@@ -98,3 +98,11 @@ body {
 @media (max-width: 760px) {
   .layout { grid-template-columns: 1fr; }
 }
+
+.site-footer {
+  text-align: center;
+  padding: 18px;
+  font-size: 13px;
+  color: #8a8a98;
+}
+.site-footer .visits strong { color: var(--wb); }
