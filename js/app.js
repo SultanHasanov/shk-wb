@@ -67,6 +67,19 @@
     }
   }
 
+  // Декоративные вертикальные полосы (имитация штрихкода, но не декодируются).
+  function drawSideStripes(x, y, w, h, rng) {
+    ctx.fillStyle = '#000';
+    var pos = 0;
+    while (pos < w - 1) {
+      var bar = 1 + Math.floor(rng() * 4);   // ширина чёрной полосы 1..4px
+      var gap = 1 + Math.floor(rng() * 4);   // ширина пробела 1..4px
+      if (pos + bar > w) bar = w - pos;
+      ctx.fillRect(x + pos, y, bar, h);
+      pos += bar + gap;
+    }
+  }
+
   // QR через qrcodejs -> возвращает canvas.
   function buildQrCanvas(text, px) {
     var holder = document.createElement('div');
@@ -81,24 +94,6 @@
     var qrCanvas = holder.querySelector('canvas');
     document.body.removeChild(holder);
     return qrCanvas;
-  }
-
-  // Вертикальный штрихкод Code128 — кодирует ровно тот же баркод, что и QR.
-  function buildBarcodeCanvas(text) {
-    var bc = document.createElement('canvas');
-    try {
-      JsBarcode(bc, text, {
-        format: 'CODE128',
-        width: 2,
-        height: 380,
-        displayValue: false,
-        margin: 0,
-        background: '#ffffff'
-      });
-    } catch (e) {
-      return null;
-    }
-    return bc;
   }
 
   function render() {
@@ -145,25 +140,13 @@
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
-    // --- Боковые вертикальные штрихкоды ---
-    var bc = buildBarcodeCanvas(qrText);
-    if (bc) {
-      var bw = 60;            // ширина полосы на стикере
-      var bh = qrSize + 20;   // высота вдоль QR
-      var cy = qrY + qrSize / 2;
-      // левый
-      ctx.save();
-      ctx.translate(qrX - 24, cy);
-      ctx.rotate(-Math.PI / 2);
-      ctx.drawImage(bc, -bh / 2, -bw / 2, bh, bw);
-      ctx.restore();
-      // правый
-      ctx.save();
-      ctx.translate(qrX + qrSize + 24, cy);
-      ctx.rotate(-Math.PI / 2);
-      ctx.drawImage(bc, -bh / 2, -bw / 2, bh, bw);
-      ctx.restore();
-    }
+    // --- Боковые декоративные полосы (НЕ настоящий штрихкод, чтобы сканер
+    // не пытался их декодировать). Узор детерминирован по номеру. ---
+    var stripeY = qrY - 10;
+    var stripeH = qrSize + 20;
+    var stripeW = 46;
+    drawSideStripes(qrX - 14 - stripeW, stripeY, stripeW, stripeH, makeRng(code + 'L'));
+    drawSideStripes(qrX + qrSize + 14, stripeY, stripeW, stripeH, makeRng(code + 'R'));
 
     // --- Номер снизу (перенос длинного на 2 строки) ---
     ctx.fillStyle = '#000';
