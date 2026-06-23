@@ -18,16 +18,12 @@
         <span>Номер ШК (печатается снизу)</span>
         <input type="text" id="code" inputmode="numeric" placeholder="Например 5525694823">
       </label>
-      <label class="field" style="margin-top:14px">
-        <span>Код для QR и штрихкода</span>
-        <input type="text" id="qrcode" placeholder="Например *DN2SELc4">
-      </label>
       <p class="error" id="error"></p>
       <div class="actions">
         <button id="generate" class="btn btn-primary" type="button">Сгенерировать</button>
         <button id="download" class="btn" type="button" disabled>Скачать PNG</button>
       </div>
-      <p class="hint">ШК товара для модели «Поставки» (FBW). QR кодирует введённый номер.</p>
+      <p class="hint">Впишите номер ШК (только цифры) — код для QR вычислится автоматически по алгоритму WB («*» + base64).</p>
     </section>
 
     <section class="preview">

@@ -2,7 +2,6 @@
   'use strict';
 
   var input = document.getElementById('code');
-  var qrInput = document.getElementById('qrcode');
   var errorEl = document.getElementById('error');
   var genBtn = document.getElementById('generate');
   var dlBtn = document.getElementById('download');
@@ -12,6 +11,24 @@
   var W = canvas.width;   // 600
   var H = canvas.height;  // 740
   var lastCode = '';
+
+  // Кодирование номера ШК в строку QR формата WB: "*" + base64(5 байт BE + 0x00).
+  // Реверс-инжиниринг по образцам бота: 48441758150 -> *C0dakcYA и т.д.
+  function wbEncode(numStr) {
+    var n = Number(numStr);
+    if (!isFinite(n) || n < 0) return null;
+    var bytes = [
+      Math.floor(n / 4294967296) % 256, // >>32
+      Math.floor(n / 16777216) % 256,   // >>24
+      Math.floor(n / 65536) % 256,      // >>16
+      Math.floor(n / 256) % 256,        // >>8
+      n % 256,
+      0
+    ];
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return '*' + btoa(bin);
+  }
 
   // Детерминированный PRNG (mulberry32) — узор углов одинаков для одного номера.
   function makeRng(seedStr) {
@@ -65,13 +82,12 @@
     return qrCanvas;
   }
 
-  // Вертикальный штрихкод Code39 (формат WB: *DATA*).
+  // Вертикальный штрихкод Code128 — кодирует ровно тот же баркод, что и QR.
   function buildBarcodeCanvas(text) {
-    var data = text.replace(/^\*+|\*+$/g, '').toUpperCase(); // Code39 без звёздочек, верхний регистр
     var bc = document.createElement('canvas');
     try {
-      JsBarcode(bc, data, {
-        format: 'CODE39',
+      JsBarcode(bc, text, {
+        format: 'CODE128',
         width: 2,
         height: 380,
         displayValue: false,
@@ -85,21 +101,20 @@
   }
 
   function render() {
-    var code = input.value.trim();      // печатный номер ШК (снизу)
-    var qrText = qrInput.value.trim();  // код для QR/штрихкода, напр. *DN2SELc4
+    var code = input.value.trim();  // номер ШК (печатается снизу)
     if (!code) {
       input.classList.add('invalid');
       errorEl.textContent = 'Введите номер ШК.';
       return;
     }
-    if (!qrText) {
-      input.classList.remove('invalid');
-      qrInput.classList.add('invalid');
-      errorEl.textContent = 'Введите код для QR (например *DN2SELc4).';
+    if (!/^\d+$/.test(code)) {
+      input.classList.add('invalid');
+      errorEl.textContent = 'Номер ШК — только цифры.';
       return;
     }
+    // Код для QR/штрихкода вычисляем из номера ШК по алгоритму WB ("*" + base64).
+    var qrText = wbEncode(code);
     input.classList.remove('invalid');
-    qrInput.classList.remove('invalid');
     errorEl.textContent = '';
 
     var rng = makeRng(qrText);
