@@ -2,6 +2,7 @@
   'use strict';
 
   var input = document.getElementById('code');
+  var qrInput = document.getElementById('qrcode');
   var errorEl = document.getElementById('error');
   var genBtn = document.getElementById('generate');
   var dlBtn = document.getElementById('download');
@@ -64,12 +65,13 @@
     return qrCanvas;
   }
 
-  // Вертикальный штрихкод Code128.
+  // Вертикальный штрихкод Code39 (формат WB: *DATA*).
   function buildBarcodeCanvas(text) {
+    var data = text.replace(/^\*+|\*+$/g, '').toUpperCase(); // Code39 без звёздочек, верхний регистр
     var bc = document.createElement('canvas');
     try {
-      JsBarcode(bc, text, {
-        format: 'CODE128',
+      JsBarcode(bc, data, {
+        format: 'CODE39',
         width: 2,
         height: 380,
         displayValue: false,
@@ -83,21 +85,24 @@
   }
 
   function render() {
-    var code = input.value.trim();
+    var code = input.value.trim();      // печатный номер ШК (снизу)
+    var qrText = qrInput.value.trim();  // код для QR/штрихкода, напр. *DN2SELc4
     if (!code) {
       input.classList.add('invalid');
       errorEl.textContent = 'Введите номер ШК.';
       return;
     }
-    if (!/^[0-9A-Za-z\-]+$/.test(code)) {
-      input.classList.add('invalid');
-      errorEl.textContent = 'Допустимы цифры, латинские буквы и дефис.';
+    if (!qrText) {
+      input.classList.remove('invalid');
+      qrInput.classList.add('invalid');
+      errorEl.textContent = 'Введите код для QR (например *DN2SELc4).';
       return;
     }
     input.classList.remove('invalid');
+    qrInput.classList.remove('invalid');
     errorEl.textContent = '';
 
-    var rng = makeRng(code);
+    var rng = makeRng(qrText);
 
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, W, H);
@@ -120,12 +125,12 @@
     var qrSize = 300;
     var qrX = (W - qrSize) / 2;
     var qrY = 160;
-    var qr = buildQrCanvas(code, qrSize);
+    var qr = buildQrCanvas(qrText, qrSize);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
     // --- Боковые вертикальные штрихкоды ---
-    var bc = buildBarcodeCanvas(code);
+    var bc = buildBarcodeCanvas(qrText);
     if (bc) {
       var bw = 60;            // ширина полосы на стикере
       var bh = qrSize + 20;   // высота вдоль QR
