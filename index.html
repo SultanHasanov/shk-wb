@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Генератор стикеров Wildberries</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="logo">WB</span>
+    <h1>Генератор стикеров</h1>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <label class="field">
+        <span>Номер ШК товара</span>
+        <input type="text" id="code" inputmode="numeric" placeholder="Например 10556796809">
+      </label>
+      <p class="error" id="error"></p>
+      <div class="actions">
+        <button id="generate" class="btn btn-primary" type="button">Сгенерировать</button>
+        <button id="download" class="btn" type="button" disabled>Скачать PNG</button>
+      </div>
+      <p class="hint">ШК товара для модели «Поставки» (FBW). QR кодирует введённый номер.</p>
+    </section>
+
+    <section class="preview">
+      <div class="sticker-card">
+        <canvas id="sticker" width="600" height="740"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/qrcode.min.js"></script>
+  <script src="js/jsbarcode.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
