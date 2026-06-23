@@ -100,9 +100,29 @@ body {
 }
 
 .site-footer {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
   padding: 18px;
   font-size: 13px;
   color: #8a8a98;
 }
 .site-footer .visits strong { color: var(--wb); }
+
+.wa-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #eafbf1;
+  color: #128c3e;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .15s;
+}
+.wa-link:hover { background: #d6f5e3; }
+.wa-icon { flex: none; }
