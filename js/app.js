@@ -5,6 +5,7 @@
   var errorEl = document.getElementById('error');
   var genBtn = document.getElementById('generate');
   var dlBtn = document.getElementById('download');
+  var shareBtn = document.getElementById('share');
   var canvas = document.getElementById('sticker');
   var ctx = canvas.getContext('2d');
 
@@ -185,6 +186,7 @@
 
     lastCode = code;
     dlBtn.disabled = false;
+    shareBtn.disabled = false;
   }
 
   function download() {
@@ -195,8 +197,30 @@
     a.click();
   }
 
+  function share() {
+    if (!lastCode) return;
+    var fileName = 'wb-sticker-' + lastCode + '.png';
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var file = new File([blob], fileName, { type: 'image/png' });
+      // Web Share API с файлами (мобильные браузеры).
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+          files: [file],
+          title: 'Стикер WB ' + lastCode,
+          text: 'ШК: ' + lastCode
+        }).catch(function () {});
+      } else {
+        // Фолбэк: если делиться файлом нельзя — просто скачиваем.
+        errorEl.textContent = 'Браузер не поддерживает «Поделиться» — файл скачан.';
+        download();
+      }
+    }, 'image/png');
+  }
+
   genBtn.addEventListener('click', render);
   dlBtn.addEventListener('click', download);
+  shareBtn.addEventListener('click', share);
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') render();
   });
