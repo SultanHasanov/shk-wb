@@ -13,18 +13,56 @@
   var H = canvas.height;  // 740
   var lastCode = '';
 
+  var VERHOEFF_MUL = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+    [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+    [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+    [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+    [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+    [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+  ];
+  var VERHOEFF_PERM = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+    [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+    [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+    [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+    [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+    [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+    [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+  ];
+  var VERHOEFF_INV = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9];
+
+  function verhoeffDigit(numStr) {
+    var c = 0;
+    for (var i = 0; i < numStr.length; i++) {
+      var digit = numStr.charCodeAt(numStr.length - 1 - i) - 48;
+      c = VERHOEFF_MUL[c][VERHOEFF_PERM[(i + 1) % 8][digit]];
+    }
+    return VERHOEFF_INV[c];
+  }
+
   // Кодирование номера ШК в строку QR формата WB: "*" + base64(5 байт BE + 0x00).
-  // Реверс-инжиниринг по образцам бота: 48441758150 -> *C0dakcYA и т.д.
+
+  // WB: 5-byte big-endian number plus one BCD byte packed from
+  // Verhoeff(prefix) and Verhoeff(suffix), where suffix is the last 6 digits.
   function wbEncode(numStr) {
     var n = Number(numStr);
     if (!isFinite(n) || n < 0) return null;
+    var prefix = numStr.slice(0, -6);
+    var suffix = numStr.slice(-6);
+    var checkByte = (verhoeffDigit(prefix) << 4) | verhoeffDigit(suffix);
     var bytes = [
       Math.floor(n / 4294967296) % 256, // >>32
       Math.floor(n / 16777216) % 256,   // >>24
       Math.floor(n / 65536) % 256,      // >>16
       Math.floor(n / 256) % 256,        // >>8
       n % 256,
-      0
+      checkByte
     ];
     var bin = '';
     for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
@@ -67,17 +105,22 @@
     }
   }
 
-  // Декоративные вертикальные полосы (имитация штрихкода, но не декодируются).
-  function drawSideStripes(x, y, w, h, rng) {
-    ctx.fillStyle = '#000';
-    var pos = 0;
-    while (pos < w - 1) {
-      var bar = 1 + Math.floor(rng() * 4);   // ширина чёрной полосы 1..4px
-      var gap = 1 + Math.floor(rng() * 4);   // ширина пробела 1..4px
-      if (pos + bar > w) bar = w - pos;
-      ctx.fillRect(x + pos, y, bar, h);
-      pos += bar + gap;
+  // Настоящий вертикальный Code128 с числовым ШК (как на оригинале WB).
+  function buildBarcodeCanvas(text, thickness) {
+    var bc = document.createElement('canvas');
+    try {
+      JsBarcode(bc, text, {
+        format: 'CODE128',
+        width: 3,            // ширина модуля — крупно, чтобы сканер читал
+        height: thickness,
+        displayValue: false,
+        margin: 0,
+        background: '#ffffff'
+      });
+    } catch (e) {
+      return null;
     }
+    return bc;
   }
 
   // QR через qrcodejs -> возвращает canvas.
@@ -140,13 +183,26 @@
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(qr, qrX, qrY, qrSize, qrSize);
 
-    // --- Боковые декоративные полосы (НЕ настоящий штрихкод, чтобы сканер
-    // не пытался их декодировать). Узор детерминирован по номеру. ---
-    var stripeY = qrY - 10;
-    var stripeH = qrSize + 20;
-    var stripeW = 46;
-    drawSideStripes(qrX - 14 - stripeW, stripeY, stripeW, stripeH, makeRng(code + 'L'));
-    drawSideStripes(qrX + qrSize + 14, stripeY, stripeW, stripeH, makeRng(code + 'R'));
+    // --- Боковые настоящие штрихкоды (Code128 числового ШК), вертикально ---
+    var bc = buildBarcodeCanvas(code, 46);
+    if (bc) {
+      var cy = qrY + qrSize / 2;
+      var len = qrSize + 20;            // длина вдоль QR
+      var thick = 46;                   // толщина полосы
+      ctx.imageSmoothingEnabled = false;
+      // левый
+      ctx.save();
+      ctx.translate(qrX - 14 - thick / 2, cy);
+      ctx.rotate(-Math.PI / 2);
+      ctx.drawImage(bc, -len / 2, -thick / 2, len, thick);
+      ctx.restore();
+      // правый
+      ctx.save();
+      ctx.translate(qrX + qrSize + 14 + thick / 2, cy);
+      ctx.rotate(-Math.PI / 2);
+      ctx.drawImage(bc, -len / 2, -thick / 2, len, thick);
+      ctx.restore();
+    }
 
     // --- Номер снизу (перенос длинного на 2 строки) ---
     ctx.fillStyle = '#000';
