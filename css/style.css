@@ -126,3 +126,67 @@ body {
 }
 .wa-link:hover { background: #d6f5e3; }
 .wa-icon { flex: none; }
+
+/* ---------- Админка ключей ---------- */
+.admin-panel {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+}
+.admin-title { font-size: 20px; margin: 0 0 16px; color: var(--wb); }
+.admin-subtitle { font-size: 15px; margin: 18px 0 10px; }
+
+.admin-card {
+  background: #fff;
+  border: 1px solid #e6e6ee;
+  border-radius: 14px;
+  padding: 20px;
+}
+.admin-card .field { margin-bottom: 12px; }
+
+.admin-out {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #faf0f8;
+  border: 1px solid #f0d6ea;
+  border-radius: 10px;
+}
+.admin-out-value {
+  flex: 1;
+  font-family: "Consolas", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--wb-dark);
+  letter-spacing: .5px;
+}
+
+.admin-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-mini-btn {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-left: 6px;
+}
+
+.admin-table-wrap { overflow-x: auto; }
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.admin-table th, .admin-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+.admin-table th { color: #8a8a98; font-weight: 600; }
+.admin-key-cell { font-family: "Consolas", monospace; font-weight: 600; }
