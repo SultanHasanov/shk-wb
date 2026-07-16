@@ -190,3 +190,27 @@ body {
 }
 .admin-table th { color: #8a8a98; font-weight: 600; }
 .admin-key-cell { font-family: "Consolas", monospace; font-weight: 600; }
+
+/* ---------- Скачивание программы «Подбор кодов» ---------- */
+.download-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: center;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid #e6e6ee;
+  border-radius: 14px;
+  padding: 24px;
+}
+.download-title { font-size: 20px; margin: 0 0 10px; color: var(--wb); }
+.download-info p { margin: 0 0 12px; line-height: 1.5; font-size: 14px; }
+.download-info .actions { margin-top: 4px; margin-bottom: 12px; }
+.download-info .btn { flex: 0 0 auto; padding: 12px 22px; text-decoration: none; display: inline-block; }
+.download-shot { padding: 10px; margin: 0; }
+.download-shot img { width: 100%; height: auto; display: block; border-radius: 8px; }
+
+@media (max-width: 760px) {
+  .download-panel { grid-template-columns: 1fr; }
+}
