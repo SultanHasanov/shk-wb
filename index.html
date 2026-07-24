@@ -82,6 +82,40 @@
             <tbody id="key-rows"></tbody>
           </table>
         </div>
+
+        <hr class="admin-sep">
+
+        <h3 class="admin-subtitle">Объявление в программе</h3>
+        <p class="hint">Появится баннером в программе «Подбор кодов» у всех
+          пользователей при следующем запуске.</p>
+        <label class="field">
+          <span>Текст объявления</span>
+          <textarea id="msg-text" rows="3" placeholder="Текст, который увидят пользователи программы"></textarea>
+        </label>
+        <label class="field">
+          <span>Ссылка (необязательно)</span>
+          <input type="text" id="msg-url" placeholder="https://...">
+        </label>
+        <label class="field">
+          <span>Подпись кнопки (необязательно)</span>
+          <input type="text" id="msg-button" placeholder="Подробнее">
+        </label>
+        <div class="actions">
+          <button id="msg-create-btn" class="btn btn-primary" type="button">Опубликовать</button>
+        </div>
+
+        <div class="admin-list-head">
+          <h3 class="admin-subtitle">Опубликованные объявления</h3>
+          <button id="msg-refresh-btn" class="btn admin-mini-btn" type="button">Обновить</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr><th>Текст</th><th>Статус</th><th>Действия</th></tr>
+            </thead>
+            <tbody id="msg-rows"></tbody>
+          </table>
+        </div>
       </div>
     </section>
 

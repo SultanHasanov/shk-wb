@@ -6,6 +6,7 @@
   var SECRET_HASH = '#panel-2026';   // открывать админку: index.html#panel-2026
   var ADMIN_PASS  = 'wb-admin-2026'; // пароль входа в админку
   var BASE = 'https://5f517982e1d5a6b7.mokky.dev/key';
+  var MSG_BASE = 'https://5f517982e1d5a6b7.mokky.dev/message';
 
   var section = document.getElementById('admin');
   if (!section) return;
@@ -24,6 +25,7 @@
     loginScreen.hidden = true;
     appScreen.hidden = false;
     loadKeys();
+    loadMessages();
   }
 
   function tryLogin() {
@@ -175,6 +177,110 @@
 
   createBtn.addEventListener('click', createKey);
   refreshBtn.addEventListener('click', loadKeys);
+
+  // --- Объявления в программе (mokky /message) ---
+  var msgText      = document.getElementById('msg-text');
+  var msgUrl       = document.getElementById('msg-url');
+  var msgButton    = document.getElementById('msg-button');
+  var msgCreateBtn = document.getElementById('msg-create-btn');
+  var msgRefreshBtn = document.getElementById('msg-refresh-btn');
+  var msgTbody     = document.getElementById('msg-rows');
+
+  function createMessage() {
+    var text = (msgText.value || '').trim();
+    if (!text) { alert('Введите текст объявления.'); return; }
+    msgCreateBtn.disabled = true;
+    fetch(MSG_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: text,
+        url: (msgUrl.value || '').trim(),
+        button: (msgButton.value || '').trim(),
+        active: true,
+        createdAt: new Date().toISOString()
+      })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        msgText.value = '';
+        msgUrl.value = '';
+        msgButton.value = '';
+        loadMessages();
+      })
+      .catch(function () { alert('Ошибка публикации (нет связи с сервером).'); })
+      .then(function () { msgCreateBtn.disabled = false; });
+  }
+
+  function loadMessages() {
+    if (!msgTbody) return;
+    msgTbody.innerHTML = '<tr><td colspan="3">Загрузка…</td></tr>';
+    fetch(MSG_BASE)
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        if (!Array.isArray(list) || !list.length) {
+          msgTbody.innerHTML = '<tr><td colspan="3">Объявлений нет</td></tr>';
+          return;
+        }
+        list.sort(function (a, b) { return (b.id || 0) - (a.id || 0); });
+        msgTbody.innerHTML = '';
+        list.forEach(renderMessageRow);
+      })
+      .catch(function () {
+        msgTbody.innerHTML = '<tr><td colspan="3">Ошибка загрузки</td></tr>';
+      });
+  }
+
+  function renderMessageRow(rec) {
+    var tr = document.createElement('tr');
+
+    var tdText = document.createElement('td');
+    tdText.textContent = rec.text || '';
+
+    var tdStatus = document.createElement('td');
+    var active = rec.active !== false;
+    tdStatus.textContent = active ? 'показывается' : 'скрыто';
+    tdStatus.style.color = active ? '#128c3e' : '#888';
+
+    var tdActions = document.createElement('td');
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn admin-mini-btn';
+    toggleBtn.textContent = active ? 'Скрыть' : 'Показать';
+    toggleBtn.addEventListener('click', function () { toggleMessage(rec.id, !active); });
+
+    var delBtn = document.createElement('button');
+    delBtn.className = 'btn admin-mini-btn';
+    delBtn.textContent = 'Удалить';
+    delBtn.addEventListener('click', function () { deleteMessage(rec.id); });
+
+    tdActions.appendChild(toggleBtn);
+    tdActions.appendChild(delBtn);
+
+    tr.appendChild(tdText);
+    tr.appendChild(tdStatus);
+    tr.appendChild(tdActions);
+    msgTbody.appendChild(tr);
+  }
+
+  function toggleMessage(id, active) {
+    fetch(MSG_BASE + '/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: active })
+    })
+      .then(function () { loadMessages(); })
+      .catch(function () { alert('Ошибка изменения (нет связи).'); });
+  }
+
+  function deleteMessage(id) {
+    if (!confirm('Удалить это объявление?')) return;
+    fetch(MSG_BASE + '/' + id, { method: 'DELETE' })
+      .then(function () { loadMessages(); })
+      .catch(function () { alert('Ошибка удаления (нет связи).'); });
+  }
+
+  if (msgCreateBtn) msgCreateBtn.addEventListener('click', createMessage);
+  if (msgRefreshBtn) msgRefreshBtn.addEventListener('click', loadMessages);
 
   // Автовход в рамках вкладки — после того, как все элементы и обработчики готовы.
   if (sessionStorage.getItem('wb_admin_ok') === '1') {
