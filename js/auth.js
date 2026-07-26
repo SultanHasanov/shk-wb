@@ -222,12 +222,13 @@
     if (rawPhone.length !== 10) {
       throw new Error('Введите 10 цифр номера телефона');
     }
+    const apiPhone = `7${rawPhone}`;
 
     // Первый запрос без X-Pow (сервер вернёт challenge)
     try {
       const result = await apiRequest('/code/wb-captcha', {
         captcha_token: '',
-        phone_number: rawPhone,
+        phone_number: apiPhone,
         save_push: true,
       });
 
@@ -236,7 +237,7 @@
         // Повторный запрос с решённым PoW
         const result2 = await apiRequest('/code/wb-captcha', {
           captcha_token: '',
-          phone_number: rawPhone,
+          phone_number: apiPhone,
           save_push: true,
         }, {
           challenge: result.powChallenge,
@@ -271,7 +272,7 @@
         try {
           const result2 = await apiRequest('/code/wb-captcha', {
             captcha_token: '',
-            phone_number: rawPhone,
+            phone_number: apiPhone,
             save_push: true,
           }, {
             challenge: err.powChallenge,
