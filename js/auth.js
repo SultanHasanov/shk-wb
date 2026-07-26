@@ -4,7 +4,7 @@
 
   const STORAGE_KEY = 'wb_auth_user';
   const ACCESS_TOKEN_KEY = 'wb_access_token';
-  const API_BASE = 'https://auth-my-pvz.wb.ru/v2';
+  const API_BASE = '/api/proxy';
 
   // DOM-элементы
   const modal = document.getElementById('auth-modal');
