@@ -32,6 +32,45 @@ body {
 
 .topbar h1 { font-size: 18px; margin: 0; font-weight: 600; }
 
+/* Кнопка входа в шапке */
+.auth-buttons {
+  margin-left: auto;
+}
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--wb);
+  color: var(--wb);
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn-outline:hover {
+  background: var(--wb);
+  color: #fff;
+}
+#auth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#auth-status .user-phone {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}
+#auth-status .logout-btn {
+  background: none;
+  border: none;
+  color: #8a8a98;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+#auth-status .logout-btn:hover { color: var(--wb); }
+
 .layout {
   display: grid;
   grid-template-columns: 360px 1fr;
@@ -213,4 +252,69 @@ body {
 
 @media (max-width: 760px) {
   .download-panel { grid-template-columns: 1fr; }
+}
+
+/* ---------- Модальное окно авторизации ---------- */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  max-width: 400px;
+  width: 100%;
+  border-radius: 20px;
+  padding: 32px 28px;
+  position: relative;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+}
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: #8a8a98;
+}
+.modal-close:hover { color: var(--ink); }
+
+.modal-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--wb);
+  text-align: center;
+  margin: 0 0 24px;
+  letter-spacing: -0.5px;
+}
+.modal .field { margin-bottom: 16px; }
+.modal .field label { font-weight: 600; font-size: 14px; }
+.modal .actions { margin-top: 8px; }
+.modal .btn { flex: 1; }
+
+.success-msg {
+  text-align: center;
+  color: #1a8c4a;
+  font-size: 16px;
+  margin: 16px 0;
+}
+#auth-error {
+  text-align: center;
+  min-height: 20px;
+  margin: 4px 0 8px;
+}
+
+.modal-overlay[hidden] {
+  display: none !important;
+}
+
+body.modal-open {
+  overflow: hidden;
 }

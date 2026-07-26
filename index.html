@@ -10,6 +10,11 @@
   <header class="topbar">
     <span class="logo">WB</span>
     <h1>Генератор стикеров</h1>
+    <div class="auth-buttons">
+      <div id="auth-status">
+        <button id="auth-login-btn" class="btn btn-outline">Войти</button>
+      </div>
+    </div>
   </header>
 
   <main class="layout">
@@ -155,9 +160,37 @@
     </a>
   </footer>
 
+  <!-- Модальное окно авторизации -->
+  <div id="auth-modal" class="modal-overlay" hidden>
+    <div class="modal">
+      <button class="modal-close" id="auth-modal-close">&times;</button>
+      <h2 class="modal-title">МОЙ ПВЗ</h2>
+      <div id="auth-form">
+        <div class="field">
+          <label for="auth-phone">Телефон</label>
+          <input type="text" id="auth-phone" placeholder="+7 (___) ___-__-__" inputmode="numeric" maxlength="18">
+        </div>
+        <div id="auth-code-field" class="field" style="display:none;">
+          <label for="auth-code">Код подтверждения</label>
+          <input type="text" id="auth-code" placeholder="Введите код" inputmode="numeric" maxlength="6">
+        </div>
+        <p class="error" id="auth-error"></p>
+        <div class="actions">
+          <button id="auth-send-btn" class="btn btn-primary" type="button">Отправить код</button>
+          <button id="auth-confirm-btn" class="btn btn-primary" type="button" style="display:none;">Подтвердить</button>
+        </div>
+      </div>
+      <div id="auth-success" style="display:none;">
+        <p class="success-msg">Вы успешно вошли как <strong id="auth-user-phone"></strong></p>
+        <button id="auth-logout-btn" class="btn btn-outline">Выйти</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/qrcode.min.js"></script>
   <script src="js/app.js"></script>
   <script src="js/visits.js"></script>
   <script src="js/admin.js"></script>
+  <script src="js/auth.js"></script>
 </body>
 </html>
