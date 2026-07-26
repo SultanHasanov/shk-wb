@@ -8,6 +8,17 @@ function getToken(req) {
   return req.headers['x-token'] || '';
 }
 
+function getWbSessionCookies(req) {
+  return String(req.headers.cookie || '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => (
+      part.startsWith('wbx-refresh=') ||
+      part.startsWith('wbx-validation-key=')
+    ))
+    .join('; ');
+}
+
 function sendError(res, status, message, details) {
   res.status(status).json({ error: message, details });
 }
@@ -23,6 +34,7 @@ export default async function handler(req, res) {
   }
 
   const token = getToken(req);
+  const sessionCookies = getWbSessionCookies(req);
   if (!token) {
     sendError(res, 401, 'Сначала войдите в аккаунт WB');
     return;
@@ -75,6 +87,7 @@ export default async function handler(req, res) {
     Referer: 'https://my-pvz.wb.ru/rating',
     Authorization: `Bearer ${token}`,
     'X-Token': token,
+    'WB-Access-Token': token,
     'X-Client-Type': 'web',
     'X-Device-Type': 'web',
     'X-App-Type': 'web',
@@ -82,6 +95,7 @@ export default async function handler(req, res) {
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
   };
 
+  if (sessionCookies) upstreamHeaders.Cookie = sessionCookies;
   if (body) upstreamHeaders['Content-Type'] = 'application/json';
 
   try {

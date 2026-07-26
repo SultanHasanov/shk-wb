@@ -1,5 +1,22 @@
 const ALLOWED_PATHS = new Set(['/auth', '/code/wb-captcha']);
 
+function forwardWbSessionCookies(response, res) {
+  const setCookieHeader = response.headers.get('set-cookie') || '';
+  const cookiePattern = /(?:^|,\s*|;\s*)(wbx-(?:refresh|validation-key))=([^;,\s]+)/gi;
+  const cookies = [];
+  let match;
+
+  while ((match = cookiePattern.exec(setCookieHeader)) !== null) {
+    const name = match[1].toLowerCase();
+    const maxAge = name === 'wbx-refresh' ? 60 * 60 * 24 * 90 : 60 * 60 * 24;
+    cookies.push(
+      `${name}=${match[2]}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+    );
+  }
+
+  if (cookies.length) res.setHeader('Set-Cookie', cookies);
+}
+
 function getValidationCookie(req) {
   const cookieHeader = req.headers.cookie || '';
   const validationCookie = cookieHeader
@@ -75,6 +92,7 @@ export default async function handler(req, res) {
     const contentType = response.headers.get('content-type') || '';
     const responseText = await response.text();
 
+    forwardWbSessionCookies(response, res);
     if (responsePow) res.setHeader('X-Pow', responsePow);
     if (correlationId) res.setHeader('X-Correlation-Id', correlationId);
 
