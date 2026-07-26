@@ -43,6 +43,11 @@ export default async function handler(req, res) {
     });
 
     // Получаем тело ответа
+    const responsePow = response.headers.get('x-pow');
+    if (responsePow) {
+      res.setHeader('X-Pow', responsePow);
+    }
+
     const data = await response.json();
 
     console.log('[proxy] <-', response.status, JSON.stringify(Object.fromEntries(response.headers.entries())), JSON.stringify(data));
