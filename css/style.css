@@ -318,3 +318,164 @@ body {
 body.modal-open {
   overflow: hidden;
 }
+
+/* ---------- Отзывы и оценки ПВЗ ---------- */
+.rating-section {
+  grid-column: 1 / -1;
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e6e6ee;
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(39, 23, 49, .06);
+}
+
+.rating-heading,
+.rating-toolbar,
+.rating-review-top,
+.rating-review-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rating-heading h2 {
+  margin: 2px 0 6px;
+  font-size: 24px;
+}
+
+.rating-heading p {
+  margin: 0;
+  color: #777584;
+  font-size: 14px;
+}
+
+.rating-kicker {
+  color: var(--wb);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.rating-secondary-btn,
+.rating-load-btn,
+.rating-more-btn {
+  flex: 0 0 auto;
+}
+
+.rating-secondary-btn { padding: 10px 16px; }
+.rating-toolbar { align-items: end; margin-top: 22px; }
+.rating-point-field { flex: 1; margin: 0; }
+
+.rating-point-field select {
+  width: 100%;
+  margin-top: 7px;
+  padding: 12px 14px;
+  border: 1px solid #d0d0dc;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.rating-point-field select:focus {
+  border-color: var(--wb);
+  outline: none;
+}
+
+.rating-load-btn { min-width: 180px; }
+.rating-error { margin-top: 12px; }
+
+.rating-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.rating-summary-card {
+  padding: 16px;
+  border-radius: 14px;
+  background: #faf7fc;
+  border: 1px solid #f0e5f2;
+}
+
+.rating-summary-card span {
+  display: block;
+  margin-bottom: 7px;
+  color: #777584;
+  font-size: 12px;
+}
+
+.rating-summary-card strong {
+  color: var(--wb-dark);
+  font-size: 22px;
+}
+
+.rating-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rating-review {
+  padding: 17px;
+  border: 1px solid #eceaf0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.rating-date { color: #777584; font-size: 13px; }
+.rating-stars { color: #f2a100; font-weight: 800; white-space: nowrap; }
+.rating-comment { margin: 12px 0; line-height: 1.45; }
+.rating-comment-muted { color: #9996a2; font-style: italic; }
+
+.rating-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #777584;
+  font-size: 12px;
+}
+
+.rating-client-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px 7px 12px;
+  border-radius: 10px;
+  background: #f7eff8;
+  color: var(--wb-dark);
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rating-copy-btn {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--wb);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rating-copy-btn:hover { background: var(--wb-dark); }
+.rating-review-footer { align-items: end; margin-top: 13px; }
+.rating-empty { padding: 28px; text-align: center; color: #777584; }
+.rating-more-btn { display: block; margin: 18px auto 0; min-width: 180px; }
+
+@media (max-width: 650px) {
+  .rating-section { padding: 18px; }
+  .rating-heading, .rating-toolbar, .rating-review-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .rating-secondary-btn, .rating-load-btn { width: 100%; }
+  .rating-summary { grid-template-columns: 1fr; }
+  .rating-client-id { justify-content: space-between; }
+}

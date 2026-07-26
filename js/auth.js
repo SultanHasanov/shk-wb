@@ -369,6 +369,7 @@
       loginTime: Date.now(),
     }));
     updateUI();
+    window.dispatchEvent(new CustomEvent('wb-auth-change', { detail: { loggedIn: true } }));
   }
 
   function logout() {
@@ -378,6 +379,7 @@
     currentPhone = null;
     updateUI();
     resetForm();
+    window.dispatchEvent(new CustomEvent('wb-auth-change', { detail: { loggedIn: false } }));
   }
 
   function isLoggedIn() {

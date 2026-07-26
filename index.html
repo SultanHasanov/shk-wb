@@ -40,6 +40,56 @@
       </div>
     </section>
 
+    <section id="rating-section" class="rating-section" hidden>
+      <div class="rating-heading">
+        <div>
+          <span class="rating-kicker">Мой ПВЗ</span>
+          <h2>Отзывы и оценки</h2>
+          <p>Выберите пункт выдачи, чтобы загрузить его последние оценки.</p>
+        </div>
+        <button id="rating-refresh-points" class="btn rating-secondary-btn" type="button">
+          Обновить ПВЗ
+        </button>
+      </div>
+
+      <div class="rating-toolbar">
+        <label class="field rating-point-field">
+          <span>Пункт выдачи</span>
+          <select id="rating-point-select">
+            <option value="">Загрузка списка ПВЗ…</option>
+          </select>
+        </label>
+        <button id="rating-load-btn" class="btn btn-primary rating-load-btn" type="button" disabled>
+          Загрузить отзывы
+        </button>
+      </div>
+
+      <p id="rating-error" class="error rating-error" role="alert"></p>
+
+      <div id="rating-summary" class="rating-summary" hidden>
+        <div class="rating-summary-card">
+          <span>Оценка ПВЗ</span>
+          <strong id="rating-current">—</strong>
+        </div>
+        <div class="rating-summary-card">
+          <span>Средняя по региону</span>
+          <strong id="rating-region">—</strong>
+        </div>
+        <div class="rating-summary-card">
+          <span>Всего отзывов</span>
+          <strong id="rating-total">—</strong>
+        </div>
+      </div>
+
+      <div id="rating-empty" class="rating-empty" hidden>
+        У выбранного ПВЗ пока нет отзывов.
+      </div>
+      <div id="rating-list" class="rating-list"></div>
+      <button id="rating-more-btn" class="btn rating-more-btn" type="button" hidden>
+        Показать ещё
+      </button>
+    </section>
+
     <section id="admin" class="admin-panel" hidden>
       <h2 class="admin-title">Админка ключей</h2>
 
@@ -192,5 +242,6 @@
   <script src="js/visits.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/rating.js"></script>
 </body>
 </html>
