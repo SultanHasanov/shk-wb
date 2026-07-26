@@ -46,8 +46,8 @@ export default async function handler(req, res) {
     targetUrl = `${RATING_ORIGIN}/external/api/v1/list`;
     method = 'POST';
     body = {
-      pickup_point_ids: Array.isArray(req.body?.pickup_point_ids)
-        ? req.body.pickup_point_ids
+      pickpoint_ids: Array.isArray(req.body?.pickpoint_ids)
+        ? req.body.pickpoint_ids
         : [],
       limit: Math.min(Math.max(Number(req.body?.limit) || 11, 1), 200),
       offset: Math.max(Number(req.body?.offset) || 0, 0),

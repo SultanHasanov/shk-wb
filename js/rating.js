@@ -107,7 +107,7 @@
       const result = await ratingRequest('/api/rating?action=points', {
         method: 'POST',
         body: JSON.stringify({
-          pickup_point_ids: [],
+          pickpoint_ids: [],
           limit: 11,
           offset: 0,
           only_disputable: false,
