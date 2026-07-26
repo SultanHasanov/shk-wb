@@ -244,6 +244,10 @@
   }
 
   // 2. Подтверждение кода (auth)
+  function getAccessTokenFromResponse(data) {
+    return data?.payload?.access_token || data?.access_token || null;
+  }
+
   async function confirmCode(code, stickerId) {
     const codeDigits = String(code).replace(/\D/g, '');
     if (codeDigits.length < 4 || codeDigits.length > 6) {
@@ -265,7 +269,7 @@
 
       // Успешный ответ – сохраняем токен сразу, не повторяя запрос
       if (result.data && result.data.result === 0) {
-        const token = result.data.access_token;
+        const token = getAccessTokenFromResponse(result.data);
         if (token) {
           saveAccessToken(token);
           return { accessToken: token };
@@ -282,16 +286,16 @@
         });
 
         if (result2.data && result2.data.result === 0) {
-          const token = result2.data.access_token;
+          const token = getAccessTokenFromResponse(result2.data);
           if (token) {
             saveAccessToken(token);
             return { accessToken: token };
           }
         }
-        throw new Error(result2.data?.message || 'Неверный код');
+        throw new Error(result2.data?.message || result2.data?.error || 'Неверный код');
       }
 
-      throw new Error(result.data?.message || 'Неверный код');
+      throw new Error(result.data?.message || result.data?.error || 'Неверный код');
     } catch (err) {
       // Если ошибка содержит challenge – пробуем ещё раз с решённым PoW
       if (err.powChallenge) {
@@ -303,13 +307,13 @@
             challenge: err.powChallenge,
           });
           if (result2.data && result2.data.result === 0) {
-            const token = result2.data.access_token;
+            const token = getAccessTokenFromResponse(result2.data);
             if (token) {
               saveAccessToken(token);
               return { accessToken: token };
             }
           }
-          throw new Error(result2.data?.message || 'Неверный код');
+          throw new Error(result2.data?.message || result2.data?.error || 'Неверный код');
         } catch (e2) {
           throw new Error(e2.message || 'Ошибка подтверждения кода');
         }
