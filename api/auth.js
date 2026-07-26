@@ -3,7 +3,7 @@ export default async function handler(req, res) {
   // Разрешаем CORS для ответа (но это не обязательно, т.к. клиент и сервер на одном origin)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Pow, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Pow, Authorization, deviceId, wb-appversion');
 
   if (req.method === 'OPTIONS') {
     res.status(200).end();
@@ -32,6 +32,8 @@ export default async function handler(req, res) {
   // Если клиент прислал X-Pow или Authorization – передаём их
   if (req.headers['x-pow']) headers['X-Pow'] = req.headers['x-pow'];
   if (req.headers['authorization']) headers['Authorization'] = req.headers['authorization'];
+  if (req.headers['deviceid']) headers['deviceId'] = req.headers['deviceid'];
+  if (req.headers['wb-appversion']) headers['wb-appversion'] = req.headers['wb-appversion'];
 
   console.log('[proxy] ->', targetUrl, JSON.stringify({ headers, body: req.body }));
 

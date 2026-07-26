@@ -4,6 +4,7 @@
 
   const STORAGE_KEY = 'wb_auth_user';
   const ACCESS_TOKEN_KEY = 'wb_access_token';
+  const DEVICE_ID_KEY = 'wb_device_id';
   const API_BASE = '/api/proxy';
 
   // DOM-элементы
@@ -49,6 +50,15 @@
     if (digits.length > 6) result += `-${digits.slice(6, 8)}`;
     if (digits.length > 8) result += `-${digits.slice(8, 10)}`;
     return result;
+  }
+
+  function getDeviceId() {
+    let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+    if (!deviceId) {
+      deviceId = crypto.randomUUID();
+      localStorage.setItem(DEVICE_ID_KEY, deviceId);
+    }
+    return deviceId;
   }
 
   function getCaretPosition(formattedValue, digitsBeforeCursor) {
@@ -108,7 +118,13 @@
     while (nonce < maxAttempts) {
       const input = salt + nonce.toString();
       const hash = await sha256(input);
-      if (hash.startsWith('0'.repeat(difficulty))) {
+      const fullZeroNibbles = Math.floor(difficulty / 4);
+      const remainingBits = difficulty % 4;
+      const hasFullZeroNibbles = hash.startsWith('0'.repeat(fullZeroNibbles));
+      const nextNibble = parseInt(hash[fullZeroNibbles] || '0', 16);
+      const hasRemainingZeroBits = remainingBits === 0 ||
+        nextNibble < Math.pow(2, 4 - remainingBits);
+      if (hasFullZeroNibbles && hasRemainingZeroBits) {
         return nonce;
       }
       nonce++;
@@ -132,6 +148,8 @@
     const headers = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      'deviceId': getDeviceId(),
+      'wb-appversion': 'v0.0.55',
       ...options.headers,
     };
 
