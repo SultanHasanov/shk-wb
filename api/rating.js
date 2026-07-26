@@ -19,6 +19,57 @@ function getWbSessionCookies(req) {
     .join('; ');
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return {};
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function firstClaim(claims, names) {
+  for (const name of names) {
+    if (claims[name] !== undefined && claims[name] !== null) return claims[name];
+  }
+  return undefined;
+}
+
+function headerValue(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function addIdentityHeaders(headers, token) {
+  const claims = decodeJwtPayload(token);
+  const mappings = {
+    'X-Pvz-Access': ['pvz_access', 'pvzAccess', 'x_pvz_access'],
+    'X-User-Id': ['user_id', 'userId', 'sub'],
+    'X-Employee-Id': ['employee_id', 'employeeId'],
+    'X-Session-Id': ['session_id', 'sessionId', 'sid'],
+    'X-Client-Id': ['client_id', 'clientId'],
+    'X-Role': ['role', 'roles'],
+    'X-Rules': ['rules', 'permissions'],
+    'X-Is-Admin': ['is_admin', 'isAdmin'],
+    'X-Domain': ['domain'],
+    'X-Used-Token': ['used_token', 'usedToken'],
+    'X-Pickpoint-Id': ['pickpoint_id', 'pickpointId', 'point_id'],
+    'X-Pickpoint-External-Id': [
+      'pickpoint_external_id',
+      'pickpointExternalId',
+      'point_external_id',
+    ],
+    'X-Pickpoint-Shard': ['pickpoint_shard', 'pickpointShard', 'point_shard'],
+  };
+
+  for (const [header, names] of Object.entries(mappings)) {
+    const value = firstClaim(claims, names);
+    if (value !== undefined) headers[header] = headerValue(value);
+  }
+}
+
 function sendError(res, status, message, details) {
   res.status(status).json({ error: message, details });
 }
@@ -95,6 +146,7 @@ export default async function handler(req, res) {
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
   };
 
+  addIdentityHeaders(upstreamHeaders, token);
   if (sessionCookies) upstreamHeaders.Cookie = sessionCookies;
   if (body) upstreamHeaders['Content-Type'] = 'application/json';
 
