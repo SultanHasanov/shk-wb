@@ -224,74 +224,23 @@
     }
     const apiPhone = `7${rawPhone}`;
 
-    // Первый запрос без X-Pow (сервер вернёт challenge)
-    try {
-      const result = await apiRequest('/code/wb-captcha', {
-        captcha_token: '',
-        phone_number: apiPhone,
-        save_push: true,
-      });
+    // WB already sends the code and session sticker in the first successful
+    // response. The X-Pow challenge belongs to the next protected operation;
+    // repeating wb-captcha here sends an unnecessary duplicate request.
+    const result = await apiRequest('/code/wb-captcha', {
+      captcha_token: '',
+      phone_number: apiPhone,
+      save_push: true,
+    });
 
-      // Если сервер вернул challenge – решаем и повторяем запрос
-      if (result.powChallenge) {
-        // Повторный запрос с решённым PoW
-        const result2 = await apiRequest('/code/wb-captcha', {
-          captcha_token: '',
-          phone_number: apiPhone,
-          save_push: true,
-        }, {
-          challenge: result.powChallenge,
-        });
-
-        // Проверяем ответ
-        if (result2.data && result2.data.result === 0) {
-          const payload = result2.data.payload || {};
-          if (payload.sticker) {
-            sticker = payload.sticker;
-            currentPhone = rawPhone;
-            return { sticker, ttl: payload.ttl || 60 };
-          }
-        }
-        throw new Error(result2.data?.message || 'Не удалось запросить код');
-      }
-
-      // Если сразу пришёл sticker (без challenge)
-      if (result.data && result.data.result === 0) {
-        const payload = result.data.payload || {};
-        if (payload.sticker) {
-          sticker = payload.sticker;
-          currentPhone = rawPhone;
-          return { sticker, ttl: payload.ttl || 60 };
-        }
-      }
-
-      throw new Error(result.data?.message || 'Ошибка при запросе кода');
-    } catch (err) {
-      // Если ошибка содержит challenge – пробуем ещё раз с решённым PoW
-      if (err.powChallenge) {
-        try {
-          const result2 = await apiRequest('/code/wb-captcha', {
-            captcha_token: '',
-            phone_number: apiPhone,
-            save_push: true,
-          }, {
-            challenge: err.powChallenge,
-          });
-          if (result2.data && result2.data.result === 0) {
-            const payload = result2.data.payload || {};
-            if (payload.sticker) {
-              sticker = payload.sticker;
-              currentPhone = rawPhone;
-              return { sticker, ttl: payload.ttl || 60 };
-            }
-          }
-          throw new Error(result2.data?.message || 'Не удалось запросить код');
-        } catch (e2) {
-          throw new Error(e2.message || 'Ошибка при запросе кода');
-        }
-      }
-      throw err;
+    const payload = result.data?.payload || {};
+    if (result.data?.result === 0 && payload.sticker) {
+      sticker = payload.sticker;
+      currentPhone = rawPhone;
+      return { sticker, ttl: payload.ttl || 60 };
     }
+
+    throw new Error(result.data?.message || 'Не удалось запросить код');
   }
 
   // 2. Подтверждение кода (auth)
