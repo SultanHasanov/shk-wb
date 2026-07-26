@@ -263,7 +263,16 @@
         sticker: stickerId,
       });
 
-      // Если вернулся challenge – решаем и повторяем
+      // Успешный ответ – сохраняем токен сразу, не повторяя запрос
+      if (result.data && result.data.result === 0) {
+        const token = result.data.access_token;
+        if (token) {
+          saveAccessToken(token);
+          return { accessToken: token };
+        }
+      }
+
+      // Если код ещё не принят и вернулся challenge – решаем и повторяем
       if (result.powChallenge) {
         const result2 = await apiRequest('/auth', {
           code: codeNumber,
@@ -280,15 +289,6 @@
           }
         }
         throw new Error(result2.data?.message || 'Неверный код');
-      }
-
-      // Успешный ответ без challenge
-      if (result.data && result.data.result === 0) {
-        const token = result.data.access_token;
-        if (token) {
-          saveAccessToken(token);
-          return { accessToken: token };
-        }
       }
 
       throw new Error(result.data?.message || 'Неверный код');
