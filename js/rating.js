@@ -78,18 +78,29 @@
       return;
     }
 
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Выберите ПВЗ';
+    placeholder.selected = true;
+    pointSelect.appendChild(placeholder);
+
     points.forEach((point) => {
       const option = document.createElement('option');
       option.value = String(point.external_id);
       option.textContent = `${point.address || 'ПВЗ'} · ID ${point.external_id}`;
       pointSelect.appendChild(option);
     });
-    loadBtn.disabled = false;
+    loadBtn.disabled = true;
   }
 
   async function loadPoints() {
-    let shouldLoadReviews = false;
     errorEl.textContent = '';
+    points = [];
+    pointSelect.innerHTML = '<option value="">Загрузка списка ПВЗ…</option>';
+    list.innerHTML = '';
+    summary.hidden = true;
+    empty.hidden = true;
+    moreBtn.hidden = true;
     setLoading(refreshPointsBtn, true, 'Загрузка…');
     loadBtn.disabled = true;
     try {
@@ -97,22 +108,20 @@
         method: 'POST',
         body: JSON.stringify({
           pickup_point_ids: [],
-          limit: 100,
+          limit: 11,
           offset: 0,
           only_disputable: false,
         }),
       });
       points = Array.isArray(result?.data) ? result.data : [];
       renderPoints();
-      shouldLoadReviews = points.length === 1;
     } catch (error) {
       points = [];
       renderPoints();
       errorEl.textContent = error.message;
     } finally {
       setLoading(refreshPointsBtn, false, '');
-      loadBtn.disabled = !points.length;
-      if (shouldLoadReviews) loadReviews(true);
+      loadBtn.disabled = !pointSelect.value;
     }
   }
 
@@ -240,6 +249,7 @@
   loadBtn.addEventListener('click', () => loadReviews(true));
   moreBtn.addEventListener('click', () => loadReviews(false));
   pointSelect.addEventListener('change', () => {
+    loadBtn.disabled = !pointSelect.value;
     list.innerHTML = '';
     summary.hidden = true;
     moreBtn.hidden = true;

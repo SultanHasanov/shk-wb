@@ -40,7 +40,7 @@ export default async function handler(req, res) {
       pickup_point_ids: Array.isArray(req.body?.pickup_point_ids)
         ? req.body.pickup_point_ids
         : [],
-      limit: Math.min(Math.max(Number(req.body?.limit) || 100, 1), 200),
+      limit: Math.min(Math.max(Number(req.body?.limit) || 11, 1), 200),
       offset: Math.max(Number(req.body?.offset) || 0, 0),
       only_disputable: Boolean(req.body?.only_disputable),
     };
