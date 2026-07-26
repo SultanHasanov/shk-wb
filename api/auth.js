@@ -33,6 +33,8 @@ export default async function handler(req, res) {
   if (req.headers['x-pow']) headers['X-Pow'] = req.headers['x-pow'];
   if (req.headers['authorization']) headers['Authorization'] = req.headers['authorization'];
 
+  console.log('[proxy] ->', targetUrl, JSON.stringify({ headers, body: req.body }));
+
   try {
     const response = await fetch(targetUrl, {
       method: 'POST',
@@ -42,6 +44,8 @@ export default async function handler(req, res) {
 
     // Получаем тело ответа
     const data = await response.json();
+
+    console.log('[proxy] <-', response.status, JSON.stringify(Object.fromEntries(response.headers.entries())), JSON.stringify(data));
 
     // Передаём клиенту статус и данные
     res.status(response.status).json(data);
