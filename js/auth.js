@@ -254,17 +254,19 @@
       throw new Error('Нет активной сессии. Запросите код заново.');
     }
 
+    const codeNumber = Number(codeDigits);
+
     // Первый запрос (может потребовать PoW)
     try {
       const result = await apiRequest('/auth', {
-        code: codeDigits,
+        code: codeNumber,
         sticker: stickerId,
       });
 
       // Если вернулся challenge – решаем и повторяем
       if (result.powChallenge) {
         const result2 = await apiRequest('/auth', {
-          code: codeDigits,
+          code: codeNumber,
           sticker: stickerId,
         }, {
           challenge: result.powChallenge,
@@ -295,7 +297,7 @@
       if (err.powChallenge) {
         try {
           const result2 = await apiRequest('/auth', {
-            code: codeDigits,
+            code: codeNumber,
             sticker: stickerId,
           }, {
             challenge: err.powChallenge,
