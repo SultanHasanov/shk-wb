@@ -1,4 +1,5 @@
 const RATING_ORIGIN = 'https://point-rating.wb.ru';
+const OFFICES_ORIGIN = 'https://pickpoint-ext-delivery.wb.ru';
 
 function getToken(req) {
   const authorization = req.headers.authorization || '';
@@ -42,7 +43,10 @@ export default async function handler(req, res) {
   let method;
   let body;
 
-  if (action === 'points' && req.method === 'POST') {
+  if (action === 'offices' && req.method === 'GET') {
+    targetUrl = `${OFFICES_ORIGIN}/v2/my-pvz/offices`;
+    method = 'GET';
+  } else if (action === 'points' && req.method === 'POST') {
     targetUrl = `${RATING_ORIGIN}/external/api/v1/list`;
     method = 'POST';
     body = {
@@ -84,7 +88,7 @@ export default async function handler(req, res) {
     Referer: 'https://my-pvz.wb.ru/',
     'X-Token': token,
     'X-App-Type': 'prod-my-pvz',
-    'X-App-Version': 'v0.0.44',
+    'X-App-Version': action === 'offices' ? 'v0.0.55' : 'v0.0.44',
     'X-Client-Id': 'my-pvz',
     'X-Language': 'ru',
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',

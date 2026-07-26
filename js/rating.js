@@ -104,16 +104,36 @@
     setLoading(refreshPointsBtn, true, 'Загрузка…');
     loadBtn.disabled = true;
     try {
-      const result = await ratingRequest('/api/rating?action=points', {
-        method: 'POST',
-        body: JSON.stringify({
-          pickpoint_ids: [],
-          limit: 11,
-          offset: 0,
-          only_disputable: false,
-        }),
+      const officesResult = await ratingRequest('/api/rating?action=offices', {
+        method: 'GET',
       });
-      points = Array.isArray(result?.data) ? result.data : [];
+      const offices = Array.isArray(officesResult?.offices) ? officesResult.offices : [];
+      const officeIds = offices.map((office) => Number(office.office_id)).filter(Boolean);
+
+      let ratings = [];
+      if (officeIds.length) {
+        const result = await ratingRequest('/api/rating?action=points', {
+          method: 'POST',
+          body: JSON.stringify({
+            pickpoint_ids: officeIds,
+            limit: Math.min(Math.max(officeIds.length, 1), 200),
+            offset: 0,
+            only_disputable: false,
+          }),
+        });
+        ratings = Array.isArray(result?.data) ? result.data : [];
+      }
+
+      const ratingById = new Map(ratings.map((item) => [Number(item.external_id), item]));
+      points = offices.map((office) => {
+        const rating = ratingById.get(Number(office.office_id));
+        return {
+          external_id: office.office_id,
+          address: office.full_address || office.office_name,
+          rating: rating?.rating ?? null,
+          region_rating: rating?.region_rating ?? null,
+        };
+      });
       renderPoints();
     } catch (error) {
       points = [];
