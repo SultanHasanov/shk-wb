@@ -150,6 +150,7 @@
       'Accept': 'application/json',
       'deviceId': getDeviceId(),
       'wb-appversion': 'v0.0.55',
+      'X-Language': 'ru',
       ...options.headers,
     };
 
