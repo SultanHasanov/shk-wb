@@ -120,28 +120,12 @@
           .filter((id) => Number.isSafeInteger(id) && id > 0),
       )];
 
-      let ratings = [];
-      if (pointIds.length) {
-        const result = await ratingRequest('/api/rating?action=points', {
-          method: 'POST',
-          body: JSON.stringify({
-            pickpoint_ids: pointIds,
-            limit: Math.min(Math.max(pointIds.length, 1), 200),
-            offset: 0,
-            only_disputable: false,
-          }),
-        });
-        ratings = Array.isArray(result?.data) ? result.data : [];
-      }
-
-      const ratingById = new Map(ratings.map((item) => [Number(item.external_id), item]));
       points = pointIds.map((pointId) => {
-        const rating = ratingById.get(pointId);
         return {
           external_id: pointId,
-          address: rating?.address || `ПВЗ ID ${pointId}`,
-          rating: rating?.rating ?? null,
-          region_rating: rating?.region_rating ?? null,
+          address: `ПВЗ ID ${pointId}`,
+          rating: null,
+          region_rating: null,
         };
       });
       renderPoints();
