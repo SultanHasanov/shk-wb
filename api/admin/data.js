@@ -1,34 +1,81 @@
 const { requireAdmin } = require('../_admin-auth');
+const { sendApiError, supabaseFetch } = require('../_supabase');
 
-const RESOURCE_PATHS = { key: 'key', message: 'message' };
+const RESOURCES = {
+  key: {
+    table: 'license_keys',
+    toDb(body) {
+      const out = {};
+      if ('key' in body) out.key = body.key;
+      if ('limit' in body) out.usage_limit = body.limit;
+      if ('used' in body) out.used = body.used;
+      if ('active' in body) out.active = body.active;
+      if ('note' in body) out.note = body.note;
+      if ('createdAt' in body) out.created_at = body.createdAt;
+      return out;
+    },
+    fromDb(row) {
+      return {
+        id: row.id, key: row.key, limit: row.usage_limit, used: row.used,
+        active: row.active, note: row.note, createdAt: row.created_at,
+      };
+    },
+  },
+  message: {
+    table: 'announcements',
+    toDb(body) {
+      const out = {};
+      for (const field of ['text', 'url', 'button', 'active']) {
+        if (field in body) out[field] = body[field];
+      }
+      if ('createdAt' in body) out.created_at = body.createdAt;
+      return out;
+    },
+    fromDb(row) {
+      return {
+        id: row.id, text: row.text, url: row.url, button: row.button,
+        active: row.active, createdAt: row.created_at,
+      };
+    },
+  },
+};
 
 module.exports = async function handler(req, res) {
   if (!requireAdmin(req, res)) return;
-
-  const resourcePath = RESOURCE_PATHS[req.query.resource];
+  const config = RESOURCES[req.query.resource];
   const id = req.query.id;
-  if (!resourcePath || (id && !/^[A-Za-z0-9_-]+$/.test(String(id)))) {
+  if (!config || (id && !/^\d+$/.test(String(id)))) {
     return res.status(400).json({ error: 'Invalid resource' });
   }
 
-  const base = (process.env.MOKKY_API_BASE || 'https://5f517982e1d5a6b7.mokky.dev').replace(/\/$/, '');
-  const url = `${base}/${resourcePath}${id ? `/${id}` : ''}`;
-  const options = {
-    method: req.method,
-    headers: { 'Content-Type': 'application/json' },
-  };
-  if (!['GET', 'HEAD'].includes(req.method) && req.body !== undefined) {
-    options.body = JSON.stringify(req.body);
-  }
-
   try {
-    const upstream = await fetch(url, options);
-    const text = await upstream.text();
-    res.status(upstream.status);
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
-    return res.send(text);
+    if (req.method === 'GET') {
+      const rows = await supabaseFetch(`${config.table}?select=*&order=id.desc`);
+      return res.status(200).json(rows.map(config.fromDb));
+    }
+    if (req.method === 'POST') {
+      const rows = await supabaseFetch(config.table, {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(config.toDb(req.body || {})),
+      });
+      return res.status(201).json(config.fromDb(rows[0]));
+    }
+    if (req.method === 'PATCH' && id) {
+      const rows = await supabaseFetch(`${config.table}?id=eq.${id}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(config.toDb(req.body || {})),
+      });
+      return res.status(200).json(config.fromDb(rows[0]));
+    }
+    if (req.method === 'DELETE' && id) {
+      await supabaseFetch(`${config.table}?id=eq.${id}`, { method: 'DELETE' });
+      return res.status(204).end();
+    }
+    res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
+    return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    console.error('Mokky request failed:', error);
-    return res.status(502).json({ error: 'Upstream request failed' });
+    return sendApiError(res, error);
   }
 };
