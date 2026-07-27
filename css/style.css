@@ -132,6 +132,10 @@ body {
   grid-column: 1 / -1;
   margin-top: 8px;
 }
+.admin-page {
+  width: min(1100px, calc(100% - 32px));
+  margin: 24px auto;
+}
 .admin-title { font-size: 20px; margin: 0 0 16px; color: var(--wb); }
 .admin-subtitle { font-size: 15px; margin: 18px 0 10px; }
 
