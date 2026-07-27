@@ -29,7 +29,12 @@ async function supabaseFetch(path, options = {}) {
 
 function sendApiError(res, error) {
   console.error(error.message, error.details || '');
-  return res.status(502).json({ error: 'Database request failed' });
+  const details = error.details && typeof error.details === 'object' ? error.details : {};
+  return res.status(502).json({
+    error: 'Database request failed',
+    code: details.code || null,
+    detail: details.message || null,
+  });
 }
 
 module.exports = { sendApiError, supabaseFetch };
