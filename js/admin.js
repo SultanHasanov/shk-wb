@@ -4,9 +4,8 @@
 (function () {
   // === НАСТРОЙКИ (можно менять) ===
   var SECRET_HASH = '#panel-2026';   // открывать админку: index.html#panel-2026
-  var ADMIN_PASS  = 'wb-admin-2026'; // пароль входа в админку
-  var BASE = 'https://5f517982e1d5a6b7.mokky.dev/key';
-  var MSG_BASE = 'https://5f517982e1d5a6b7.mokky.dev/message';
+  var BASE = '/api/admin/data?resource=key';
+  var MSG_BASE = '/api/admin/data?resource=message';
 
   var section = document.getElementById('admin');
   if (!section) return;
@@ -29,13 +28,22 @@
   }
 
   function tryLogin() {
-    if (passInput.value === ADMIN_PASS) {
-      sessionStorage.setItem('wb_admin_ok', '1');
-      loginErr.textContent = '';
-      showApp();
-    } else {
-      loginErr.textContent = 'Неверный пароль';
-    }
+    loginBtn.disabled = true;
+    loginErr.textContent = '';
+    fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passInput.value })
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('login failed');
+        passInput.value = '';
+        showApp();
+      })
+      .catch(function () {
+        loginErr.textContent = 'Неверный пароль';
+      })
+      .then(function () { loginBtn.disabled = false; });
   }
   loginBtn.addEventListener('click', tryLogin);
   passInput.addEventListener('keydown', function (e) {
@@ -149,7 +157,7 @@
   }
 
   function toggleActive(id, active) {
-    fetch(BASE + '/' + id, {
+    fetch(BASE + '&id=' + encodeURIComponent(id), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: active })
@@ -160,7 +168,7 @@
 
   function deleteKey(id, key) {
     if (!confirm('Удалить ключ ' + key + '?')) return;
-    fetch(BASE + '/' + id, { method: 'DELETE' })
+    fetch(BASE + '&id=' + encodeURIComponent(id), { method: 'DELETE' })
       .then(function () { loadKeys(); })
       .catch(function () { alert('Ошибка удаления (нет связи).'); });
   }
@@ -263,7 +271,7 @@
   }
 
   function toggleMessage(id, active) {
-    fetch(MSG_BASE + '/' + id, {
+    fetch(MSG_BASE + '&id=' + encodeURIComponent(id), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: active })
@@ -274,7 +282,7 @@
 
   function deleteMessage(id) {
     if (!confirm('Удалить это объявление?')) return;
-    fetch(MSG_BASE + '/' + id, { method: 'DELETE' })
+    fetch(MSG_BASE + '&id=' + encodeURIComponent(id), { method: 'DELETE' })
       .then(function () { loadMessages(); })
       .catch(function () { alert('Ошибка удаления (нет связи).'); });
   }
@@ -282,9 +290,8 @@
   if (msgCreateBtn) msgCreateBtn.addEventListener('click', createMessage);
   if (msgRefreshBtn) msgRefreshBtn.addEventListener('click', loadMessages);
 
-  // Автовход в рамках вкладки — после того, как все элементы и обработчики готовы.
-  if (sessionStorage.getItem('wb_admin_ok') === '1') {
-    showApp();
-  }
+  // Сессию проверяет сервер; пароль и токен недоступны JavaScript.
+  fetch('/api/admin/session').then(function (r) {
+    if (r.ok) showApp();
+  });
 })();
-

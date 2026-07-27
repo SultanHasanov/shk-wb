@@ -4,3 +4,6 @@
 /src-tauri/icons
 __pycache__/
 *.pyc
+.env
+.env.*
+!.env.example
