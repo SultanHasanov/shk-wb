@@ -31,7 +31,7 @@ from typing import List, Optional
 import crack_cell as core
 
 APP_TITLE = "Подбор кодов"
-APP_VERSION = "1.2.8"
+APP_VERSION = "1.2.9"
 TELEGRAM_URL = "https://t.me/roma_denosov"
 SITE_URL = "https://shk-wb.vercel.app/"
 VERSION_URL = "https://shk-wb.vercel.app/downloads/version.json"
@@ -1387,30 +1387,41 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _apply_update(self, cur: str, new: str, win: tk.Toplevel):
-        """Запустить bat-помощник, который заменит exe после выхода, и закрыться."""
-        bat_path = os.path.join(tempfile.gettempdir(), "shk_update.bat")
-        script = (
-            "@echo off\r\n"
-            ":retry\r\n"
-            "ping -n 2 127.0.0.1 >nul\r\n"
-            f'move /y "{new}" "{cur}" >nul 2>&1\r\n'
-            "if errorlevel 1 goto retry\r\n"
-            f'start "" "{cur}"\r\n'
-            'del "%~f0" >nul 2>&1\r\n'
-        )
-        try:
-            with open(bat_path, "w", encoding="cp866") as f:
-                f.write(script)
-        except Exception:
-            with open(bat_path, "w") as f:
-                f.write(script)
+        """Заменить exe через оконный WSH-процесс, не показывая терминал."""
+        script_path = os.path.join(tempfile.gettempdir(), "shk_update.vbs")
 
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        def vbs_string(value: str) -> str:
+            return value.replace('"', '""')
+
+        script = (
+            'Option Explicit\r\n'
+            'Dim fso, shell, currentExe, newExe, scriptFile, attempt\r\n'
+            'Set fso = CreateObject("Scripting.FileSystemObject")\r\n'
+            'Set shell = CreateObject("WScript.Shell")\r\n'
+            f'currentExe = "{vbs_string(cur)}"\r\n'
+            f'newExe = "{vbs_string(new)}"\r\n'
+            'scriptFile = WScript.ScriptFullName\r\n'
+            'WScript.Sleep 800\r\n'
+            'For attempt = 1 To 120\r\n'
+            '  On Error Resume Next\r\n'
+            '  Err.Clear\r\n'
+            '  fso.CopyFile newExe, currentExe, True\r\n'
+            '  If Err.Number = 0 Then Exit For\r\n'
+            '  On Error GoTo 0\r\n'
+            '  WScript.Sleep 500\r\n'
+            'Next\r\n'
+            'On Error Resume Next\r\n'
+            'If fso.FileExists(newExe) Then fso.DeleteFile newExe, True\r\n'
+            'shell.Run Chr(34) & currentExe & Chr(34), 1, False\r\n'
+            'fso.DeleteFile scriptFile, True\r\n'
+        )
+        with open(script_path, "w", encoding="utf-16") as f:
+            f.write(script)
+
         CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
-            ["cmd", "/c", bat_path],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+            ["wscript.exe", "//B", "//Nologo", script_path],
+            creationflags=CREATE_NO_WINDOW,
             close_fds=True,
         )
         try:
