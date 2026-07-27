@@ -31,7 +31,7 @@ from typing import List, Optional
 import crack_cell as core
 
 APP_TITLE = "Подбор кодов"
-APP_VERSION = "1.2.7"
+APP_VERSION = "1.2.8"
 TELEGRAM_URL = "https://t.me/roma_denosov"
 SITE_URL = "https://shk-wb.vercel.app/"
 VERSION_URL = "https://shk-wb.vercel.app/downloads/version.json"
