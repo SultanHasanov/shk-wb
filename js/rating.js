@@ -36,7 +36,11 @@
   }
 
   function getErrorMessage(data, fallback) {
-    return data?.message || data?.error || data?.details || fallback;
+    if (typeof data?.message === 'string') return data.message;
+    if (typeof data?.error === 'string') return data.error;
+    if (typeof data?.error?.message === 'string') return data.error.message;
+    if (typeof data?.details === 'string') return data.details;
+    return fallback;
   }
 
   async function ratingRequest(url, options = {}) {
@@ -104,19 +108,25 @@
     setLoading(refreshPointsBtn, true, 'Загрузка…');
     loadBtn.disabled = true;
     try {
-      const officesResult = await ratingRequest('/api/rating?action=offices', {
+      const orgsResult = await ratingRequest('/api/rating?action=orgs', {
         method: 'GET',
       });
-      const offices = Array.isArray(officesResult?.offices) ? officesResult.offices : [];
-      const officeIds = offices.map((office) => Number(office.office_id)).filter(Boolean);
+      const orgs = Array.isArray(orgsResult) ? orgsResult : [];
+      const pointIds = [...new Set(
+        orgs.flatMap((org) => (
+          Array.isArray(org?.eapids) ? org.eapids : []
+        ))
+          .map(Number)
+          .filter((id) => Number.isSafeInteger(id) && id > 0),
+      )];
 
       let ratings = [];
-      if (officeIds.length) {
+      if (pointIds.length) {
         const result = await ratingRequest('/api/rating?action=points', {
           method: 'POST',
           body: JSON.stringify({
-            pickpoint_ids: officeIds,
-            limit: Math.min(Math.max(officeIds.length, 1), 200),
+            pickpoint_ids: pointIds,
+            limit: Math.min(Math.max(pointIds.length, 1), 200),
             offset: 0,
             only_disputable: false,
           }),
@@ -125,11 +135,11 @@
       }
 
       const ratingById = new Map(ratings.map((item) => [Number(item.external_id), item]));
-      points = offices.map((office) => {
-        const rating = ratingById.get(Number(office.office_id));
+      points = pointIds.map((pointId) => {
+        const rating = ratingById.get(pointId);
         return {
-          external_id: office.office_id,
-          address: office.full_address || office.office_name,
+          external_id: pointId,
+          address: rating?.address || `ПВЗ ID ${pointId}`,
           rating: rating?.rating ?? null,
           region_rating: rating?.region_rating ?? null,
         };
