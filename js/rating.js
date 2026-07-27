@@ -45,6 +45,7 @@
 
   async function ratingRequest(url, options = {}) {
     const token = window.WBAuth?.getAccessToken();
+    const deviceId = window.WBAuth?.getDeviceId();
     if (!token) throw new Error('Сначала войдите в аккаунт WB');
 
     const response = await fetch(url, {
@@ -52,6 +53,7 @@
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        ...(deviceId ? { Deviceid: deviceId } : {}),
         ...(options.headers || {}),
       },
     });

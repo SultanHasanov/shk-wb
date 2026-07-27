@@ -661,6 +661,7 @@
   window.WBAuth = {
     getUser,
     getAccessToken,
+    getDeviceId,
     isLoggedIn,
     logout,
     requestCode,

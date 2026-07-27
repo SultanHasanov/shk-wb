@@ -24,7 +24,10 @@ function sendError(res, status, message, details) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Token');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Token, Deviceid',
+  );
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
@@ -75,7 +78,7 @@ export default async function handler(req, res) {
     params.set('filter.limit', String(limit));
     params.set('filter.offset', String(offset));
     params.set('filter.only_disputable', 'false');
-    targetUrl = `${RATING_ORIGIN}/external/api/V3/feedbacks/pickpoint?${params}`;
+    targetUrl = `${RATING_ORIGIN}/external/api/v3/feedbacks/pickpoint?${params}`;
     method = 'GET';
   } else {
     sendError(res, 404, 'Неизвестная операция рейтинга');
@@ -94,6 +97,7 @@ export default async function handler(req, res) {
     'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
   };
 
+  if (req.headers.deviceid) upstreamHeaders.Deviceid = req.headers.deviceid;
   if (sessionCookies) upstreamHeaders.Cookie = sessionCookies;
   if (body) upstreamHeaders['Content-Type'] = 'application/json';
 
