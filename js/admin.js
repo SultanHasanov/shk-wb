@@ -23,6 +23,7 @@
   function showApp() {
     loginScreen.hidden = true;
     appScreen.hidden = false;
+    loadStats();
     loadKeys();
     loadMessages();
   }
@@ -59,6 +60,56 @@
   var copyBtn     = document.getElementById('key-copy-btn');
   var refreshBtn  = document.getElementById('key-refresh-btn');
   var tbody       = document.getElementById('key-rows');
+
+  // --- Статистика посещений сайта и запусков приложения ---
+  var statsRefreshBtn = document.getElementById('stats-refresh-btn');
+  var statsSiteTotal = document.getElementById('stats-site-total');
+  var statsAppTotal = document.getElementById('stats-app-total');
+  var statsRows = document.getElementById('stats-rows');
+
+  function formatNumber(value) {
+    return Number(value || 0).toLocaleString('ru-RU');
+  }
+
+  function formatDay(value) {
+    var parts = String(value || '').split('-');
+    return parts.length === 3 ? parts[2] + '.' + parts[1] + '.' + parts[0] : value;
+  }
+
+  function loadStats() {
+    if (!statsRows) return;
+    statsRows.innerHTML = '<tr><td colspan="3">Загрузка…</td></tr>';
+    fetch('/api/admin/stats')
+      .then(function (r) {
+        if (!r.ok) throw new Error('stats failed');
+        return r.json();
+      })
+      .then(function (data) {
+        statsSiteTotal.textContent = formatNumber(data.totals && data.totals.siteVisits);
+        statsAppTotal.textContent = formatNumber(data.totals && data.totals.appLaunches);
+        var days = Array.isArray(data.days) ? data.days : [];
+        if (!days.length) {
+          statsRows.innerHTML = '<tr><td colspan="3">Данных пока нет</td></tr>';
+          return;
+        }
+        statsRows.innerHTML = '';
+        days.forEach(function (day) {
+          var tr = document.createElement('tr');
+          [formatDay(day.day), formatNumber(day.siteVisits), formatNumber(day.appLaunches)]
+            .forEach(function (text) {
+              var td = document.createElement('td');
+              td.textContent = text;
+              tr.appendChild(td);
+            });
+          statsRows.appendChild(tr);
+        });
+      })
+      .catch(function () {
+        statsRows.innerHTML = '<tr><td colspan="3">Ошибка загрузки</td></tr>';
+      });
+  }
+
+  if (statsRefreshBtn) statsRefreshBtn.addEventListener('click', loadStats);
 
   function generateKey() {
     var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';

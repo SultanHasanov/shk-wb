@@ -51,6 +51,24 @@
       </div>
 
       <div id="admin-app" class="admin-card" hidden>
+        <div class="admin-list-head">
+          <h3 class="admin-subtitle">Статистика</h3>
+          <button id="stats-refresh-btn" class="btn admin-mini-btn" type="button">Обновить</button>
+        </div>
+        <div class="admin-stats-totals">
+          <div class="admin-stat"><span>Посещений сайта всего</span><strong id="stats-site-total">—</strong></div>
+          <div class="admin-stat"><span>Запусков приложения всего</span><strong id="stats-app-total">—</strong></div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr><th>Дата</th><th>Посещения сайта</th><th>Запуски приложения</th></tr>
+            </thead>
+            <tbody id="stats-rows"></tbody>
+          </table>
+        </div>
+
+        <hr class="admin-sep">
         <h3 class="admin-subtitle">Создать ключ</h3>
         <label class="field">
           <span>Число итераций (лимит)</span>

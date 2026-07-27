@@ -6,6 +6,16 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   try {
+    // Приложение запрашивает объявления один раз при каждом запуске.
+    // Ошибка статистики не должна мешать загрузке самих объявлений.
+    try {
+      await supabaseFetch('rpc/record_app_launch', {
+        method: 'POST',
+        body: '{}',
+      });
+    } catch (analyticsError) {
+      console.error('App launch analytics failed', analyticsError.message);
+    }
     const rows = await supabaseFetch(
       'announcements?select=id,text,url,button,active,created_at&active=eq.true&order=id.desc'
     );
