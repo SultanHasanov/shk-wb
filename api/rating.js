@@ -75,7 +75,7 @@ export default async function handler(req, res) {
     params.set('filter.limit', String(limit));
     params.set('filter.offset', String(offset));
     params.set('filter.only_disputable', 'false');
-    targetUrl = `${RATING_ORIGIN}/external/api/v3/feedbacks/pickpoint?${params}`;
+    targetUrl = `${RATING_ORIGIN}/external/api/V3/feedbacks/pickpoint?${params}`;
     method = 'GET';
   } else {
     sendError(res, 404, 'Неизвестная операция рейтинга');
