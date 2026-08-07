@@ -83,7 +83,7 @@ def scan_candidates(raw: str) -> List[str]:
 
 
 APP_TITLE = "Подбор кодов"
-APP_VERSION = "1.2.9"
+APP_VERSION = "1.3.0"
 TELEGRAM_URL = "https://t.me/roma_denosov"
 SITE_URL = "https://shk-wb.vercel.app/"
 VERSION_URL = "https://shk-wb.vercel.app/downloads/version.json"
@@ -1833,20 +1833,40 @@ class App(tk.Tk):
         win.title("Обновление")
         win.transient(self)
         win.resizable(False, False)
-        ttk.Label(win, text="Загрузка установщика, подождите…").pack(padx=24, pady=16)
-        pb = ttk.Progressbar(win, mode="indeterminate")
+        status_var = tk.StringVar(value="Загрузка установщика…")
+        ttk.Label(win, textvariable=status_var).pack(padx=24, pady=(16, 8))
+        pb = ttk.Progressbar(win, mode="determinate", maximum=100, length=320)
         pb.pack(fill="x", padx=24, pady=(0, 16))
-        pb.start(15)
+
+        def on_progress(block_num, block_size, total_size):
+            downloaded = block_num * block_size
+            if total_size and total_size > 0:
+                downloaded = min(downloaded, total_size)
+                pct = downloaded * 100 / total_size
+                mb = downloaded / 1048576
+                total_mb = total_size / 1048576
+                self.after(0, lambda: (
+                    pb.configure(mode="determinate", value=pct),
+                    status_var.set(f"Загрузка: {mb:.1f} / {total_mb:.1f} МБ ({pct:.0f}%)"),
+                ))
+            else:
+                # сервер не сообщил размер — показываем скачанные МБ на «бегущей» полосе
+                mb = downloaded / 1048576
+                self.after(0, lambda: status_var.set(f"Загрузка: {mb:.1f} МБ…"))
 
         def worker():
             try:
-                urllib.request.urlretrieve(url, dest)
+                urllib.request.urlretrieve(url, dest, reporthook=on_progress)
             except Exception as ex:
                 self.after(0, lambda: (win.destroy(), messagebox.showerror(
                     APP_TITLE, f"Не удалось скачать обновление: {ex}"
                 )))
                 return
-            self.after(0, lambda: self._run_installer(dest, win))
+            self.after(0, lambda: (
+                pb.configure(value=100),
+                status_var.set("Загрузка завершена. Запуск установщика…"),
+                self._run_installer(dest, win),
+            ))
 
         threading.Thread(target=worker, daemon=True).start()
 
