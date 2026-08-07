@@ -7,6 +7,8 @@
 """
 
 import json
+import base64
+import binascii
 import hashlib
 import http.cookiejar
 import os
@@ -29,6 +31,56 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
 
 import crack_cell as core
+
+try:
+    import niimbot_printer as printer
+except Exception:  # модуль печати не обязателен для остального функционала
+    printer = None
+
+try:
+    import scan_hook
+except Exception:  # глобальный перехват сканера — только Windows, необязателен
+    scan_hook = None
+
+# Раскладка ЙЦУКЕН: если сканер «печатает» латинский код при активной русской
+# раскладке, буквы приходят кириллицей. Карта возвращает их обратно в латиницу.
+_RU_TO_EN = str.maketrans(
+    "ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮйцукенгшщзхъфывапролджэячсмитьбю",
+    "QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,.qwertyuiop[]asdfghjkl;'zxcvbnm,.",
+)
+
+
+def scan_candidates(raw: str) -> List[str]:
+    """Варианты нормализации отсканированной строки для поиска в базе:
+    сырой код, «пере-разложенный» из кириллицы в латиницу, декодированный
+    номер WB-стикера из QR вида *DSuZKCdI и только цифры."""
+    raw = (raw or "").strip()
+    out: List[str] = []
+    for s in (raw, raw.translate(_RU_TO_EN)):
+        s = s.strip()
+        if s and s not in out:
+            out.append(s)
+
+        # Центральный QR на новом WB-стикере содержит строку вида
+        # "*DSuZKCdI". После '*' идут 6 байт в Base64: первые 5 байт —
+        # sticker_code (big-endian), последний байт — контрольный.
+        if s.startswith("*"):
+            encoded = s[1:].rstrip("*")
+            try:
+                padded = encoded + "=" * (-len(encoded) % 4)
+                payload = base64.b64decode(padded, validate=True)
+                if len(payload) == 6:
+                    sticker = str(int.from_bytes(payload[:5], "big"))
+                    if sticker not in out:
+                        out.append(sticker)
+            except (binascii.Error, ValueError, TypeError):
+                pass
+
+        digits = re.sub(r"\D", "", s)
+        if digits and digits not in out:
+            out.append(digits)
+    return out
+
 
 APP_TITLE = "Подбор кодов"
 APP_VERSION = "1.2.9"
@@ -819,12 +871,24 @@ class App(tk.Tk):
         self._tour_ring: Optional[tk.Toplevel] = None
         self._tour_idx = 0
 
+        # настройки печати этикеток (принтер, размер, плотность)
+        self.printer_cfg = self._load_printer_cfg()
+        self._scan_buf: List[str] = []  # накопитель символов скана (по кодам клавиш)
+        # фоновый (глобальный) перехват сканера
+        self._scan_listener = None
+        self._hook_queue: "queue.Queue[str]" = queue.Queue()
+
         self._build_ui()
         self.after(100, self._drain_log_queue)
         self.after(200, self._check_license)
         self.after(300, self._check_update)
         self.after(400, self._check_messages)
         self.after(600, self._maybe_autostart_tour)
+        self.after(700, lambda: self.scan_entry.focus_set())
+        self.after(120, self._poll_hook_queue)
+        if self.bg_scan_var.get():
+            self.after(800, self._start_background_scan)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ---------- вспомогательное ----------
 
@@ -911,6 +975,44 @@ class App(tk.Tk):
         ttk.Button(
             top, text="Отзывы WB", command=self.open_wb_reviews
         ).grid(row=0, column=6, sticky="w", padx=(16, 0))
+
+        # ---- сканер товара: печать этикетки с ячейкой автоматически ----
+        scan_frame = ttk.LabelFrame(
+            self, text="Сканер товара — печать ячейки автоматически"
+        )
+        scan_frame.pack(fill="x", padx=8, pady=(2, 4))
+        ttk.Label(scan_frame, text="Отсканируйте QR товара:").grid(
+            row=0, column=0, sticky="w", padx=(8, 4), pady=6
+        )
+        self.scan_var = tk.StringVar()
+        self.scan_entry = ttk.Entry(scan_frame, textvariable=self.scan_var, width=30)
+        self.scan_entry.grid(row=0, column=1, padx=4, pady=6)
+        self.scan_entry.bind("<KeyPress>", self._on_scan_key)
+        self._add_context_menu(self.scan_entry)
+        self.scan_status_var = tk.StringVar(value="Готов к сканированию.")
+        ttk.Label(
+            scan_frame, textvariable=self.scan_status_var, foreground="#555"
+        ).grid(row=0, column=2, sticky="w", padx=(12, 8), pady=6)
+        ttk.Button(
+            scan_frame, text="Настроить принтер", command=self._open_printer_picker
+        ).grid(row=0, column=3, sticky="e", padx=8, pady=6)
+        scan_frame.columnconfigure(2, weight=1)
+
+        # фоновый режим: ловить скан даже когда окно не в фокусе (вместе с WB_PVZ)
+        self.bg_scan_var = tk.BooleanVar(
+            value=bool(self.printer_cfg.get("background_scan"))
+        )
+        self.bg_scan_chk = ttk.Checkbutton(
+            scan_frame,
+            text="Фоновый режим — ловить скан вместе с WB_PVZ (не нужно кликать в поле)",
+            variable=self.bg_scan_var, command=self._toggle_background_scan,
+        )
+        self.bg_scan_chk.grid(
+            row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 6)
+        )
+        if scan_hook is None or not scan_hook.GlobalScanListener(lambda c: None).available():
+            self.bg_scan_chk.configure(state="disabled")
+            self.bg_scan_var.set(False)
 
         self.status_var = tk.StringVar(value="")
         ttk.Label(self, textvariable=self.status_var, foreground="#555").pack(fill="x", padx=8)
@@ -1058,6 +1160,363 @@ class App(tk.Tk):
             messagebox.showerror(APP_TITLE, f"Не удалось сохранить файл: {ex}")
             return
         self.log(f"QR сохранён: {dest}")
+
+    # ---------- печать этикеток (NIIMBOT) ----------
+
+    PRINTER_CFG_PATH = Path(
+        os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming"
+    ) / "wb_pvz_tools" / "printer.json"
+
+    def _load_printer_cfg(self) -> dict:
+        cfg = {
+            "address": "", "name": "",
+            "width_mm": 40.0, "height_mm": 30.0, "density": 3,
+        }
+        try:
+            with self.PRINTER_CFG_PATH.open("r", encoding="utf-8") as f:
+                cfg.update(json.load(f))
+        except Exception:
+            pass
+        return cfg
+
+    def _save_printer_cfg(self):
+        try:
+            self.PRINTER_CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with self.PRINTER_CFG_PATH.open("w", encoding="utf-8") as f:
+                json.dump(self.printer_cfg, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _label_settings(self):
+        return printer.LabelSettings(
+            width_mm=float(self.printer_cfg.get("width_mm", 40.0)),
+            height_mm=float(self.printer_cfg.get("height_mm", 30.0)),
+            density=int(self.printer_cfg.get("density", 3)),
+        )
+
+    # ---- сканирование товара -> поиск ячейки -> авто-печать ----
+
+    # Раскладку Windows обходим, читая код по virtual-key кодам клавиш.
+    _VK_SHIFT_NUM = {
+        48: ")", 49: "!", 50: "@", 51: "#", 52: "$",
+        53: "%", 54: "^", 55: "&", 56: "*", 57: "(",
+    }
+    _VK_PUNCT = {
+        189: ("-", "_"), 187: ("=", "+"), 188: (",", "<"), 190: (".", ">"),
+        191: ("/", "?"), 186: (";", ":"), 222: ("'", '"'), 219: ("[", "{"),
+        221: ("]", "}"), 220: ("\\", "|"), 192: ("`", "~"),
+        109: ("-", "-"), 107: ("+", "+"), 106: ("*", "*"),
+        111: ("/", "/"), 110: (".", "."),
+    }
+
+    def _on_scan_key(self, event):
+        """Собираем отсканированный код по кодам клавиш (не по символам) —
+        так содержимое QR читается верно при любой раскладке Windows."""
+        ks = event.keysym
+        if ks in ("Return", "KP_Enter"):
+            self.on_scan("".join(self._scan_buf))
+            self._scan_buf = []
+            return "break"
+        if ks == "BackSpace":
+            if self._scan_buf:
+                self._scan_buf.pop()
+            self.scan_var.set("".join(self._scan_buf))
+            return "break"
+        if ks in ("Shift_L", "Shift_R", "Caps_Lock", "Control_L", "Control_R",
+                  "Alt_L", "Alt_R", "Tab", "ISO_Level3_Shift"):
+            return None
+        kc = event.keycode
+        shift = bool(event.state & 0x0001)
+        ch = None
+        if 65 <= kc <= 90:            # буквы A-Z
+            ch = chr(kc) if shift else chr(kc + 32)
+        elif 48 <= kc <= 57:          # цифры верхнего ряда
+            ch = self._VK_SHIFT_NUM[kc] if shift else chr(kc)
+        elif 96 <= kc <= 105:         # цифры numpad
+            ch = chr(kc - 48)
+        elif kc in self._VK_PUNCT:
+            ch = self._VK_PUNCT[kc][1 if shift else 0]
+        elif event.char and event.char.isascii() and event.char.isprintable():
+            ch = event.char           # фолбэк для нераспознанных клавиш
+        if ch is not None:
+            self._scan_buf.append(ch)
+            self.scan_var.set("".join(self._scan_buf))
+        return "break"
+
+    def on_scan(self, code=None):
+        """Скан из поля ввода (окно в фокусе): очистить поле и обработать."""
+        if code is None:
+            code = self.scan_var.get()
+        code = (code or "").strip()
+        self.scan_var.set("")
+        self.scan_entry.focus_set()
+        self._process_scan_code(code)
+
+    def _process_scan_code(self, code: str):
+        """Найти ячейку по коду и напечатать. Не трогает фокус/поле — годится
+        и для фонового режима (когда в фокусе WB_PVZ)."""
+        code = (code or "").strip()
+        if not code:
+            return
+        if not self._ensure_printer_ready(pending_scan=code):
+            return
+        self.scan_status_var.set(f"Поиск ячейки для кода {code}...")
+
+        def worker():
+            try:
+                con = core.connect_readonly(core.DEFAULT_DB_PATH)
+                cell = None
+                for cand in scan_candidates(code):
+                    cell = core.cell_for_code(con, cand)
+                    if cell:
+                        break
+                con.close()
+            except Exception as ex:
+                self.after(0, lambda: self._scan_lookup_failed(code, str(ex)))
+                return
+            self.after(0, lambda: self._scan_lookup_done(code, cell))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _scan_lookup_failed(self, code: str, err: str):
+        self.scan_status_var.set(f"Ошибка базы: {err}")
+        self.log(f"Скан {code}: ошибка чтения базы — {err}")
+
+    def _scan_lookup_done(self, code: str, cell):
+        if not cell:
+            self.scan_status_var.set(f"Код {code} не найден в базе.")
+            self.log(f"Скан {code}: ячейка не найдена.")
+            self.bell()
+            return
+        self.scan_status_var.set(f"Код {code} → ячейка {cell}. Печать...")
+        self.log(f"Скан {code} → ячейка {cell}. Отправляю на печать.")
+        self._enqueue_print(str(cell))
+
+    # ---- фоновый (глобальный) режим сканера ----
+
+    def _toggle_background_scan(self):
+        if self.bg_scan_var.get():
+            self._start_background_scan()
+        else:
+            self._stop_background_scan()
+        self.printer_cfg["background_scan"] = bool(self.bg_scan_var.get())
+        self._save_printer_cfg()
+
+    def _start_background_scan(self):
+        if scan_hook is None or self._scan_listener is not None:
+            return
+        # колбэк вызывается из потока хука -> кладём в очередь, обрабатываем в Tk
+        self._scan_listener = scan_hook.GlobalScanListener(self._hook_queue.put)
+        if not self._scan_listener.available():
+            self._scan_listener = None
+            return
+        self._scan_listener.start()
+        self.scan_status_var.set(
+            "Фоновый режим включён — сканируйте, не переключаясь на это окно."
+        )
+        self.log("Фоновый перехват сканера включён (работает вместе с WB_PVZ).")
+
+    def _stop_background_scan(self):
+        if self._scan_listener is not None:
+            try:
+                self._scan_listener.stop()
+            except Exception:
+                pass
+            self._scan_listener = None
+            self.log("Фоновый перехват сканера выключен.")
+
+    def _poll_hook_queue(self):
+        """Забираем коды, пойманные фоновым хуком, и обрабатываем в потоке Tk."""
+        try:
+            while True:
+                code = self._hook_queue.get_nowait()
+                self.scan_var.set("")
+                self._process_scan_code(code)
+        except queue.Empty:
+            pass
+        self.after(120, self._poll_hook_queue)
+
+    def _on_close(self):
+        self._stop_background_scan()
+        self.destroy()
+
+    def _ensure_printer_ready(self, pending_scan: Optional[str] = None) -> bool:
+        """Проверить, что печать возможна и принтер выбран. Возвращает True,
+        если можно печатать прямо сейчас. Если принтер не настроен — открывает
+        окно настройки и (при наличии кода) повторяет скан после выбора."""
+        if printer is None or not printer.pil_available():
+            messagebox.showerror(
+                APP_TITLE,
+                "Печать недоступна — не установлен Pillow (пакет qrcode[pil]).",
+            )
+            return False
+        if not printer.bleak_available():
+            messagebox.showerror(
+                APP_TITLE,
+                "Печать по Bluetooth недоступна — не установлен пакет bleak.",
+            )
+            return False
+        if not self.printer_cfg.get("address"):
+            after = None
+            if pending_scan is not None:
+                after = lambda: self.on_scan(pending_scan)
+            self._open_printer_picker(after_select=after)
+            return False
+        return True
+
+    def _enqueue_print(self, cell: str):
+        """Поставить этикетку в очередь печати (единый рабочий поток печатает
+        по одной — быстрые сканы не конфликтуют на BLE)."""
+        if not hasattr(self, "_print_queue"):
+            self._print_queue = queue.Queue()
+            threading.Thread(target=self._print_worker, daemon=True).start()
+        self._print_queue.put(cell)
+        self.after(0, lambda: self.progress.start(15))
+
+    def _print_worker(self):
+        address = self.printer_cfg.get("address")
+        while True:
+            cell = self._print_queue.get()
+            settings = self._label_settings()
+            try:
+                printer.print_cell_label(
+                    self.printer_cfg.get("address") or address, cell, settings,
+                    log=self.log,
+                )
+                err = None
+            except Exception as ex:
+                err = str(ex)
+
+            def done(cell=cell, err=err):
+                if self._print_queue.empty():
+                    self.progress.stop()
+                if err:
+                    self.scan_status_var.set(f"Ошибка печати ячейки {cell}.")
+                    self.log(f"Ошибка печати ячейки {cell}: {err}")
+                else:
+                    self.scan_status_var.set(
+                        f"Ячейка {cell} напечатана. Готов к сканированию."
+                    )
+            self.after(0, done)
+            self._print_queue.task_done()
+
+    def _save_label_png(self, cell: str):
+        try:
+            img = printer.render_cell_label(cell, self._label_settings())
+        except Exception as ex:
+            messagebox.showerror(APP_TITLE, f"Не удалось создать этикетку: {ex}")
+            return
+        desktop = Path.home() / "Desktop"
+        initial_dir = str(desktop if desktop.is_dir() else Path.home())
+        dest = filedialog.asksaveasfilename(
+            title="Сохранить этикетку",
+            initialdir=initial_dir,
+            initialfile=f"label_{cell}.png",
+            defaultextension=".png",
+            filetypes=[("PNG", "*.png")],
+        )
+        if not dest:
+            return
+        try:
+            img.save(dest)
+        except Exception as ex:
+            messagebox.showerror(APP_TITLE, f"Не удалось сохранить файл: {ex}")
+            return
+        self.log(f"Этикетка сохранена: {dest}")
+
+    def _open_printer_picker(self, after_select=None):
+        if printer is None:
+            messagebox.showerror(APP_TITLE, "Модуль печати недоступен.")
+            return
+        win = tk.Toplevel(self)
+        win.title("Выбор принтера")
+        win.transient(self)
+        win.resizable(False, False)
+
+        ttk.Label(
+            win, text="Bluetooth-принтеры NIIMBOT:", font=("", 10, "bold"),
+        ).pack(anchor="w", padx=16, pady=(16, 4))
+
+        listbox = tk.Listbox(win, width=44, height=6)
+        listbox.pack(padx=16, pady=4)
+        devices: List = []
+
+        status = ttk.Label(win, text="", foreground="#555")
+        status.pack(anchor="w", padx=16)
+
+        # --- настройки этикетки ---
+        opts = ttk.LabelFrame(win, text="Этикетка")
+        opts.pack(fill="x", padx=16, pady=8)
+        w_var = tk.StringVar(value=str(self.printer_cfg.get("width_mm", 40.0)))
+        h_var = tk.StringVar(value=str(self.printer_cfg.get("height_mm", 30.0)))
+        d_var = tk.IntVar(value=int(self.printer_cfg.get("density", 3)))
+        ttk.Label(opts, text="Ширина, мм:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(opts, textvariable=w_var, width=6).grid(row=0, column=1, padx=6)
+        ttk.Label(opts, text="Высота, мм:").grid(row=0, column=2, sticky="w", padx=6)
+        ttk.Entry(opts, textvariable=h_var, width=6).grid(row=0, column=3, padx=6)
+        ttk.Label(opts, text="Плотность (1–5):").grid(row=1, column=0, sticky="w", padx=6, pady=4)
+        ttk.Spinbox(opts, from_=1, to=5, textvariable=d_var, width=4).grid(row=1, column=1, padx=6)
+
+        def do_scan():
+            status.configure(text="Поиск принтеров...")
+            listbox.delete(0, "end")
+            scan_btn.configure(state="disabled")
+
+            def worker():
+                try:
+                    found = printer.list_printers()
+                    err = None
+                except Exception as ex:
+                    found = []
+                    err = str(ex)
+
+                def show():
+                    devices.clear()
+                    devices.extend(found)
+                    for d in found:
+                        listbox.insert("end", f"{d.name}  [{d.address}]")
+                    if err:
+                        status.configure(text=f"Ошибка поиска: {err}")
+                    elif not found:
+                        status.configure(text="Принтеры не найдены. Включите принтер и повторите.")
+                    else:
+                        status.configure(text=f"Найдено: {len(found)}")
+                    scan_btn.configure(state="normal")
+                self.after(0, show)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def save_and_close():
+            try:
+                self.printer_cfg["width_mm"] = float(w_var.get().replace(",", "."))
+                self.printer_cfg["height_mm"] = float(h_var.get().replace(",", "."))
+                self.printer_cfg["density"] = int(d_var.get())
+            except ValueError:
+                messagebox.showwarning(APP_TITLE, "Проверьте размеры этикетки.")
+                return
+            sel = listbox.curselection()
+            if sel:
+                dev = devices[sel[0]]
+                self.printer_cfg["address"] = dev.address
+                self.printer_cfg["name"] = dev.name
+            elif not self.printer_cfg.get("address"):
+                messagebox.showwarning(APP_TITLE, "Выберите принтер из списка.")
+                return
+            self._save_printer_cfg()
+            win.destroy()
+            if after_select:
+                after_select()
+
+        btns = ttk.Frame(win)
+        btns.pack(pady=(4, 16))
+        scan_btn = ttk.Button(btns, text="Найти принтеры", command=do_scan)
+        scan_btn.pack(side="left", padx=6)
+        ttk.Button(btns, text="Сохранить", command=save_and_close).pack(side="left", padx=6)
+        ttk.Button(btns, text="Отмена", command=win.destroy).pack(side="left", padx=6)
+
+        if self.printer_cfg.get("name"):
+            status.configure(text=f"Текущий: {self.printer_cfg['name']}")
+        do_scan()
 
     # ---------- автообновление ----------
 
@@ -1362,74 +1821,51 @@ class App(tk.Tk):
             messagebox.showerror(APP_TITLE, "В манифесте обновления нет ссылки на файл.")
             return
 
-        cur = sys.executable
-        new = cur + ".new"
+        # Скачиваем ОБЫЧНЫЙ установщик (Inno Setup) во временную папку и
+        # запускаем его видимо — без скрытого VBS и самоперезаписи exe
+        # (такое поведение раньше ловил антивирус как малварь).
+        filename = os.path.basename(urllib.parse.urlparse(url).path) or "shk_setup.exe"
+        if not filename.lower().endswith(".exe"):
+            filename += ".exe"
+        dest = os.path.join(tempfile.gettempdir(), filename)
 
         win = tk.Toplevel(self)
         win.title("Обновление")
         win.transient(self)
         win.resizable(False, False)
-        ttk.Label(win, text="Загрузка обновления, подождите…").pack(padx=24, pady=16)
+        ttk.Label(win, text="Загрузка установщика, подождите…").pack(padx=24, pady=16)
         pb = ttk.Progressbar(win, mode="indeterminate")
         pb.pack(fill="x", padx=24, pady=(0, 16))
         pb.start(15)
 
         def worker():
             try:
-                urllib.request.urlretrieve(url, new)
+                urllib.request.urlretrieve(url, dest)
             except Exception as ex:
                 self.after(0, lambda: (win.destroy(), messagebox.showerror(
                     APP_TITLE, f"Не удалось скачать обновление: {ex}"
                 )))
                 return
-            self.after(0, lambda: self._apply_update(cur, new, win))
+            self.after(0, lambda: self._run_installer(dest, win))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _apply_update(self, cur: str, new: str, win: tk.Toplevel):
-        """Заменить exe через оконный WSH-процесс, не показывая терминал."""
-        script_path = os.path.join(tempfile.gettempdir(), "shk_update.vbs")
-
-        def vbs_string(value: str) -> str:
-            return value.replace('"', '""')
-
-        script = (
-            'Option Explicit\r\n'
-            'Dim fso, shell, currentExe, newExe, scriptFile, attempt\r\n'
-            'Set fso = CreateObject("Scripting.FileSystemObject")\r\n'
-            'Set shell = CreateObject("WScript.Shell")\r\n'
-            f'currentExe = "{vbs_string(cur)}"\r\n'
-            f'newExe = "{vbs_string(new)}"\r\n'
-            'scriptFile = WScript.ScriptFullName\r\n'
-            'WScript.Sleep 800\r\n'
-            'For attempt = 1 To 120\r\n'
-            '  On Error Resume Next\r\n'
-            '  Err.Clear\r\n'
-            '  fso.CopyFile newExe, currentExe, True\r\n'
-            '  If Err.Number = 0 Then Exit For\r\n'
-            '  On Error GoTo 0\r\n'
-            '  WScript.Sleep 500\r\n'
-            'Next\r\n'
-            'On Error Resume Next\r\n'
-            'If fso.FileExists(newExe) Then fso.DeleteFile newExe, True\r\n'
-            'shell.Run Chr(34) & currentExe & Chr(34), 1, False\r\n'
-            'fso.DeleteFile scriptFile, True\r\n'
-        )
-        with open(script_path, "w", encoding="utf-16") as f:
-            f.write(script)
-
-        CREATE_NO_WINDOW = 0x08000000
-        subprocess.Popen(
-            ["wscript.exe", "//B", "//Nologo", script_path],
-            creationflags=CREATE_NO_WINDOW,
-            close_fds=True,
-        )
+    def _run_installer(self, installer_path: str, win: tk.Toplevel):
+        """Запустить скачанный установщик обычным образом и закрыть программу,
+        чтобы установщик мог обновить файлы. Никаких скрытых процессов."""
         try:
             win.destroy()
         except Exception:
             pass
+        try:
+            os.startfile(installer_path)  # видимое окно установщика
+        except Exception as ex:
+            messagebox.showerror(
+                APP_TITLE,
+                f"Не удалось запустить установщик:\n{ex}\n\nФайл: {installer_path}",
+            )
+            return
         self.destroy()
-        os._exit(0)  # гарантированно освобождаем файл exe для замены
 
     # ---------- модалка «Товары клиента» ----------
 

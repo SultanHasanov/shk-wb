@@ -549,6 +549,48 @@ def pickup_history_for_sid(con, sid: str):
     return result
 
 
+def cell_for_code(con, code: str):
+    """Найти номер ячейки по отсканированному коду товара (QR/штрихкод WB-стикера).
+    Код сверяется с sticker_code / scanned_code / barcode во всех источниках.
+    Возвращает строку с номером ячейки или None. При нескольких совпадениях
+    берётся самая свежая запись."""
+    code = str(code).strip()
+    if not code:
+        return None
+    # колонки, в которых может лежать код с QR/штрихкода WB-стикера
+    code_cols = (
+        "sticker_code", "scanned_code", "barcode", "shk_code",
+        "encoded_scanned_code", "ext_barcode", "item_uid",
+        "track_id", "wb_item", "origin_id",
+    )
+    sources = ("goods_in_pick_point", "smart_pvz_goods")
+    best_cell = None
+    best_upd = ""
+    for table in sources:
+        try:
+            existing = {r["name"] for r in con.execute(f"pragma table_info({table})")}
+        except sqlite3.OperationalError:
+            continue
+        cols = [c for c in code_cols if c in existing]
+        if not cols:
+            continue
+        where = " or ".join(f"cast({c} as text) = ?" for c in cols)
+        try:
+            rows = con.execute(
+                f"select cell, status_updated as upd from {table} "
+                f"where cell is not null and ({where})",
+                tuple(code for _ in cols),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        for r in rows:
+            upd = str(r["upd"] or "")
+            if best_cell is None or upd >= best_upd:
+                best_cell = str(r["cell"])
+                best_upd = upd
+    return best_cell
+
+
 def clients_for_cell(con, cell: str):
     """ВСЕ клиенты, чьи товары лежат в этой ячейке, независимо от статуса.
     Возвращает список (sid, status, date) — по одной записи на клиента

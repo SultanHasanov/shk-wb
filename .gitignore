@@ -4,6 +4,13 @@
 /src-tauri/icons
 __pycache__/
 *.pyc
+
+# артефакты сборки (PyInstaller/Nuitka/Inno Setup)
+/scripts/build/
+/scripts/build-*/
+/scripts/dist/
+/scripts/dist-*/
+/scripts/dist-installer/
 .env
 .env.*
 !.env.example
