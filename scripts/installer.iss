@@ -11,7 +11,7 @@
 #define MyAppName "Подбор кодов"
 #define MyAppVersion "1.3.0"
 #define MyAppPublisher "SHK Tools"
-#define MyAppExeName "crack_cell_gui.exe"
+#define MyAppExeName "Подбор кодов.exe"
 ; Папка сборки. PyInstaller onedir: "dist\Подбор кодов".
 ; Для Nuitka заменить на "build-nuitka\crack_cell_gui.dist".
 #define MyDistDir "dist\Подбор кодов"
