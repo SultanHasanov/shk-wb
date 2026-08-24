@@ -39,7 +39,9 @@
   var printStatus = document.getElementById('print-status');
   var printableImages = [];
   var THERMAL_STORAGE_KEY = 'sticker_thermal_print_settings';
-  var ACCESS_STORAGE_KEY = 'sticker_access_code';
+  var LEGACY_ACCESS_STORAGE_KEY = 'sticker_access_code';
+  var PRODUCT_ACCESS_STORAGE_KEY = 'sticker_product_access_code';
+  var BOX_ACCESS_STORAGE_KEY = 'sticker_box_access_code';
   var accessBalance = document.getElementById('access-balance');
   var accessBalanceTitle = document.getElementById('access-balance-title');
   var accessUsed = document.getElementById('access-used');
@@ -146,16 +148,36 @@
   restoreThermalSettings();
 
   try {
-    var savedAccessCode = localStorage.getItem(ACCESS_STORAGE_KEY) || '';
+    var savedAccessCode = localStorage.getItem(PRODUCT_ACCESS_STORAGE_KEY) || localStorage.getItem(LEGACY_ACCESS_STORAGE_KEY) || '';
+    if (/^\d{6}$/.test(savedAccessCode)) localStorage.setItem(PRODUCT_ACCESS_STORAGE_KEY, savedAccessCode);
     if (/^\d{6}$/.test(savedAccessCode)) { accessCode.value = savedAccessCode; loadAccessStatus(); }
   } catch (_storageError) {}
 
-  function rememberAccessCode() {
+  function currentAccessStorageKey() {
+    return productMode ? PRODUCT_ACCESS_STORAGE_KEY : BOX_ACCESS_STORAGE_KEY;
+  }
+
+  function storedAccessCode() {
+    try { return localStorage.getItem(currentAccessStorageKey()) || ''; }
+    catch (_storageError) { return ''; }
+  }
+
+  function persistAccessCode() {
     var value = accessCode.value.trim();
-    if (!/^\d{6}$/.test(value)) return;
-    try { localStorage.setItem(ACCESS_STORAGE_KEY, value); } catch (_storageError) {}
+    if (!/^\d{6}$/.test(value)) return false;
+    try { localStorage.setItem(currentAccessStorageKey(), value); } catch (_storageError) {}
+    return true;
+  }
+
+  function rememberAccessCode() {
+    if (!persistAccessCode()) return;
     accessPanel.hidden = true;
     showAccessSuccess();
+  }
+
+  function currentAccessModeLabel() {
+    if (productMode) return customMode ? 'Товар по номеру' : 'Стикеры товаров';
+    return customMode ? 'Коробка по номеру' : 'QR коробок';
   }
 
   function setAccessMessage(text, type) {
@@ -177,7 +199,7 @@
 
   function forgetAccessCode() {
     accessCode.value = '';
-    try { localStorage.removeItem(ACCESS_STORAGE_KEY); } catch (_storageError) {}
+    try { localStorage.removeItem(currentAccessStorageKey()); } catch (_storageError) {}
     showAccessPanel('Ключ не подходит. Проверьте шесть цифр или купите новый пакет.');
     accessStatus = null;
     renderAccessStatus();
@@ -186,7 +208,7 @@
   function renderAccessStatus() {
     if (!accessStatus) { accessBalance.hidden = true; return; }
     var balance = productMode ? (customMode ? accessStatus.custom : accessStatus.range) : (customMode ? accessStatus.boxCustom : accessStatus.boxRange);
-    accessBalanceTitle.textContent = productMode ? (customMode ? 'Товар по номеру' : 'Стикеры товаров') : (customMode ? 'Коробка по номеру' : 'QR коробок');
+    accessBalanceTitle.textContent = currentAccessModeLabel();
     accessUsed.textContent = String(balance.used);
     accessRemaining.textContent = String(balance.remaining);
     accessBalance.hidden = false;
@@ -208,8 +230,9 @@
       .then(function (data) {
         if(sequence!==accessCheckSequence)return;
         updateAccessStatus(data.access);
+        persistAccessCode();
         var balance=productMode?(customMode?data.access.custom:data.access.range):(customMode?data.access.boxCustom:data.access.boxRange);
-        if(balance.remaining<1){showAccessPanel('Лимит для режима «'+(customMode?'По номеру':'Возвратные')+'» исчерпан. Выберите другой ключ или купите новый пакет.');return;}
+        if(balance.remaining<1){showAccessPanel('Лимит для режима «'+currentAccessModeLabel()+'» исчерпан. Переключитесь на другой режим или купите новый пакет.');return;}
         rememberAccessCode();setAccessMessage('', '');
       })
       .catch(function (reason) { if(sequence!==accessCheckSequence)return;accessStatus=null;renderAccessStatus();showAccessPanel(reason.status===404?'Такой ключ не найден. Проверьте введённые цифры.':'Не удалось проверить ключ. Попробуйте ещё раз.'); });
@@ -217,7 +240,7 @@
 
   function handleAccessError(body) {
     if (body.code === 'INVALID_ACCESS_CODE') { forgetAccessCode(); showAccessPanel('Такой ключ не найден. Проверьте введённые цифры.'); }
-    else if (body.code === 'ACCESS_CODE_LIMIT') { try { localStorage.removeItem(ACCESS_STORAGE_KEY); } catch (_error) {} showAccessPanel('Лимит этого ключа исчерпан. Купите новый пакет.'); }
+    else if (body.code === 'ACCESS_CODE_LIMIT') { persistAccessCode(); showAccessPanel('Лимит для режима «'+currentAccessModeLabel()+'» исчерпан. Переключитесь на другой режим или купите новый пакет.'); }
     else if (body.code === 'ACCESS_CODE_REQUIRED') showAccessPanel('Бесплатный лимит исчерпан. Введите ключ или купите пакет.');
   }
 
@@ -251,11 +274,20 @@
 
   function switchCategory(products) {
     var changed=productMode!==products;
+    if(changed)persistAccessCode();
     productMode = products;
+    if(changed){
+      accessCheckSequence++;
+      accessStatus=null;
+      accessCode.value=storedAccessCode();
+    }
     tabProducts.classList.toggle('active', products);
     tabBoxes.classList.toggle('active', !products);
     switchMode(customMode);
-    if(changed)showCategoryExample();
+    if(changed){
+      if(!/^\d{6}$/.test(accessCode.value.trim()))showAccessPanel('');
+      showCategoryExample();
+    }
   }
 
   function showBatch(data) {
