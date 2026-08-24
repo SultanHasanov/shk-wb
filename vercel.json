@@ -1,0 +1,45 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "functions": {
+    "api/payments.js": { "includeFiles": "api/_private/*.exe" },
+    "api/stickers/pdf.js": { "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/api/payments/create", "destination": "/api/payments?action=create" },
+    { "source": "/api/payments/webhook", "destination": "/api/payments?action=webhook" },
+    { "source": "/api/payments/status", "destination": "/api/payments?action=status" },
+    { "source": "/api/payments/download", "destination": "/api/payments?action=download" },
+    { "source": "/api/payments/download-cell-print", "destination": "/api/payments?action=download-cell-print" },
+    { "source": "/api/payments/config", "destination": "/api/payments?action=config" }
+    ,{ "source": "/api/payments/promo", "destination": "/api/payments?action=promo" }
+    ,{ "source": "/api/admin/stats", "destination": "/api/admin/data?resource=stats" }
+    ,{ "source": "/api/admin/login", "destination": "/api/admin/data?auth=login" }
+    ,{ "source": "/api/admin/logout", "destination": "/api/admin/data?auth=logout" }
+    ,{ "source": "/api/admin/session", "destination": "/api/admin/data?auth=session" }
+    ,{ "source": "/api/sticker-stats", "destination": "/api/visits?action=stickerStats" }
+    ,{ "source": "/api/cell-print/activate", "destination": "/api/cell-print?action=activate" }
+    ,{ "source": "/api/cell-print/feed", "destination": "/api/cell-print?action=feed" }
+  ],
+  "redirects": [
+    { "source": "/generator", "destination": "/", "permanent": true },
+    { "source": "/generator.html", "destination": "/", "permanent": true },
+    { "source": "/index-live", "destination": "/", "permanent": true },
+    { "source": "/index-live.html", "destination": "/", "permanent": true }
+    ,{ "source": "/payment-result.html", "destination": "/payment-result", "permanent": true }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), bluetooth=(self)" }
+      ]
+    },
+    {
+      "source": "/admin-enigma/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    }
+  ]
+}

@@ -8,7 +8,7 @@ module.exports = async function handler(req, res) {
   try {
     // Приложение запрашивает объявления один раз при каждом запуске.
     // Ошибка статистики не должна мешать загрузке самих объявлений.
-    try {
+    if (String(req.query.surface || '') !== 'site') try {
       await supabaseFetch('rpc/record_app_launch', {
         method: 'POST',
         body: '{}',

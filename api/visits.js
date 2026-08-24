@@ -5,8 +5,33 @@ async function currentTotal() {
   return rows.length ? rows[0].total_visits : 0;
 }
 
+async function stickerStats() {
+  const rows = await supabaseFetch('rpc/get_sticker_generation_stats', {
+    method: 'POST',
+    body: '{}',
+  });
+  const stats = Array.isArray(rows) && rows.length ? rows[0] : {};
+  return {
+    returnStickers: safeCount(stats.return_stickers),
+    customStickers: safeCount(stats.custom_stickers),
+  };
+}
+
+function safeCount(value) {
+  const count = Number(value || 0);
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+}
+
 module.exports = async function handler(req, res) {
   try {
+    if (req.query && req.query.action === 'stickerStats') {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        return res.status(405).json({ error: 'Method not allowed' });
+      }
+      return res.status(200).json(await stickerStats());
+    }
     if (req.method === 'GET') return res.status(200).json({ count: await currentTotal() });
     if (req.method === 'POST') {
       const visitorId = String(req.body && req.body.visitorId || '').trim();

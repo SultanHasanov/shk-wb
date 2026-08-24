@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /admin-enigma/
+Disallow: /api/
+
+Sitemap: https://shk-wb.vercel.app/sitemap.xml

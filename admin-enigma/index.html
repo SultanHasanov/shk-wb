@@ -30,22 +30,157 @@
       </div>
 
       <div id="admin-app" class="admin-card" hidden>
+        <nav class="admin-nav" aria-label="Разделы админки">
+          <a href="#pool-section">Диапазон стикеров</a>
+          <a href="#box-pool-section">Диапазон коробок</a>
+          <a href="#payments-section">Оплата</a>
+          <a href="#promocodes-section">Промокоды</a>
+          <a href="#access-section">Коды доступа</a>
+          <a href="#stats-section">Статистика</a>
+          <a href="#program-section">Программа</a>
+          <a href="#announcements-section">Объявления</a>
+          <a href="#cell-print-admin">Печать ячеек</a>
+        </nav>
+        <div id="pool-section" class="admin-section admin-section-featured">
+          <div class="admin-list-head">
+            <div><p class="admin-kicker">Генератор стикеров</p><h3 class="admin-section-title">Диапазон номеров</h3></div>
+            <button id="sticker-pool-refresh" class="btn admin-mini-btn" type="button">Обновить</button>
+          </div>
+          <p class="hint admin-help">Задайте номера включительно. Использованные номера сохраняются в истории и повторно не выдаются.</p>
+          <div class="admin-stats-totals admin-pool-stats">
+            <div class="admin-stat"><span>Доступный диапазон</span><strong id="sticker-pool-current">—</strong></div>
+            <div class="admin-stat"><span>Свободно номеров</span><strong id="sticker-pool-available">—</strong></div>
+            <div class="admin-stat"><span>Уже использовано</span><strong id="sticker-pool-used">—</strong></div>
+          </div>
+          <div class="admin-form-grid">
+            <label class="field"><span>Первый номер</span><input id="sticker-pool-start" type="text" inputmode="numeric" maxlength="12" placeholder="598741450000"></label>
+            <label class="field"><span>Последний номер</span><input id="sticker-pool-end" type="text" inputmode="numeric" maxlength="12" placeholder="598741459999"></label>
+            <div class="admin-form-action"><button id="sticker-pool-save" class="btn btn-primary" type="button">Применить диапазон</button></div>
+          </div>
+          <p id="sticker-pool-message" class="admin-message" role="status"></p>
+          <details class="admin-details" open>
+            <summary>Последние использованные номера</summary>
+            <div class="admin-table-wrap">
+              <table class="admin-table"><thead><tr><th>Номер</th><th>Дата выдачи</th><th>Партия</th></tr></thead><tbody id="sticker-pool-used-rows"></tbody></table>
+            </div>
+            <div class="admin-pagination"><button id="sticker-pool-prev" class="btn admin-mini-btn" type="button">← Назад</button><span id="sticker-pool-page">Страница 1</span><button id="sticker-pool-next" class="btn admin-mini-btn" type="button">Вперёд →</button></div>
+          </details>
+        </div>
+
+        <div id="box-pool-section" class="admin-section admin-section-featured">
+          <div class="admin-list-head">
+            <div><p class="admin-kicker">QR возвратных коробок</p><h3 class="admin-section-title">Отдельный диапазон номеров</h3></div>
+            <button id="box-pool-refresh" class="btn admin-mini-btn" type="button">Обновить</button>
+          </div>
+          <p class="hint admin-help">Эти номера используются только для этикеток *B-T* с QR вида TRBX…. Товарный диапазон не расходуется.</p>
+          <div class="admin-stats-totals admin-pool-stats">
+            <div class="admin-stat"><span>Доступный диапазон</span><strong id="box-pool-current">—</strong></div>
+            <div class="admin-stat"><span>Свободно номеров</span><strong id="box-pool-available">—</strong></div>
+            <div class="admin-stat"><span>Уже использовано</span><strong id="box-pool-used">—</strong></div>
+          </div>
+          <div class="admin-form-grid">
+            <label class="field"><span>Первый номер</span><input id="box-pool-start" type="text" inputmode="numeric" maxlength="12" placeholder="5084472000"></label>
+            <label class="field"><span>Последний номер</span><input id="box-pool-end" type="text" inputmode="numeric" maxlength="12" placeholder="5084472999"></label>
+            <div class="admin-form-action"><button id="box-pool-save" class="btn btn-primary" type="button">Применить диапазон</button></div>
+          </div>
+          <p id="box-pool-message" class="admin-message" role="status"></p>
+          <details class="admin-details" open>
+            <summary>Последние выданные номера коробок</summary>
+            <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Номер</th><th>Дата выдачи</th><th>Партия</th></tr></thead><tbody id="box-pool-used-rows"></tbody></table></div>
+            <div class="admin-pagination"><button id="box-pool-prev" class="btn admin-mini-btn" type="button">← Назад</button><span id="box-pool-page">Страница 1</span><button id="box-pool-next" class="btn admin-mini-btn" type="button">Вперёд →</button></div>
+          </details>
+        </div>
+
+        <div id="promocodes-section" class="admin-section">
+          <div class="admin-list-head"><div><p class="admin-kicker">Скачивание программы</p><h3 class="admin-section-title">Промокоды</h3></div><button id="promo-admin-refresh" class="btn admin-mini-btn" type="button">Обновить</button></div>
+          <p class="hint admin-help">Промокод даёт бесплатное скачивание программы. Лимит определяет, сколько раз его можно применить.</p>
+          <div class="admin-form-grid">
+            <label class="field"><span>Промокод</span><input id="promo-admin-code" type="text" maxlength="32" placeholder="Например: FREE2026"></label>
+            <label class="field"><span>Лимит использований</span><input id="promo-admin-limit" type="number" min="1" max="100000" value="1"></label>
+            <label class="field"><span>Пометка</span><input id="promo-admin-note" type="text" maxlength="200" placeholder="Для кого или для чего"></label>
+            <div class="admin-form-action"><button id="promo-admin-create" class="btn btn-primary" type="button">Создать промокод</button></div>
+          </div>
+          <p id="promo-admin-message" class="admin-message" role="status"></p>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Код</th><th>Использовано</th><th>Статус</th><th>Пометка</th><th>Действия</th></tr></thead><tbody id="promo-admin-rows"></tbody></table></div>
+        </div>
+
+        <div id="payments-section" class="admin-section admin-section-featured">
+          <div class="admin-list-head"><div><p class="admin-kicker">ЮKassa</p><h3 class="admin-section-title">Оплата и тарифы</h3></div><button id="payment-admin-refresh" class="btn admin-mini-btn">Обновить</button></div>
+          <div class="admin-stats-totals"><div class="admin-stat"><span>ЮKassa</span><strong id="ready-yookassa">—</strong></div><div class="admin-stat"><span>Режим</span><strong id="ready-mode">—</strong></div></div>
+          <label class="payment-toggle"><input id="payment-enabled" type="checkbox"> Принимать оплату на сайте</label>
+          <h3>Действующие пакеты</h3><p class="hint admin-help">Общая цена одинакова для возвратных и QR по номеру.</p>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Количество</th><th>Цена пакета</th></tr></thead><tbody id="package-price-rows"></tbody></table></div>
+          <div class="admin-list-head"><h3>Последние заказы</h3></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Дата</th><th>Пакет</th><th>Сумма</th><th>Статус</th><th>Код</th><th>Действия</th></tr></thead><tbody id="payment-order-rows"></tbody></table></div>
+        </div>
+
+        <div id="stats-section" class="admin-section">
         <div class="admin-list-head">
           <h3 class="admin-subtitle">Статистика</h3>
           <button id="stats-refresh-btn" class="btn admin-mini-btn" type="button">Обновить</button>
         </div>
         <div class="admin-stats-totals">
           <div class="admin-stat"><span>Посещений сайта всего</span><strong id="stats-site-total">—</strong></div>
+          <div class="admin-stat"><span>Уникальных посетителей всего</span><strong id="stats-unique-total">—</strong></div>
           <div class="admin-stat"><span>Запусков приложения всего</span><strong id="stats-app-total">—</strong></div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>Дата</th><th>Посещения сайта</th><th>Запуски приложения</th></tr></thead>
+            <thead><tr><th>Дата</th><th>Все посещения</th><th>Уникальные посетители</th><th>Запуски приложения</th></tr></thead>
             <tbody id="stats-rows"></tbody>
           </table>
         </div>
+        </div>
 
-        <hr class="admin-sep">
+        <div id="access-section" class="admin-section">
+        <h3 class="admin-subtitle">Коды доступа к генератору стикеров</h3>
+        <label class="field">
+          <span>Имя получателя</span>
+          <input type="text" id="sticker-key-name" maxlength="120" placeholder="Например: Иван">
+        </label>
+        <label class="field">
+          <span>Количество стикеров из диапазона</span>
+          <input type="number" id="sticker-key-range-limit" min="0" max="100000" value="10">
+        </label>
+        <label class="field">
+          <span>Количество генераций по номеру</span>
+          <input type="number" id="sticker-key-custom-limit" min="0" max="100000" value="10">
+        </label>
+        <label class="field"><span>QR коробок массово</span><input type="number" id="sticker-key-box-range-limit" min="0" max="100000" value="0"></label>
+        <label class="field"><span>QR коробок по номеру</span><input type="number" id="sticker-key-box-custom-limit" min="0" max="100000" value="0"></label>
+        <div class="actions">
+          <button id="sticker-key-create" class="btn btn-primary" type="button">Сгенерировать 6-значный код</button>
+        </div>
+        <div id="sticker-key-output" class="admin-out" hidden>
+          <span class="admin-out-value" id="sticker-key-value"></span>
+          <button id="sticker-key-copy" class="btn admin-mini-btn" type="button">Скопировать</button>
+        </div>
+        <div class="admin-list-head">
+          <h3 class="admin-subtitle">Выданные коды</h3>
+          <button id="sticker-key-refresh" class="btn admin-mini-btn" type="button">Обновить</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Код</th><th>Имя</th><th>Товары массово</th><th>Товары по номеру</th><th>Коробки массово</th><th>Коробки по номеру</th><th>Статус</th><th>Действия</th></tr></thead>
+            <tbody id="sticker-key-rows"></tbody>
+          </table>
+        </div>
+        </div>
+
+        <dialog id="sticker-key-dialog" class="admin-dialog">
+          <form method="dialog">
+            <div class="admin-list-head"><h3>Редактировать код доступа</h3><button class="admin-dialog-close" value="cancel" aria-label="Закрыть">×</button></div>
+            <input id="sticker-edit-id" type="hidden">
+            <label class="field"><span>Имя получателя</span><input id="sticker-edit-name" type="text" maxlength="120"></label>
+            <label class="field"><span>Лимит стикеров из диапазона</span><input id="sticker-edit-range" type="number" min="0" max="100000"></label>
+            <label class="field"><span>Лимит генераций по номеру</span><input id="sticker-edit-custom" type="number" min="0" max="100000"></label>
+            <label class="field"><span>QR коробок массово</span><input id="sticker-edit-box-range" type="number" min="0" max="100000"></label>
+            <label class="field"><span>QR коробок по номеру</span><input id="sticker-edit-box-custom" type="number" min="0" max="100000"></label>
+            <p id="sticker-edit-info" class="hint"></p>
+            <div class="actions"><button value="cancel" class="btn">Отмена</button><button id="sticker-edit-save" value="default" class="btn btn-primary">Сохранить</button></div>
+          </form>
+        </dialog>
+
+        <div id="program-section" class="admin-section">
         <h3 class="admin-subtitle">Создать ключ</h3>
         <label class="field">
           <span>Число итераций (лимит)</span>
@@ -74,7 +209,19 @@
           </table>
         </div>
 
-        <hr class="admin-sep">
+        </div>
+
+        <div id="cell-print-admin" class="admin-section admin-section-featured">
+          <div class="admin-list-head"><div><p class="admin-kicker">Отдельная программа</p><h3 class="admin-section-title">Печать ячеек</h3></div><button id="cp-refresh" class="btn admin-mini-btn">Обновить</button></div>
+          <h3>Выдать ключ вручную</h3><div class="admin-form-grid"><label class="field"><span>Срок</span><select id="cp-days"><option value="3">3 дня</option><option value="7">7 дней</option><option value="30" selected>30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></label><label class="field"><span>Устройства</span><select id="cp-devices"><option>1</option><option>2</option><option>3</option><option>5</option><option>10</option><option>20</option></select></label><label class="field"><span>Пометка</span><input id="cp-note" maxlength="200"></label><button id="cp-create" class="btn btn-primary">Создать ключ</button></div><p id="cp-message" class="admin-message"></p>
+          <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Ключ</th><th>Срок</th><th>Устройства</th><th>Окончание</th><th>Статус</th><th>Действия</th></tr></thead><tbody id="cp-rows"></tbody></table></div>
+          <details class="admin-details"><summary>Активированные устройства</summary><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>ID ключа</th><th>Устройство</th><th>Первая проверка</th><th>Последняя проверка</th><th>Действия</th></tr></thead><tbody id="cp-device-rows"></tbody></table></div></details>
+          <h3>Промокоды</h3><div class="admin-form-grid"><label class="field"><span>Код</span><input id="cp-promo-code" maxlength="32"></label><label class="field"><span>Скидка, %</span><input id="cp-promo-discount" type="number" min="1" max="100" value="10"></label><label class="field"><span>Область</span><select id="cp-promo-scope"><option value="all">Все покупки</option><option value="program">Программа</option><option value="license">Ключи</option></select></label><label class="field"><span>Лимит</span><input id="cp-promo-limit" type="number" min="1" value="1"></label><label class="field"><span>Действует до</span><input id="cp-promo-expiry" type="datetime-local"></label><button id="cp-promo-create" class="btn btn-primary">Создать промокод</button></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Код</th><th>Скидка</th><th>Область</th><th>Использовано</th><th>Действия</th></tr></thead><tbody id="cp-promo-rows"></tbody></table></div>
+          <h3>Объявление</h3><div class="admin-form-grid"><label class="field"><span>Текст</span><textarea id="cp-ann-text"></textarea></label><label class="field"><span>Ссылка</span><input id="cp-ann-url"></label><label class="field"><span>Уровень</span><select id="cp-ann-level"><option value="info">Информация</option><option value="warning">Предупреждение</option><option value="important">Важное</option></select></label><button id="cp-ann-create" class="btn btn-primary">Опубликовать</button></div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Текст</th><th>Уровень</th><th>Статус</th><th>Действия</th></tr></thead><tbody id="cp-ann-rows"></tbody></table></div>
+          <h3>Обновление</h3><div class="admin-form-grid"><label class="field"><span>Версия</span><input id="cp-release-version" value="1.0.0"></label><label class="field"><span>Минимальная версия</span><input id="cp-release-min" value="1.0.0"></label><label class="field"><span>Ссылка</span><input id="cp-release-url"></label><label class="field"><span>Изменения</span><textarea id="cp-release-notes"></textarea></label><label class="payment-toggle"><input id="cp-release-required" type="checkbox"> Обязательное</label><button id="cp-release-save" class="btn btn-primary">Сохранить релиз</button></div>
+        </div>
+
+        <div id="announcements-section" class="admin-section admin-section-featured">
         <h3 class="admin-subtitle">Объявление в программе</h3>
         <p class="hint">Появится баннером в программе «Подбор кодов» у всех пользователей при следующем запуске.</p>
         <label class="field">
@@ -103,10 +250,19 @@
             <tbody id="msg-rows"></tbody>
           </table>
         </div>
+        </div>
       </div>
     </section>
   </main>
 
   <script src="../js/admin.js"></script>
+  <script src="../js/sticker-admin.js"></script>
+  <script src="../js/sticker-pool-admin.js"></script>
+  <script src="../js/box-pool-admin.js"></script>
+  <script src="../js/payment-admin.js"></script>
+  <script src="../js/promo-admin.js"></script>
+  <script src="../js/admin-tabs.js"></script>
+  <script src="../js/admin-unique-stats.js"></script>
+  <script src="../js/cell-print-admin.js"></script>
 </body>
 </html>

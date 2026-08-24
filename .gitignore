@@ -14,3 +14,24 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+.vercel
+.env*
+
+# Локальные приватные исходники, архивы и материалы на ревизию
+/_local-only/
+/.deploy-*/
+/.claude/
+/.agents/
+/*.log
+/synthetic_qr_lab_output/
+/scripts/
+
+# Бинарные релизы: в Git остаются только production-файлы
+/downloads/*
+!/downloads/version.json
+!/downloads/Подбор кодов setup 1.3.2.exe
+
+# Локальные эксперименты и вспомогательные файлы
+/image.png
+/wb-rating-client-id.user.js

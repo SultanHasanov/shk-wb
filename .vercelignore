@@ -1,0 +1,20 @@
+.agents/
+_local-only/
+.claude/
+.git/
+.deploy-*/
+*.log
+.env*
+__pycache__/
+scripts/
+synthetic_qr_lab_output/
+wb-rating-client-id.user.js
+image.png
+downloads/*
+account.html
+api/account.js
+api/_user-auth.js
+js/account.js
+supabase/migrations/20260824_user_accounts.sql
+!downloads/version.json
+!downloads/Подбор кодов setup 1.3.2.exe

@@ -3,109 +3,230 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex">
-  <title>Технические работы — Генератор стикеров Wildberries</title>
-  <link rel="icon" href="images/favicon.svg" type="image/svg+xml">
-  <style>
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-      background: #f4f4f8;
-      color: #1d1d27;
-    }
-
-    .card {
-      width: 100%;
-      max-width: 520px;
-      background: #fff;
-      border: 1px solid #e6e6ee;
-      border-radius: 16px;
-      padding: 40px 32px;
-      text-align: center;
-      box-shadow: 0 8px 30px rgba(29, 29, 39, .06);
-    }
-
-    .logo {
-      font-weight: 800;
-      font-size: 34px;
-      color: #cb11ab;
-      letter-spacing: -1px;
-    }
-
-    h1 {
-      margin: 20px 0 12px;
-      font-size: 24px;
-      font-weight: 700;
-    }
-
-    p {
-      margin: 0 0 8px;
-      font-size: 16px;
-      line-height: 1.5;
-      color: #55555f;
-    }
-
-    .links {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 12px;
-      margin-top: 24px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 20px;
-      border-radius: 10px;
-      color: #fff;
-      font-weight: 600;
-      font-size: 15px;
-      text-decoration: none;
-    }
-
-    .btn-wa { background: #25D366; }
-    .btn-wa:hover { background: #1eb955; }
-
-    .btn-tg { background: #229ED9; }
-    .btn-tg:hover { background: #1b86ba; }
-
-    @media (max-width: 480px) {
-      body { padding: 16px; }
-      .card { padding: 32px 20px; }
-      h1 { font-size: 21px; }
-    }
-  </style>
+  <title>Генератор ШК ВБ — возвратные стикеры онлайн</title>
+  <meta name="description" content="Создавайте возвратные ШК и стикеры ВБ онлайн. Генерация по номеру, предпросмотр, скачивание PDF и печать на обычном или термопринтере.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://shk-wb.vercel.app/">
+  <link rel="icon" href="/images/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:site_name" content="Генератор стикеров">
+  <meta property="og:title" content="Генератор ШК ВБ — возвратные стикеры онлайн">
+  <meta property="og:description" content="Возвратные ШК и стикеры Wildberries: генерация онлайн, готовый PDF и печать на термопринтере.">
+  <meta property="og:url" content="https://shk-wb.vercel.app/">
+  <meta property="og:image" content="https://shk-wb.vercel.app/images/og-generator-v3.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1728">
+  <meta property="og:image:height" content="910">
+  <meta property="og:image:alt" content="Генератор QR-кодов и стикеров — создание и скачивание готовых стикеров">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://shk-wb.vercel.app/images/og-generator-v3.png">
+  <meta name="twitter:image:alt" content="Генератор QR-кодов и стикеров">
+  <link rel="stylesheet" href="/css/style.css">
+  <script>try{if(localStorage.getItem('payments_enabled')==='0')document.documentElement.className+=' payments-off';}catch(e){}</script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {"@type":"WebSite","@id":"https://shk-wb.vercel.app/#website","url":"https://shk-wb.vercel.app/","name":"Генератор ШК и возвратных стикеров ВБ","inLanguage":"ru-RU"},
+      {"@type":"WebApplication","@id":"https://shk-wb.vercel.app/#generator","name":"Генератор ШК ВБ и возвратных стикеров","url":"https://shk-wb.vercel.app/","applicationCategory":"UtilitiesApplication","operatingSystem":"Любая ОС с современным браузером","browserRequirements":"Требуется JavaScript","inLanguage":"ru-RU","description":"Онлайн-генератор возвратных ШК и стикеров Wildberries с экспортом в PDF и печатью."}
+    ]
+  }
+  </script>
+  <script src="/js/metrika.js" defer></script><script src="/js/cookie-notice.js" defer></script><script src="/js/nav.js" defer></script>
 </head>
 <body>
-  <main class="card">
-    <div class="logo">WB</div>
-    <h1>Идут технические работы</h1>
-    <p>Сайт временно недоступен. Скоро вернёмся.</p>
-    <div class="links">
-      <a class="btn btn-wa" href="https://wa.me/79667283100?text=Здравствуйте!%20Вопрос%20по%20сайту."
-         target="_blank" rel="noopener">
-        <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">
-          <path fill="#fff" d="M16 .5C7.4.5.5 7.4.5 16c0 2.8.8 5.5 2.2 7.9L.5 31.5l7.8-2.1c2.3 1.3 4.9 1.9 7.7 1.9 8.6 0 15.5-6.9 15.5-15.5S24.6.5 16 .5zm0 28c-2.5 0-4.9-.7-7-1.9l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2.1-2-4.5-2-7 0-7.3 5.9-13.2 13.2-13.2S29.2 8.7 29.2 16 23.3 28.5 16 28.5z"/>
-          <path fill="#fff" d="M24.1 19.6c-.4-.2-2.4-1.2-2.8-1.3-.4-.1-.7-.2-1 .2-.3.4-1.1 1.3-1.3 1.6-.2.2-.5.3-.9.1-2.3-1.1-3.8-2-5.3-4.6-.4-.7.4-.6 1.1-2 .1-.2.1-.5 0-.7-.1-.2-1-2.4-1.4-3.3-.4-.9-.7-.7-1-.8h-.8c-.3 0-.7.1-1.1.5-.4.4-1.4 1.4-1.4 3.4s1.5 4 1.7 4.2c.2.3 2.9 4.5 7.1 6.3 2.6 1.1 3.6 1.2 4.9 1 .8-.1 2.4-1 2.8-2 .3-1 .3-1.8.2-2-.1-.2-.4-.3-.8-.5z"/>
-        </svg>
-        <span>WhatsApp</span>
-      </a>
-      <a class="btn btn-tg" href="https://t.me/roma_denosov" target="_blank" rel="noopener">
-        <svg viewBox="0 0 32 32" width="20" height="20" aria-hidden="true">
-          <path fill="#fff" d="M26.6 5.7 3.4 14.6c-1.4.6-1.4 1.4-.2 1.7l5.9 1.9 2.3 7c.3.8.2 1.1 1 1.1.6 0 .9-.3 1.3-.7l2.9-2.8 6 4.5c1.1.6 1.9.3 2.2-1L28.5 7.6c.4-1.7-.7-2.4-1.9-1.9zM11 18.2l12.9-8.2c.6-.4 1.2-.2.7.2l-11 10-.4 4.5-2.2-6.5z"/>
-        </svg>
-        <span>Telegram</span>
-      </a>
+  <noscript><div><img src="https://mc.yandex.ru/watch/111723088" style="position:absolute;left:-9999px" alt=""></div></noscript>
+  <aside id="site-announcement" class="site-announcement" aria-live="polite" hidden>
+    <div class="site-announcement-inner"><span id="site-announcement-text"></span><a id="site-announcement-link" class="site-announcement-link" href="#" hidden></a><button id="site-announcement-close" class="site-announcement-close" type="button" aria-label="Закрыть объявление">&times;</button></div>
+  </aside>
+  <header class="topbar">
+    <a class="logo logo-link" href="/" aria-label="Генератор стикеров — главная">WB</a>
+    <span class="header-name">Генератор QR-кодов и стикеров</span>
+    <button class="nav-toggle" type="button" aria-label="Меню" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
+    <nav id="site-nav" class="site-nav" aria-label="Основная навигация">
+      <a class="active" href="/">Генератор</a>
+      <a href="/vozvratnye-stikery-wb">Возвратные стикеры</a>
+      <a href="/program">Скачать программу</a>
+      <a href="/cell-print">Печать ячеек</a>
+      <a class="tg-link" href="https://t.me/wbtools_ru" target="_blank" rel="noopener"><img class="tg-ava" src="/images/telegram-wb-tools-avatar.png" alt="Аватар канала WB Tools" width="26" height="26" loading="lazy"><svg class="tg-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.04 15.47 8.7 20.2c.48 0 .69-.21.94-.46l2.26-2.16 4.68 3.43c.86.48 1.48.23 1.71-.79l3.1-14.54c.31-1.28-.46-1.78-1.3-1.47L1.6 9.9c-1.25.48-1.23 1.17-.21 1.48l4.66 1.45L17.2 6.5c.5-.31.96-.14.58.19z"/></svg>Telegram-канал</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Онлайн-инструмент</p>
+      <h1>Генератор <em>возвратных ШК</em> и стикеров ВБ</h1>
+      <p class="hero-copy">Создавайте возвратные стикеры Wildberries или QR-коды по номеру ШК онлайн. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или термопринтер. Первый стикер — <strong>бесплатно</strong>, дальше <strong>от 0,27 ₽</strong> за штуку.</p>
+      <div class="trust-row"><span>Первый стикер бесплатно</span><span>Оплата через ЮKassa</span><span>Готовый PDF для печати</span><span>Без регистрации</span></div>
+    </section>
+
+    <div class="layout generator-layout">
+      <section class="panel" aria-labelledby="generator-heading">
+        <h2 id="generator-heading" class="panel-title">Создать стикеры</h2>
+        <div class="mode-tabs generator-main-tabs" role="tablist" aria-label="Тип этикеток">
+          <button id="tab-products" class="mode-tab active generator-visual-tab" type="button" role="tab" aria-label="Стикеры для товаров" title="Стикеры для товаров"><img src="/images/tab-products.png" alt="" width="160" height="160"></button>
+          <button id="tab-boxes" class="mode-tab generator-visual-tab" type="button" role="tab" aria-label="QR-коды для возвратных коробок" title="QR-коды для возвратных коробок"><img src="/images/tab-return-boxes.png" alt="" width="160" height="160"></button>
+        </div>
+        <div class="mode-tabs generator-subtabs" role="tablist" aria-label="Способ генерации">
+          <button id="tab-range" class="mode-tab active" type="button" role="tab" aria-controls="range-panel">Массово</button>
+          <button id="tab-custom" class="mode-tab" type="button" role="tab" aria-controls="custom-panel">По номеру</button>
+        </div>
+        <div id="access-balance" class="access-balance" hidden>
+          <span id="access-balance-title">Лимит ключа</span>
+          <strong><span id="access-used">0</span> использовано &middot; <span id="access-remaining">0</span> осталось</strong>
+        </div>
+        <div id="range-panel">
+          <label class="field"><span>Количество стикеров</span><input type="number" id="quantity" inputmode="numeric" min="1" max="500" placeholder="Например: 200"></label>
+          <div class="actions"><button id="generate" class="btn btn-primary" type="button">Сгенерировать</button></div>
+          <p class="hint">Первый возвратный стикер можно создать бесплатно. Каждый номер выдаётся только один раз.</p>
+        </div>
+        <div id="custom-panel" hidden>
+          <label class="field"><span>Номер ШК</span><input type="text" id="custom-code" inputmode="numeric" minlength="11" maxlength="11" pattern="[0-9]{11}" placeholder="Например: 59874145000"></label>
+          <div class="actions"><button id="custom-generate" class="btn btn-primary" type="button">Сгенерировать QR</button></div>
+          <p class="hint">По введённому номеру один QR можно создать бесплатно.</p>
+        </div>
+        <div id="box-range-panel" hidden>
+          <label class="field"><span>Количество QR для коробок</span><input type="number" id="box-quantity" inputmode="numeric" min="1" max="500" placeholder="Например: 100"></label>
+          <label class="field"><span>Префикс</span><input type="text" id="box-prefix" value="TRBX" maxlength="12" autocomplete="off"></label>
+          <div class="actions"><button id="box-generate" class="btn btn-primary" type="button">Сгенерировать пачку</button></div>
+          <p class="hint">QR содержит обычный текст: префикс и номер, например TRBX5084472379.</p>
+        </div>
+        <div id="box-custom-panel" hidden>
+          <label class="field"><span>Код коробки</span><span class="prefixed-code-field"><input type="text" id="box-custom-prefix" value="TRBX" maxlength="12" aria-label="Префикс"><input type="text" id="box-custom-code" inputmode="numeric" maxlength="12" placeholder="5084472379" aria-label="Номер коробки"></span></label>
+          <div class="actions"><button id="box-custom-generate" class="btn btn-primary" type="button">Сгенерировать QR коробки</button></div>
+          <p class="hint">Префикс TRBX уже подставлен, но его можно изменить.</p>
+        </div>
+        <p class="error" id="error" role="alert"></p>
+        <div id="thermal-print-settings" class="thermal-print-settings" hidden>
+          <label class="field"><span>Размер этикетки</span><select id="thermal-label-size"><option value="40x30">40 × 30 мм</option><option value="50x30">50 × 30 мм</option><option value="50x40">50 × 40 мм</option><option value="58x40">58 × 40 мм</option><option value="75x58">75 × 58 мм</option><option value="100x75">100 × 75 мм</option><option value="custom">Свой размер</option></select></label>
+          <div id="thermal-custom-size" class="thermal-custom-size" hidden>
+            <label class="field"><span>Ширина, мм</span><input id="thermal-label-width" type="number" inputmode="decimal" min="15" max="112" step="0.1" value="50"></label>
+            <span class="thermal-size-separator" aria-hidden="true">×</span>
+            <label class="field"><span>Высота, мм</span><input id="thermal-label-height" type="number" inputmode="decimal" min="10" max="300" step="0.1" value="30"></label>
+          </div>
+          <label class="field"><span>Модель TSC для проверки</span><select id="thermal-printer-model"><option value="tdp225">TSC TDP-225 — до 52 мм</option><option value="te200">TSC TE200 — до 108 мм</option><option value="other">Другой принтер</option></select></label>
+          <p id="thermal-warning" class="thermal-warning" role="status"></p>
+          <p class="thermal-help">В окне печати выберите TSC, масштаб 100%, поля «Нет», отключите колонтитулы и укажите такой же размер бумаги в драйвере.</p>
+        </div>
+        <div class="actions print-actions"><a id="download" class="btn" href="#" hidden>Скачать PDF A4</a><button id="share-sticker" class="btn icon-btn" type="button" title="Поделиться стикером" aria-label="Поделиться стикером" hidden><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></svg></button><button id="print-regular" class="btn" type="button" hidden>Обычная печать</button><button id="print-thermal" class="btn btn-primary" type="button" hidden>Печать на термопринтере</button><button id="print-niimbot" class="btn btn-primary" type="button" hidden>Печать на NIIMBOT</button></div>
+        <p id="print-status" class="hint" role="status"></p>
+        <div id="access-panel" class="access-panel" hidden>
+          <p id="access-intro">Бесплатный стикер уже создан. Введите шестизначный ключ доступа или купите пакет — код придёт сразу после оплаты.</p>
+          <label class="field"><span>Шестизначный ключ</span><input id="access-code" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" autocomplete="one-time-code"></label>
+          <p id="access-status" class="access-status" role="status" aria-live="polite"></p>
+          <button id="open-payment" class="btn btn-primary" type="button" hidden>Купить генерации</button>
+        </div>
+        <div id="access-success" class="access-success" hidden><strong>Ключ активирован</strong><span>Начните генерировать.</span></div>
+      </section>
+      <section class="preview sticker-grid" id="sticker-preview" aria-live="polite">
+        <div class="empty-state">
+          <figure class="sticker-example">
+            <figcaption>Пример товарного стикера</figcaption>
+            <img src="/api/stickers/image?example=1&v=4" alt="Пример готового стикера для товара" width="330" height="407">
+          </figure>
+          <p class="empty-state-title">Здесь появятся ваши стикеры</p>
+          <p class="empty-state-copy">Укажите количество слева и нажмите «Сгенерировать». Первый стикер бесплатный — можно проверить качество печати до оплаты.</p>
+          <a class="empty-state-link" href="#payment-section">Пакеты от 0,27 ₽ за стикер</a>
+        </div>
+      </section>
     </div>
+
+
+    <section id="payment-section" class="payment-section" aria-labelledby="payment-title">
+      <div class="purchase-targets" role="tablist" aria-label="Что покупаете">
+        <button id="buy-target-product" class="purchase-target active" type="button" data-target="product"><img src="/images/tab-products.png" width="120" height="120" alt=""><strong>Стикеры для товаров</strong></button>
+        <button id="buy-target-box" class="purchase-target" type="button" data-target="box"><img src="/images/tab-return-boxes.png" width="120" height="120" alt=""><strong>QR для возвратных коробок</strong></button>
+      </div>
+      <div class="payment-head">
+        <p class="eyebrow">Оплата ЮKassa</p>
+        <h2 id="payment-title">Пакеты генераций</h2>
+        <p>Ключ доступа приходит сразу после оплаты и подставляется в генератор автоматически. Регистрация не нужна.</p>
+      </div>
+      <div class="pkg-grid" id="pkg-grid">
+        <button class="pkg-card" type="button" data-pkg="50"><span class="pkg-qty">50 стикеров</span><strong class="pkg-price" data-pkg-price>—</strong><span class="pkg-unit" data-pkg-unit></span></button>
+        <button class="pkg-card" type="button" data-pkg="100"><span class="pkg-qty">100 стикеров</span><strong class="pkg-price" data-pkg-price>—</strong><span class="pkg-unit" data-pkg-unit></span></button>
+        <button class="pkg-card is-best" type="button" data-pkg="200"><span class="pkg-badge">Чаще всего берут</span><span class="pkg-qty">200 стикеров</span><strong class="pkg-price" data-pkg-price>—</strong><span class="pkg-unit" data-pkg-unit></span></button>
+        <button class="pkg-card" type="button" data-pkg="500"><span class="pkg-qty">500 стикеров</span><strong class="pkg-price" data-pkg-price>—</strong><span class="pkg-unit" data-pkg-unit></span></button>
+      </div>
+      <div class="payment-card">
+        <label class="field"><span id="buy-range-label">Товарные стикеры массово</span><select id="buy-range"><option value="0">Не нужны</option></select></label>
+        <label class="field"><span id="buy-custom-label">Товарные стикеры по номеру</span><select id="buy-custom"><option value="0">Не нужны</option></select></label>
+        <div id="payment-breakdown" class="payment-breakdown"></div>
+        <label class="payment-consent"><input id="buy-consent" type="checkbox"> <span>Принимаю <a href="/offer" target="_blank">оферту</a> и <a href="/privacy" target="_blank">политику конфиденциальности</a>.</span></label>
+        <button id="buy-submit" class="btn btn-primary" type="button">Перейти к оплате</button>
+        <p id="payment-error" class="error"></p>
+        <p class="payment-note">Оплата картой через ЮKassa. Ключ действует до полного использования лимита и не сгорает по времени. Его можно передать другому человеку — он не привязан к аккаунту.</p>
+      </div>
+    </section>
+
+    <section id="user-history" class="history-section" aria-labelledby="history-title" hidden>
+      <div class="history-head"><div><p class="eyebrow">Сохранено в этом браузере</p><h2 id="history-title">Моя история</h2></div><button id="history-clear" class="btn" type="button">Очистить историю</button></div>
+      <div id="history-package"></div><div id="history-batches" class="history-batches"></div><p class="support-note">По любым вопросам пишите в Telegram: <a href="https://t.me/roma_denosov" target="_blank" rel="noopener">@roma_denosov</a></p>
+    </section>
+
+    <section class="info-band" aria-labelledby="how-heading">
+      <div class="info-band-main">
+        <p class="eyebrow">Быстрый результат</p>
+        <h2 id="how-heading">Как создать QR-код или пачку стикеров</h2>
+        <ol class="steps">
+          <li><strong>Выберите режим.</strong> «Возвратные» берут уникальные номера из диапазона, «По номеру» создаёт QR для указанного ШК.</li>
+          <li><strong>Укажите данные.</strong> Введите количество или номер и запустите серверную генерацию.</li>
+          <li><strong>Скачайте результат.</strong> Проверьте стикеры в предпросмотре и сохраните PDF либо SVG.</li>
+        </ol>
+        <ul class="info-facts">
+          <li><strong>Генерация на сервере.</strong> Алгоритм не загружается в браузер — страница получает готовое изображение.</li>
+          <li><strong>Массовая подготовка.</strong> До 500 уникальных стикеров за один запрос, всё объединяется в PDF.</li>
+          <li><strong>Печать где угодно.</strong> Обычный принтер, термопринтер TSC или NIIMBOT по Bluetooth.</li>
+        </ul>
+      </div>
+      <aside class="info-band-stats" aria-labelledby="public-stats-title">
+        <p class="eyebrow">Статистика сервиса</p>
+        <h3 id="public-stats-title">Уже сгенерировано</h3>
+        <div class="public-stats-grid" aria-live="polite">
+          <article class="public-stat-card"><strong id="return-sticker-count">—</strong><span>Возвратных стикеров</span></article>
+          <article class="public-stat-card"><strong id="custom-sticker-count">—</strong><span>QR по номеру</span></article>
+        </div>
+      </aside>
+    </section>
+
+    <section class="program-band" aria-labelledby="program-band-title">
+      <div>
+        <p class="eyebrow">Для Windows</p>
+        <h2 id="program-band-title">Работаете с кодами на компьютере?</h2>
+        <p>«Подбор кодов» ищет код клиента по номеру ячейки — 150 ₽ разово, списание только за найденный код. «Печать ячеек» печатает этикетку на термопринтере сразу после сканирования товара.</p>
+      </div>
+      <a class="btn btn-secondary" href="/program">Подбор кодов</a>
+      <a class="btn btn-secondary" href="/cell-print">Печать ячеек</a>
+    </section>
+
+    <section class="legal-band" aria-labelledby="product-title">
+      <div class="legal-col">
+        <p class="eyebrow">Цифровая услуга</p>
+        <h2 id="product-title">Пакет генераций QR-кодов</h2>
+        <p>После оплаты покупатель получает шестизначный код доступа к онлайн-генератору. Пример заказа: 50 возвратных (23 ₽) + 20 QR по номеру (12 ₽) — итого 35 ₽. Доступ действует до полного использования лимита.</p>
+        <h3>Как получить заказ</h3>
+        <ol class="delivery-steps">
+          <li>Выберите пакет генераций.</li>
+          <li>Оплатите заказ через ЮKassa.</li>
+          <li>Сразу после подтверждения оплаты шестизначный код появится на сайте и сохранится в браузере.</li>
+          <li>Код автоматически подставится в генератор. Физическая доставка не требуется — услуга предоставляется полностью онлайн.</li>
+        </ol>
+      </div>
+      <div class="legal-col">
+        <p class="eyebrow">Информация</p>
+        <h2 id="documents-title">Документы и реквизиты</h2>
+        <p>Информация о продавце, условиях оплаты и обработке персональных данных.</p>
+        <div class="documents-links"><a href="/contacts">Контакты и реквизиты</a><a href="/offer">Публичная оферта</a><a href="/privacy">Политика конфиденциальности</a></div>
+        <p class="disclaimer">Независимый онлайн-сервис. Не является официальным сервисом Wildberries.</p>
+      </div>
+    </section>
   </main>
+
+  <footer class="site-footer">
+    <span class="visits">Посещений: <strong id="visit-count">…</strong></span>
+    <span><a href="/offer">Оферта</a> · <a href="/privacy">Политика</a> · <a href="/contacts">Контакты</a></span><a class="telegram-link tg-link" href="https://t.me/wbtools_ru" target="_blank" rel="noopener"><img class="tg-ava" src="/images/telegram-wb-tools-avatar.png" alt="Аватар канала WB Tools" width="24" height="24" loading="lazy"><svg class="tg-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.04 15.47 8.7 20.2c.48 0 .69-.21.94-.46l2.26-2.16 4.68 3.43c.86.48 1.48.23 1.71-.79l3.1-14.54c.31-1.28-.46-1.78-1.3-1.47L1.6 9.9c-1.25.48-1.23 1.17-.21 1.48l4.66 1.45L17.2 6.5c.5-.31.96-.14.58.19z"/></svg>Новости: @wbtools_ru</a>
+  </footer>
+  <script src="/js/announcement-banner.js"></script><script src="/js/niimbot-web.js"></script><script src="/js/payment.js"></script><script src="/js/history.js"></script><script src="/js/sticker-stats.js"></script><script src="/js/app.js"></script><script src="/js/visits.js"></script>
 </body>
 </html>

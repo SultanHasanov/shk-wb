@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Печать ячеек — автопечать этикетки ячейки в ПВЗ WB</title>
+  <meta name="description" content="Программа печатает номер ячейки на термопринтере сразу после сканирования товара в WB_PVZ. Очередь, защита от дублей, статистика за день. Windows, NIIMBOT по Bluetooth.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="https://shk-wb.vercel.app/cell-print">
+  <link rel="icon" href="/images/favicon.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:site_name" content="SHK Tools">
+  <meta property="og:title" content="Печать ячеек — автопечать этикетки ячейки в ПВЗ WB">
+  <meta property="og:description" content="Этикетка с номером ячейки печатается автоматически после сканирования товара. Любой термопринтер с драйвером Windows, NIIMBOT по Bluetooth.">
+  <meta property="og:url" content="https://shk-wb.vercel.app/cell-print">
+  <meta property="og:image" content="https://shk-wb.vercel.app/images/screenshot-cell-print.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:alt" content="Окно программы «Печать ячеек» со статистикой и журналом операций">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://shk-wb.vercel.app/images/screenshot-cell-print.png">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://shk-wb.vercel.app/cell-print#app",
+        "name": "Печать ячеек",
+        "url": "https://shk-wb.vercel.app/cell-print",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Windows 7, Windows 10, Windows 11",
+        "softwareVersion": "1.0.0",
+        "inLanguage": "ru-RU",
+        "description": "Программа для ПВЗ: работает в фоне вместе с WB_PVZ, находит ячейку после сканирования товара и отправляет этикетку на термопринтер.",
+        "screenshot": "https://shk-wb.vercel.app/images/screenshot-cell-print.png",
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "RUB",
+          "lowPrice": "50",
+          "highPrice": "3500",
+          "offerCount": "20",
+          "availability": "https://schema.org/InStock",
+          "url": "https://shk-wb.vercel.app/cell-print"
+        }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type":"ListItem","position":1,"name":"Главная","item":"https://shk-wb.vercel.app/"},
+          {"@type":"ListItem","position":2,"name":"Печать ячеек","item":"https://shk-wb.vercel.app/cell-print"}
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {"@type":"Question","name":"Какой принтер подойдёт?","acceptedAnswer":{"@type":"Answer","text":"Любой USB, сетевой или Bluetooth-термопринтер, установленный в Windows и печатающий через системный драйвер. Для NIIMBOT есть отдельный прямой режим по Bluetooth."}},
+          {"@type":"Question","name":"Когда начинается срок действия ключа?","acceptedAnswer":{"@type":"Answer","text":"Срок отсчитывается с первой активации ключа в программе, а не с момента оплаты."}},
+          {"@type":"Question","name":"На скольких компьютерах можно работать?","acceptedAnswer":{"@type":"Answer","text":"Количество компьютеров выбирается при покупке: от одного до двадцати. Один ключ можно использовать на компьютерах разных ПВЗ."}},
+          {"@type":"Question","name":"Что будет, если ячейка не найдена?","acceptedAnswer":{"@type":"Answer","text":"Программа не печатает этикетку и увеличивает счётчик «Не найдено». Номер ячейки можно ввести вручную и напечатать отдельно."}},
+          {"@type":"Question","name":"Нужен ли постоянный интернет?","acceptedAnswer":{"@type":"Answer","text":"Интернет нужен для активации ключа и проверки обновлений. Поиск ячейки идёт по локальной базе на вашем компьютере."}},
+          {"@type":"Question","name":"Печатается ли одна и та же ячейка дважды?","acceptedAnswer":{"@type":"Answer","text":"Нет, в программе есть защита от дублей. При необходимости можно вручную повторить печать последней этикетки."}}
+        ]
+      }
+    ]
+  }
+  </script>
+  <script src="/js/metrika.js" defer></script><script src="/js/cookie-notice.js" defer></script><script src="/js/nav.js" defer></script>
+</head>
+<body>
+  <noscript><div><img src="https://mc.yandex.ru/watch/111723088" style="position:absolute;left:-9999px" alt=""></div></noscript>
+  <header class="topbar">
+    <a class="logo logo-link" href="/" aria-label="SHK Tools — главная">WB</a>
+    <a class="back-link" href="/" data-back aria-label="Назад"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12l6-6"/></svg><span>Назад</span></a>
+    <span class="header-name">Печать ячеек</span>
+    <button class="nav-toggle" type="button" aria-label="Меню" aria-expanded="false" aria-controls="site-nav"><span></span><span></span><span></span></button>
+    <nav id="site-nav" class="site-nav" aria-label="Основная навигация">
+      <a href="/">Генератор</a>
+      <a href="/vozvratnye-stikery-wb">Возвратные стикеры</a>
+      <a href="/program">Подбор кодов</a>
+      <a class="active" href="/cell-print">Печать ячеек</a>
+      <a class="tg-link" href="https://t.me/wbtools_ru" target="_blank" rel="noopener"><img class="tg-ava" src="/images/telegram-wb-tools-avatar.png" alt="Аватар канала WB Tools" width="26" height="26" loading="lazy"><svg class="tg-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.04 15.47 8.7 20.2c.48 0 .69-.21.94-.46l2.26-2.16 4.68 3.43c.86.48 1.48.23 1.71-.79l3.1-14.54c.31-1.28-.46-1.78-1.3-1.47L1.6 9.9c-1.25.48-1.23 1.17-.21 1.48l4.66 1.45L17.2 6.5c.5-.31.96-.14.58.19z"/></svg>Telegram-канал</a>
+    </nav>
+  </header>
+
+  <main class="product-page">
+    <div class="product-hero">
+      <div>
+        <p class="eyebrow">Версия 1.0 · Windows 7/10/11</p>
+        <h1>Печать номера ячейки автоматически при сканировании в WB_PVZ</h1>
+        <p class="product-lede">Программа работает в фоне рядом с WB_PVZ: ловит скан товара, находит ячейку в локальной базе и сразу отправляет этикетку на термопринтер. Сотруднику не нужно ничего вводить руками — <strong>отсканировал и забрал этикетку</strong>.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#buy">Выбрать ключ</a>
+          <a class="btn btn-secondary" href="/api/payments/download-cell-print" download>Скачать программу бесплатно</a>
+        </div>
+        <p class="hero-note">Без регистрации и оплаты за программу. Для автоматической печати нужен ключ активации.</p>
+        <div class="trust-row">
+          <span>Любой термопринтер с драйвером Windows</span>
+          <span>NIIMBOT напрямую по Bluetooth</span>
+          <span>Защита от повторной печати</span>
+          <span>Статистика хранится локально</span>
+        </div>
+        <figure class="shot-figure">
+          <img src="/images/screenshot-cell-print.png" alt="Окно программы «Печать ячеек»: рабочее состояние, очередь печати, счётчики за день и журнал последних операций" width="1835" height="1352" loading="lazy">
+          <figcaption>Рабочее окно: состояние фонового сканирования, счётчики за период и журнал последних операций</figcaption>
+        </figure>
+      </div>
+
+      <aside class="buy-card" id="buy">
+        <p class="eyebrow">Безлимитная печать</p>
+        <h2>Выберите ключ</h2>
+        <p class="buy-card-intro">Программа бесплатна. Вы платите только за срок работы и количество компьютеров.</p>
+        <div id="cell-options">
+          <label class="field"><span>Период</span><select id="cell-days">
+            <option value="7">1 неделя</option>
+            <option value="30" selected>1 месяц</option>
+            <option value="90">3 месяца</option>
+            <option value="180">6 месяцев</option>
+            <option value="365">1 год</option>
+          </select></label>
+          <label class="field"><span>Количество компьютеров</span><select id="cell-devices">
+            <optgroup label="Один ПВЗ">
+              <option value="1">1 компьютер</option>
+              <option value="2">2 компьютера</option>
+              <option value="3">3 компьютера</option>
+            </optgroup>
+            <optgroup label="Сеть ПВЗ">
+              <option value="5">5 компьютеров</option>
+              <option value="10">10 компьютеров</option>
+              <option value="20">20 компьютеров</option>
+            </optgroup>
+          </select></label>
+          <div id="device-discount" class="discount-badge" hidden></div>
+        </div>
+        <div class="cell-total"><span>Итого</span><strong id="cell-total">150 ₽</strong><del id="cell-old-total" hidden></del></div>
+        <div class="promo-box"><input id="cell-promo" type="text" maxlength="32" placeholder="Промокод (необязательно)" aria-label="Промокод"></div>
+        <label class="payment-consent"><input id="cell-consent" type="checkbox"> <span>Принимаю <a href="/offer" target="_blank">оферту</a> и <a href="/privacy" target="_blank">политику конфиденциальности</a>.</span></label>
+        <div class="actions"><button id="cell-buy" class="btn btn-primary" type="button">Купить</button></div>
+        <p id="cell-error" class="error" role="alert"></p>
+        <ul class="buy-includes"><li>Без ограничений по числу этикеток</li><li>Срок начинается при первой активации</li><li>Установщик и обновления включены</li></ul>
+        <p class="buy-secure">Платёж проходит на стороне ЮKassa — данные карты не попадают на сайт. Ключ появляется сразу после оплаты.</p>
+      </aside>
+    </div>
+
+    <section class="product-section proof-strip" aria-label="Главные преимущества">
+      <article><strong>0 ₽</strong><span>за скачивание программы</span></article>
+      <article><strong>Безлимит</strong><span>этикеток в каждом ключе</span></article>
+      <article><strong>3 шага</strong><span>скан → ячейка → печать</span></article>
+      <article><strong>Локально</strong><span>журнал и рабочие данные</span></article>
+    </section>
+
+    <section class="product-section demo-section" aria-labelledby="demo-title">
+      <div>
+        <p class="eyebrow">Посмотрите в деле</p>
+        <h2 id="demo-title">Вся операция занимает один привычный скан</h2>
+        <p>Сотрудник продолжает работать в WB_PVZ как обычно. «Печать ячеек» незаметно выполняет остальное в фоне.</p>
+      </div>
+      <div class="demo-flow" aria-label="Сценарий автоматической печати">
+        <div><span>1</span><strong>Скан товара</strong><small>в WB_PVZ</small></div><b aria-hidden="true">→</b>
+        <div><span>2</span><strong>Поиск ячейки</strong><small>в локальной базе</small></div><b aria-hidden="true">→</b>
+        <div><span>3</span><strong>Готовая этикетка</strong><small>на термопринтере</small></div>
+      </div>
+    </section>
+
+    <section class="product-section" aria-labelledby="how-title">
+      <p class="eyebrow">Как это работает</p>
+      <h2 id="how-title">Что происходит после сканирования товара</h2>
+      <ol class="steps">
+        <li><strong>Сотрудник сканирует товар в WB_PVZ.</strong> Порядок работы не меняется — программа просто работает рядом.</li>
+        <li><strong>Программа ловит скан в фоне.</strong> Находит номер ячейки в локальной базе на этом же компьютере.</li>
+        <li><strong>Этикетка уходит на принтер.</strong> Задание встаёт в очередь и печатается на выбранном термопринтере.</li>
+      </ol>
+      <p class="hint">Фоновое сканирование можно поставить на паузу в один клик — например, на время инвентаризации.</p>
+    </section>
+
+    <section class="product-section" aria-labelledby="inside-title">
+      <p class="eyebrow">Интерфейс</p>
+      <h2 id="inside-title">Что видно в программе</h2>
+      <p>Одно окно, в котором сразу понятно рабочее состояние, что напечатано за смену и где возникли проблемы.</p>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Поиск по ячейке</h3>
+          <p>Быстрый поиск по номеру ячейки: видно, что в ней лежит и к какому заказу это относится.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Режим сканера</h3>
+          <p>Работа со сканером штрихкодов: программа подхватывает скан и сразу подставляет его в поиск.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Рабочее состояние</h3>
+          <p>Крупная строка статуса «Готово — сканируйте товар в WB_PVZ», выбранный принтер и переключатель фонового сканирования с кнопкой «Пауза».</p>
+        </article>
+        <article class="feature-card">
+          <h3>Очередь печати</h3>
+          <p>Счётчик заданий в очереди. Задания не теряются, если принтер занят или временно недоступен.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Ручная печать и повтор</h3>
+          <p>Поле «Ячейка вручную» с кнопкой «Напечатать» и отдельная кнопка «Повторить последнюю» — если этикетка помялась или не пропечаталась.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Счётчики за период</h3>
+          <p>Отсканировано, напечатано, не найдено, ошибки и повторы — за сегодня или за выбранный период.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Журнал операций</h3>
+          <p>Последние операции с временем, номером ячейки, результатом и принтером — видно, что именно пошло не так.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Экспорт CSV</h3>
+          <p>Выгрузка статистики за выбранный период в CSV — для отчёта или разбора спорных ситуаций.</p>
+        </article>
+      </div>
+      <div class="compatibility-cta"><div><strong>Не уверены насчёт своей модели?</strong><span>Скачайте программу бесплатно или напишите нам название принтера — поможем проверить совместимость.</span></div><a class="btn btn-secondary" href="https://t.me/roma_denosov" target="_blank" rel="noopener">Проверить мой принтер</a></div>
+    </section>
+
+    <section class="product-section" aria-labelledby="printers-title">
+      <p class="eyebrow">Оборудование</p>
+      <h2 id="printers-title">Совместимость с принтерами</h2>
+      <p>Поддерживается любой USB, сетевой или Bluetooth-термопринтер, который установлен в Windows и печатает через системный драйвер — отдельных драйверов ставить не нужно. Для устройств NIIMBOT доступен прямой режим по Bluetooth, без установки принтера в систему.</p>
+      <div class="spec-table-wrap">
+        <table class="spec-table">
+          <tbody>
+            <tr><th scope="row">Через драйвер Windows</th><td>Любой термопринтер, который виден в списке принтеров системы: USB, сетевой или Bluetooth.</td></tr>
+            <tr><th scope="row">NIIMBOT</th><td>Отдельный прямой режим по Bluetooth для совместимых моделей.</td></tr>
+            <tr><th scope="row">Операционная система</th><td>Windows 7, 10 и 11.</td></tr>
+            <tr><th scope="row">Интернет</th><td>Нужен для активации ключа и проверки обновлений. Поиск ячейки идёт по локальной базе.</td></tr>
+            <tr><th scope="row">Данные</th><td>Статистика и журнал операций хранятся на вашем компьютере.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="product-section product-section-accent" aria-labelledby="pricing-title">
+      <p class="eyebrow">Тарифы</p>
+      <h2 id="pricing-title">Платите только за ключ</h2>
+      <p>Программа скачивается бесплатно. Каждый ключ включает неограниченное количество этикеток на выбранный период, обновления и помощь с настройкой.</p>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Никакой двойной оплаты</h3>
+          <p>Не нужно отдельно покупать программу: скачайте установщик и выберите только срок действия ключа.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Безлимит этикеток</h3>
+          <p>Мы не списываем виртуальные этикетки за каждую печать. В течение срока ключа печатайте столько, сколько нужно ПВЗ.</p>
+        </article>
+        <article class="feature-card">
+          <h3>От 1 до 5 компьютеров</h3>
+          <p>Один ключ может работать на нескольких рабочих местах. Для сети ПВЗ стоимость каждого компьютера ниже.</p>
+        </article>
+      </div>
+      <h3 class="price-table-title">Цены на ключи</h3>
+      <p>Это окончательная стоимость: доплачивать за программу или количество напечатанных этикеток не нужно. Нажмите на цену, чтобы выбрать тариф.</p>
+      <div class="price-table-wrap">
+        <table class="price-table">
+          <caption>Цена ключа «Печать ячеек» по периодам и количеству компьютеров, ₽</caption>
+          <thead>
+            <tr>
+              <th scope="col">Период</th>
+              <th scope="col">1 компьютер</th>
+              <th scope="col">2 компьютера <span class="price-off">−15%</span></th>
+              <th scope="col">3 компьютера <span class="price-off">−23%</span></th>
+              <th scope="col">5 компьютеров <span class="price-off">−30%</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">1 неделя</th>
+              <td><button type="button" class="price-cell" data-days="7" data-devices="1">50 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="7" data-devices="2">85 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="7" data-devices="3">115 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="7" data-devices="5">175 ₽</button></td>
+            </tr>
+            <tr>
+              <th scope="row">1 месяц</th>
+              <td><button type="button" class="price-cell" data-days="30" data-devices="1">150 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="30" data-devices="2">255 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="30" data-devices="3">345 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="30" data-devices="5">525 ₽</button></td>
+            </tr>
+            <tr>
+              <th scope="row">3 месяца</th>
+              <td><button type="button" class="price-cell" data-days="90" data-devices="1">350 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="90" data-devices="2">595 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="90" data-devices="3">805 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="90" data-devices="5">1225 ₽</button></td>
+            </tr>
+            <tr>
+              <th scope="row">6 месяцев</th>
+              <td><button type="button" class="price-cell" data-days="180" data-devices="1">600 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="180" data-devices="2">1020 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="180" data-devices="3">1380 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="180" data-devices="5">2100 ₽</button></td>
+            </tr>
+            <tr>
+              <th scope="row">1 год</th>
+              <td><button type="button" class="price-cell" data-days="365" data-devices="1">1000 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="365" data-devices="2">1700 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="365" data-devices="3">2300 ₽</button></td>
+              <td><button type="button" class="price-cell" data-days="365" data-devices="5">3500 ₽</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">Год на 5 компьютеров выходит в 700 ₽ за компьютер против 1000 ₽ при покупке по одному. Срок ключа начинается с первой активации, а не с даты оплаты.</p>
+      <div class="actions"><a class="btn btn-primary" href="#buy">Выбрать ключ</a><a class="btn btn-secondary" href="/api/payments/download-cell-print" download>Скачать бесплатно</a></div>
+    </section>
+
+    <section class="product-section network-section" aria-labelledby="network-title">
+      <div class="network-heading">
+        <div><p class="eyebrow">Для нескольких ПВЗ</p><h2 id="network-title">Один ключ на всю сеть</h2><p>Компьютеры можно распределить между любым количеством пунктов. Чем больше рабочих мест подключено, тем ниже цена каждого.</p></div>
+        <span class="network-badge">до −50% за компьютер</span>
+      </div>
+      <div class="network-price-grid">
+        <article><span>5 компьютеров</span><strong>3 500 ₽</strong><small>700 ₽ за компьютер в год</small><button type="button" class="btn btn-secondary network-select" data-days="365" data-devices="5">Выбрать</button></article>
+        <article class="recommended"><em>Для небольшой сети</em><span>10 компьютеров</span><strong>6 000 ₽</strong><small>600 ₽ за компьютер в год</small><button type="button" class="btn btn-primary network-select" data-days="365" data-devices="10">Выбрать</button></article>
+        <article><span>20 компьютеров</span><strong>10 000 ₽</strong><small>500 ₽ за компьютер в год</small><button type="button" class="btn btn-secondary network-select" data-days="365" data-devices="20">Выбрать</button></article>
+      </div>
+      <div class="network-custom"><div><strong>Более 20 компьютеров?</strong><span>Рассчитаем тариф для вашей сети и поможем подключить все пункты.</span></div><a class="btn btn-secondary" href="https://t.me/roma_denosov?text=Здравствуйте!%20Хочу%20подключить%20Печать%20ячеек%20для%20сети%20ПВЗ.%20Количество%20ПВЗ:%20__%20Компьютеров:%20__" target="_blank" rel="noopener">Получить предложение</a></div>
+    </section>
+
+    <section class="product-section" aria-labelledby="install-title">
+      <p class="eyebrow">Три шага</p>
+      <h2 id="install-title">Скачайте, настройте и активируйте</h2>
+      <ol class="steps">
+        <li><strong>Скачайте программу бесплатно.</strong> Обычный установщик Windows создаст ярлык на рабочем столе.</li>
+        <li><strong>Выберите принтер.</strong> Проверьте, что программа видит оборудование и локальную базу WB_PVZ.</li>
+        <li><strong>Купите и активируйте ключ.</strong> Он появится сразу после оплаты; срок начнётся только при первой активации.</li>
+      </ol>
+    </section>
+
+    <section class="product-section" aria-labelledby="guides-title">
+      <p class="eyebrow">Инструкции без лишнего</p>
+      <h2 id="guides-title">Отдельно для владельца и сотрудника</h2>
+      <div class="guide-grid">
+        <article><span>Для владельца ПВЗ</span><h3>Установка и настройка</h3><p>Установка программы, выбор принтера, активация ключа и проверка первой этикетки.</p><a href="#install-title">Открыть инструкцию</a></article>
+        <article><span>Для сотрудника</span><h3>Работа в смене</h3><p>Запустите программу, убедитесь в статусе «Готово» и сканируйте товары в WB_PVZ как обычно.</p><a href="#how-title">Открыть инструкцию</a></article>
+      </div>
+    </section>
+
+    <section class="product-section faq-section" aria-labelledby="faq-title">
+      <p class="eyebrow">Частые вопросы</p>
+      <h2 id="faq-title">О печати, ключах и оборудовании</h2>
+      <details open><summary>Какой принтер подойдёт?</summary><p>Любой USB, сетевой или Bluetooth-термопринтер, установленный в Windows и печатающий через системный драйвер. Для NIIMBOT есть отдельный прямой режим по Bluetooth.</p></details>
+      <details><summary>Нужно ли отдельно покупать программу?</summary><p>Нет. Программа скачивается бесплатно, вы платите только за ключ на выбранный период и количество компьютеров.</p></details>
+      <details><summary>Есть ли ограничение количества этикеток?</summary><p>Нет. Пока ключ активен, можно печатать любое количество этикеток.</p></details>
+      <details><summary>Когда начинается срок действия ключа?</summary><p>Срок отсчитывается с первой активации ключа в программе, а не с момента оплаты. Можно купить заранее.</p></details>
+      <details><summary>На скольких компьютерах можно работать?</summary><p>Готовые тарифы рассчитаны на 1, 2, 3, 5, 10 или 20 компьютеров. Один ключ можно распределить между разными ПВЗ. Для сети более чем из 20 компьютеров рассчитаем индивидуальный тариф.</p></details>
+      <details><summary>Что будет, если ячейка не найдена?</summary><p>Программа не печатает этикетку и увеличивает счётчик «Не найдено». Номер ячейки можно ввести вручную в поле «Ячейка вручную» и напечатать отдельно.</p></details>
+      <details><summary>Нужен ли постоянный интернет?</summary><p>Интернет нужен для активации ключа и проверки обновлений. Сам поиск ячейки идёт по локальной базе на вашем компьютере.</p></details>
+      <details><summary>Печатается ли одна и та же ячейка дважды?</summary><p>Нет, в программе есть защита от дублей. Если этикетка помялась, есть кнопка «Повторить последнюю».</p></details>
+      <details><summary>Можно ли выгрузить статистику?</summary><p>Да. Выберите период и нажмите «Экспорт CSV» — файл откроется в Excel или любом табличном редакторе.</p></details>
+      <details><summary>Куда писать, если что-то не работает?</summary><p>В Telegram <a href="https://t.me/roma_denosov" target="_blank" rel="noopener">@roma_denosov</a> — поможем с подключением принтера и активацией ключа.</p></details>
+    </section>
+
+    <section class="cross-band" aria-labelledby="cross-title">
+      <div>
+        <p class="eyebrow">Вторая программа</p>
+        <h2 id="cross-title">Нужен поиск кода клиента по ячейке?</h2>
+        <p>«Подбор кодов» находит код клиента по номеру ячейки, показывает товары заказа и отзывы ПВЗ. Разовая покупка за 150 ₽, списание только за найденный код.</p>
+      </div>
+      <a class="btn btn-secondary" href="/program">Смотреть «Подбор кодов»</a>
+    </section>
+
+    <section class="product-section" aria-labelledby="support-title">
+      <p class="eyebrow">Помощь</p>
+      <h2 id="support-title">Поддержка и документы</h2>
+      <p class="support-note">По любым вопросам пишите в Telegram: <a href="https://t.me/roma_denosov" target="_blank" rel="noopener">@roma_denosov</a></p>
+      <div class="documents-links"><a href="/contacts">Контакты и реквизиты</a><a href="/offer">Публичная оферта</a><a href="/privacy">Политика конфиденциальности</a></div>
+      <p class="disclaimer">Независимый сервис. Не является официальным сервисом Wildberries.</p>
+    </section>
+  </main>
+
+  <div class="buy-bar">
+    <div class="buy-bar-price"><strong>от 50 ₽</strong><span>программа бесплатно · печать безлимитно</span></div>
+    <a class="btn btn-primary" href="#buy">Выбрать тариф</a>
+  </div>
+
+  <footer class="site-footer">
+    <span class="visits">Посещений: <strong id="visit-count">…</strong></span>
+    <span><a href="/offer">Оферта</a> · <a href="/privacy">Политика</a> · <a href="/contacts">Контакты</a></span>
+    <a class="telegram-link tg-link" href="https://t.me/wbtools_ru" target="_blank" rel="noopener"><img class="tg-ava" src="/images/telegram-wb-tools-avatar.png" alt="Аватар канала WB Tools" width="24" height="24" loading="lazy"><svg class="tg-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9.04 15.47 8.7 20.2c.48 0 .69-.21.94-.46l2.26-2.16 4.68 3.43c.86.48 1.48.23 1.71-.79l3.1-14.54c.31-1.28-.46-1.78-1.3-1.47L1.6 9.9c-1.25.48-1.23 1.17-.21 1.48l4.66 1.45L17.2 6.5c.5-.31.96-.14.58.19z"/></svg>Новости: @wbtools_ru</a>
+  </footer>
+  <script src="/js/cell-print-payment.js"></script><script src="/js/visits.js"></script>
+</body>
+</html>
