@@ -157,6 +157,27 @@ module.exports = async function handler(req, res) {
       return res.status(201).json(config.fromDb(rows[0]));
     }
     if (req.method === 'PATCH' && id) {
+      let extra = null;
+      if (req.query.resource === 'cellLicense') {
+        const current = await supabaseFetch(`${config.table}?id=eq.${id}&select=duration_days,expires_at&limit=1`);
+        if (!current.length) return res.status(404).json({ error: 'Ключ не найден' });
+        if ('deviceLimit' in req.body) {
+          const limit = Number(req.body.deviceLimit);
+          if (![1,2,3,5,10,20].includes(limit)) return res.status(400).json({ error: 'Число устройств: 1, 2, 3, 5, 10 или 20' });
+          const used = await supabaseFetch(`cell_print_activations?license_id=eq.${id}&select=id`);
+          if (limit < used.length) return res.status(400).json({ error: `Ключ уже активирован на ${used.length} устр. — лимит меньше сделать нельзя` });
+        }
+        if ('extendDays' in req.body) {
+          const days = Number(req.body.extendDays);
+          if (!Number.isInteger(days) || days < 1 || days > 4000) return res.status(400).json({ error: 'Продление: от 1 до 4000 дней' });
+          const total = Number(current[0].duration_days) + days;
+          if (total > 4000) return res.status(400).json({ error: 'Суммарный срок ключа не может быть больше 4000 дней' });
+          extra = { duration_days: total };
+          // Неактивированному ключу двигать нечего: expires_at посчитается при первой активации.
+          // Активированный продлеваем от даты окончания, а уже просроченный — от сегодня.
+          if (current[0].expires_at) extra.expires_at = new Date(Math.max(Date.parse(current[0].expires_at), Date.now()) + days * 86400000).toISOString();
+        }
+      }
       if (req.query.resource === 'programPromo') {
         const validationError=validateProgramPromo(req.body||{},false);if(validationError)return res.status(400).json({error:validationError});
         if('limit' in req.body){const current=await supabaseFetch(`${config.table}?id=eq.${id}&select=used&limit=1`);if(!current.length)return res.status(404).json({error:'Промокод не найден'});if(Number(req.body.limit)<Number(current[0].used))return res.status(400).json({error:'Лимит не может быть меньше числа использований'});}
@@ -174,7 +195,7 @@ module.exports = async function handler(req, res) {
       const rows = await supabaseFetch(`${config.table}?id=eq.${id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(config.toDb(req.body || {})),
+        body: JSON.stringify({ ...config.toDb(req.body || {}), ...(extra || {}) }),
       });
       return res.status(200).json(config.fromDb(rows[0]));
     }
