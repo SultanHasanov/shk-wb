@@ -37,7 +37,12 @@
   var thermalPrinterModel = document.getElementById('thermal-printer-model');
   var thermalWarning = document.getElementById('thermal-warning');
   var printStatus = document.getElementById('print-status');
+  var printActions = download.parentNode;
   var printableImages = [];
+  var PREVIEW_PAGE_SIZE = 12;
+  var previewBatchStickers = [];
+  var previewVisibleCount = 0;
+  var previewCountBeforePrint = 0;
   var THERMAL_STORAGE_KEY = 'sticker_thermal_print_settings';
   var LEGACY_ACCESS_STORAGE_KEY = 'sticker_access_code';
   var PRODUCT_ACCESS_STORAGE_KEY = 'sticker_product_access_code';
@@ -61,6 +66,64 @@
     printRegular.hidden = !visible;
     printThermal.hidden = !visible;
     thermalSettings.hidden = !visible;
+  }
+
+  function createStickerCard(sticker) {
+    var figure = document.createElement('figure');
+    figure.className = 'sticker-card';
+    var image = document.createElement('img');
+    image.src = sticker.imageUrl;
+    image.alt = (productMode ? 'Возвратный стикер ' : 'QR коробки ') + sticker.code;
+    image.loading = 'lazy';
+    figure.appendChild(image);
+    return figure;
+  }
+
+  function placeResultControls(total) {
+    var toolbar = document.createElement('div');
+    toolbar.className = 'results-toolbar';
+    var summary = document.createElement('div');
+    summary.className = 'results-summary';
+    summary.textContent = total > 1
+      ? 'Готово: ' + total + (productMode ? ' стикеров' : ' QR-кодов')
+      : (productMode ? 'Стикер готов' : 'QR-код готов');
+    toolbar.appendChild(summary);
+    toolbar.appendChild(printActions);
+    toolbar.appendChild(printStatus);
+    preview.appendChild(toolbar);
+  }
+
+  function renderBatchPreview(count) {
+    preview.innerHTML = '';
+    previewVisibleCount = Math.min(count, previewBatchStickers.length);
+    placeResultControls(previewBatchStickers.length);
+    previewBatchStickers.slice(0, previewVisibleCount).forEach(function (sticker) {
+      preview.appendChild(createStickerCard(sticker));
+    });
+    if (previewVisibleCount < previewBatchStickers.length) {
+      var more = document.createElement('div');
+      more.className = 'preview-more';
+      var status = document.createElement('span');
+      status.textContent = 'Показано ' + previewVisibleCount + ' из ' + previewBatchStickers.length;
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn';
+      button.textContent = 'Показать ещё ' + Math.min(PREVIEW_PAGE_SIZE, previewBatchStickers.length - previewVisibleCount);
+      button.addEventListener('click', function () {
+        renderBatchPreview(previewVisibleCount + PREVIEW_PAGE_SIZE);
+      });
+      more.appendChild(status);
+      more.appendChild(button);
+      preview.appendChild(more);
+    }
+  }
+
+  function renderSinglePreview(figure) {
+    previewBatchStickers = [];
+    previewVisibleCount = 0;
+    preview.innerHTML = '';
+    placeResultControls(1);
+    preview.appendChild(figure);
   }
 
   function parseDecimal(value) {
@@ -293,19 +356,10 @@
   function showBatch(data) {
     customDownload = null;
     if (accessCode.value.trim()) rememberAccessCode();
-    preview.innerHTML = '';
     currentDesignHeight = data.variant === 'box' ? 900 : 740;
     printableImages = data.stickers.map(function (sticker) { return sticker.imageUrl; });
-    data.stickers.forEach(function (sticker) {
-      var figure = document.createElement('figure');
-      figure.className = 'sticker-card';
-      var image = document.createElement('img');
-      image.src = sticker.imageUrl;
-      image.alt = 'Возвратный стикер ' + sticker.code;
-      image.loading = 'lazy';
-      figure.appendChild(image);
-      preview.appendChild(figure);
-    });
+    previewBatchStickers = data.stickers.slice();
+    renderBatchPreview(PREVIEW_PAGE_SIZE);
     download.href = data.pdfUrl;
     download.removeAttribute('download');
     download.classList.remove('icon-btn');
@@ -345,8 +399,8 @@
     fetch('/api/stickers/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'box_custom',prefix:prefix,code:code,accessCode:accessCode.value.trim()})})
       .then(function(response){return response.json().then(function(body){if(!response.ok){handleAccessError(body);throw new Error(body.error||'Не удалось создать QR коробки');}return body;});})
       .then(function(data){
-        if(accessCode.value.trim())rememberAccessCode();preview.innerHTML='';currentDesignHeight=900;
-        var figure=document.createElement('figure');figure.className='sticker-card';var image=document.createElement('img');image.src=data.imageUrl;image.alt='QR коробки '+data.prefix+data.code;figure.appendChild(image);preview.appendChild(figure);
+        if(accessCode.value.trim())rememberAccessCode();currentDesignHeight=900;
+        var figure=document.createElement('figure');figure.className='sticker-card';var image=document.createElement('img');image.src=data.imageUrl;image.alt='QR коробки '+data.prefix+data.code;figure.appendChild(image);renderSinglePreview(figure);
         customDownload={imageUrl:data.imageUrl,code:data.prefix+data.code,height:900,box:true};download.href=data.imageUrl;download.download='box-qr-'+data.prefix+data.code+'.png';download.classList.add('icon-btn');download.title='Скачать PNG';download.setAttribute('aria-label','Скачать PNG');download.innerHTML='<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14"/></svg>';download.hidden=false;shareSticker.hidden=false;printableImages=[data.imageUrl];setPrintControlsVisible(true);updateAccessStatus(data.access);window.dispatchEvent(new CustomEvent('sticker:generated'));
       }).catch(function(reason){error.textContent=reason.message||'Ошибка связи с сервером.';}).then(function(){boxCustomGenerate.disabled=false;boxCustomGenerate.textContent='Сгенерировать QR коробки';});
   }
@@ -405,10 +459,9 @@
       });
     }).then(function (data) {
       if (accessCode.value.trim()) rememberAccessCode();
-      preview.innerHTML = '';
       var figure = document.createElement('figure'); figure.className = 'sticker-card';
       var image = document.createElement('img'); image.src = data.imageUrl; image.alt = 'Стикер ' + data.code;
-      figure.appendChild(image); preview.appendChild(figure);
+      figure.appendChild(image); renderSinglePreview(figure);
       customDownload = { imageUrl: data.imageUrl, code: data.code };
       download.href = data.imageUrl; download.download = 'wb-sticker-' + data.code + '.png';
       download.classList.add('icon-btn');
@@ -516,7 +569,19 @@
     if(accessCode.value.length<6){setAccessMessage(accessCode.value.length?'Введите все 6 цифр.':'','');return;}
     accessCheckTimer=setTimeout(loadAccessStatus,350);
   });
-  printRegular.addEventListener('click', function () { window.print(); });
+  printRegular.addEventListener('click', function () {
+    if (previewBatchStickers.length && previewVisibleCount < previewBatchStickers.length) {
+      previewCountBeforePrint = previewVisibleCount;
+      renderBatchPreview(previewBatchStickers.length);
+    }
+    window.print();
+  });
+  window.addEventListener('afterprint', function () {
+    if (!previewCountBeforePrint || !previewBatchStickers.length) return;
+    var count = previewCountBeforePrint;
+    previewCountBeforePrint = 0;
+    renderBatchPreview(count);
+  });
   printThermal.addEventListener('click', printOnThermalPrinter);
   thermalLabelSize.addEventListener('change', updateThermalSettings);
   thermalLabelWidth.addEventListener('input', updateThermalSettings);

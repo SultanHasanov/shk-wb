@@ -196,6 +196,12 @@ body::before {
 .sticker-card img { width: 100%; height: auto; display: block; }
 .sticker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .sticker-grid .sticker-card { padding: 10px; margin: 0; }
+.results-toolbar { grid-column: 1 / -1; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.results-summary { color: var(--ink); font-size: 15px; font-weight: 800; }
+.results-toolbar .print-actions { margin: 0; }
+.results-toolbar #print-status { margin: 0; }
+.preview-more { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--muted); font-size: 14px; }
+.preview-more .btn { flex: 0 1 260px; }
 .empty-state { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 24px 38px; border: 1px solid var(--border); border-radius: 18px; background: linear-gradient(180deg, var(--surface) 0%, var(--accent-soft) 100%); box-shadow: var(--shadow); color: var(--muted-2); text-align: center; }
 .empty-state-title { margin: 14px 0 0; color: var(--ink); font-size: 18px; font-weight: 700; }
 .empty-state-copy { max-width: 400px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
@@ -273,6 +279,8 @@ body::before {
   html, body { max-width: 100%; overflow-x: hidden; }
   .layout { grid-template-columns: 1fr; }
   .sticker-grid { grid-template-columns: 1fr; }
+  .preview-more { align-items: stretch; flex-direction: column; text-align: center; }
+  .preview-more .btn { flex-basis: auto; width: 100%; }
   .topbar { flex-wrap: wrap; }
   .hero { margin-top: 28px; }
   .info-band, .legal-band { grid-template-columns: 1fr; gap: 28px; }
@@ -331,6 +339,7 @@ body::before {
   .cookie-notice, .generator-layout > .panel { display: none !important; }
   body > main, .generator-layout { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important; }
   .sticker-grid { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; gap: 2mm !important; align-items: start; }
+  .results-toolbar, .preview-more { display: none !important; }
   .sticker-card { padding: 0 !important; margin: 0 !important; border: .2mm solid #ddd; border-radius: 0 !important; box-shadow: none !important; break-inside: avoid; page-break-inside: avoid; }
   .sticker-card img { width: 100% !important; height: auto !important; }
 }
