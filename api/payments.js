@@ -81,11 +81,11 @@ module.exports = async function handler(req, res) {
       if(order.status!=='succeeded'&&order.yookassa_payment_id){const payment=await yookassa(`payments/${encodeURIComponent(order.yookassa_payment_id)}`);if(payment.status==='succeeded'&&payment.paid===true){await supabaseFetch(`payment_orders?id=eq.${order.id}`,{method:'PATCH',body:JSON.stringify({status:'succeeded',paid_at:new Date().toISOString(),updated_at:new Date().toISOString()})});order.status='succeeded';}}
       if(order.status!=='succeeded')return res.status(403).end();
       const isCell=order.product_kind.startsWith('cell_print_');const installer=path.join(__dirname,'_private',isCell?'cell-print-installer.exe':'program-installer.exe');
-      const stat=fs.statSync(installer);res.setHeader('Content-Type','application/vnd.microsoft.portable-executable');res.setHeader('Content-Length',String(stat.size));res.setHeader('Content-Disposition',`attachment; filename="${isCell?'cell-print-1.0.9.exe':'program-windows-1.3.2.exe'}"`);res.setHeader('Cache-Control','private, no-store');return fs.createReadStream(installer).pipe(res);
+      const stat=fs.statSync(installer);res.setHeader('Content-Type','application/vnd.microsoft.portable-executable');res.setHeader('Content-Length',String(stat.size));res.setHeader('Content-Disposition',`attachment; filename="${isCell?'cell-print-1.0.10.exe':'program-windows-1.3.2.exe'}"`);res.setHeader('Cache-Control','private, no-store');return fs.createReadStream(installer).pipe(res);
     }
     if (action === 'download-cell-print' && req.method === 'GET') {
       const installer=path.join(__dirname,'_private','cell-print-installer.exe');
-      const stat=fs.statSync(installer);res.setHeader('Content-Type','application/vnd.microsoft.portable-executable');res.setHeader('Content-Length',String(stat.size));res.setHeader('Content-Disposition','attachment; filename="cell-print-1.0.9.exe"');res.setHeader('Cache-Control','no-store');return fs.createReadStream(installer).pipe(res);
+      const stat=fs.statSync(installer);res.setHeader('Content-Type','application/vnd.microsoft.portable-executable');res.setHeader('Content-Length',String(stat.size));res.setHeader('Content-Disposition','attachment; filename="cell-print-1.0.10.exe"');res.setHeader('Cache-Control','no-store');return fs.createReadStream(installer).pipe(res);
     }
     if (action === 'webhook' && req.method === 'POST') {
       const paymentId=String(req.body?.object?.id||''); if(!paymentId) return res.status(400).end();
