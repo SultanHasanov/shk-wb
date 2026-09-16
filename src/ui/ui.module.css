@@ -651,14 +651,15 @@
   color: var(--text-tertiary);
 }
 
-.priceTable td,
-.priceTable th {
+/* Правила идут раньше базовых .table th/td, поэтому им нужна специфичность выше. */
+.table.priceTable td,
+.table.priceTable th {
   text-align: center;
 }
 
-.priceRowHead {
+.table.priceTable .priceRowHead {
   position: static;
-  text-align: left !important;
+  text-align: left;
   background: var(--surface);
   color: var(--text);
   font-size: var(--fs-13);

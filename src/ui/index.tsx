@@ -650,10 +650,12 @@ export function Stat({
 
 /* ============ Table ============ */
 
-export function Table({ children, ...p }: TableHTMLAttributes<HTMLTableElement>) {
+export function Table({ children, className, ...p }: TableHTMLAttributes<HTMLTableElement>) {
   return (
     <div className={s.tableWrap}>
-      <table className={s.table} {...p}>
+      {/* Свой className дополняет базовый, а не заменяет: иначе таблица цен
+          теряла шапку, отступы и разделители. */}
+      <table className={className ? `${s.table} ${className}` : s.table} {...p}>
         {children}
       </table>
     </div>
