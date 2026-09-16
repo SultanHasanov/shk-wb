@@ -9,7 +9,8 @@ const HOME_KEYBOARD = {
   keyboard: [
     [{ text: '🏷 Стикеры для товаров' }, { text: '📦 QR для коробок' }],
     [{ text: '➕ Создать ШК' }, { text: '💳 Остаток' }],
-    [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }, { text: '🆘 Помощь' }],
+    [{ text: '👤 Аккаунт' }, { text: '🆘 Помощь' }],
+    [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -74,7 +75,18 @@ function quantityKeyboard() {
 }
 
 function miniAppKeyboard() {
-  return choiceKeyboard([[{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }], [{ text: 'Войти и привязать Telegram', web_app: { url: publicUrl('/login') } }]]);
+  return choiceKeyboard([
+    [{ text: 'У меня уже есть кабинет', web_app: { url: publicUrl('/telegram-account') } }],
+    [{ text: 'Создать кабинет через Telegram', web_app: { url: publicUrl('/login') } }],
+    [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
+  ]);
+}
+
+function accountKeyboard() {
+  return choiceKeyboard([
+    [{ text: 'Войти в другой кабинет', web_app: { url: publicUrl('/telegram-account') } }],
+    [{ text: 'Открыть кабинет', web_app: { url: publicUrl('/cabinet') } }],
+  ]);
 }
 
 async function sendLoginPrompt(from, chatId, text) {
@@ -200,6 +212,17 @@ async function showBalance(from, chatId) {
   await sendMessage(chatId, `<b>Ваш остаток</b>\n\n💳 В пакетах: <b>${paidRemaining}</b>${details ? `\n\n${details}` : ''}`, { reply_markup: HOME_KEYBOARD });
 }
 
+async function showAccount(from, chatId) {
+  const userId = await findUser(from.id);
+  if (!userId) {
+    await sendMessage(chatId, '<b>Аккаунт не подключён</b>\n\nЕсли вы уже покупали генерации на сайте, войдите в существующий кабинет.', { reply_markup: miniAppKeyboard() });
+    return;
+  }
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used`);
+  const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
+  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\nЧтобы использовать покупки из другого кабинета, войдите в него по электронной почте.`, { reply_markup: accountKeyboard() });
+}
+
 async function showHelp(chatId) {
   await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
 }
@@ -273,10 +296,12 @@ async function handleMessage(message) {
   }
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
   if (/^\/generate(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
+  if (/^\/account(?:@\w+)?$/i.test(text)) return showAccount(from, chatId);
   if (text === '➕ Создать ШК') return startGeneration(from, chatId);
   if (text === '🏷 Стикеры для товаров') return startForCategory(from, chatId, 'product');
   if (text === '📦 QR для коробок') return startForCategory(from, chatId, 'box');
   if (text === '💳 Остаток') return showBalance(from, chatId);
+  if (text === '👤 Аккаунт') return showAccount(from, chatId);
   if (text === '🆘 Помощь') return showHelp(chatId);
   const session = await getSession(from.id);
   if (!session) return sendMessage(chatId, 'Нажмите «Создать ШК».', { reply_markup: HOME_KEYBOARD });

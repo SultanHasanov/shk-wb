@@ -90,6 +90,22 @@ async function saveIdentity(userId, telegram) {
   });
 }
 
+async function relinkIdentity(userId, telegram) {
+  const result = await request('/rest/v1/rpc/relink_telegram_identity', {
+    method: 'POST',
+    body: JSON.stringify({ p_telegram_user_id: telegram.id, p_target_user_id: userId }),
+  });
+  const details = result || {};
+  await saveIdentity(userId, telegram);
+  if (details.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
+    // Связь уже перенесена транзакцией. Неудачное удаление оставит только
+    // недоступную пустую auth-запись и не откатит рабочий кабинет пользователя.
+    await request(`/auth/v1/admin/users/${details.sourceUserId}`, { method: 'DELETE' })
+      .catch(error => console.warn('Unable to delete empty Telegram account', error.message));
+  }
+  return details;
+}
+
 async function createTelegramUser(telegram) {
   const technicalEmail = `telegram-${telegram.id}@users.invalid`;
   const user = await request('/auth/v1/admin/users', {
@@ -161,6 +177,17 @@ module.exports = async function handler(req, res) {
       return json(res, 200, { linked: true });
     }
 
+    if (telegram.mode === 'relink') {
+      const user = await currentUser(req);
+      if (!user) return json(res, 401, { error: 'Сначала войдите в кабинет с покупкой' });
+      if (!user.email || user.email.endsWith('@users.invalid')) {
+        return json(res, 400, { error: 'Войдите по электронной почте в кабинет с покупкой' });
+      }
+      await relinkIdentity(user.id, telegram);
+      await notifyMiniAppAuthorized(telegram.id).catch(error => console.warn('Unable to notify relinked Telegram user', error.message));
+      return json(res, 200, { linked: true, relinked: true });
+    }
+
     let identity = await findIdentity(telegram.id);
     let account;
     if (identity) {
@@ -175,6 +202,15 @@ module.exports = async function handler(req, res) {
     return json(res, 200, { token_hash: tokenHash });
   } catch (error) {
     console.error('Telegram auth failed', error.message);
+    if (String(error.message).includes('TELEGRAM_ACCOUNT_NOT_EMPTY')) {
+      return json(res, 409, { error: 'В текущем Telegram-кабинете уже есть данные. Напишите в поддержку — мы безопасно объединим кабинеты.', code: 'TELEGRAM_ACCOUNT_NOT_EMPTY' });
+    }
+    if (String(error.message).includes('TARGET_ACCOUNT_HAS_TELEGRAM')) {
+      return json(res, 409, { error: 'К этому кабинету уже привязан другой Telegram', code: 'TARGET_ACCOUNT_HAS_TELEGRAM' });
+    }
+    if (String(error.message).includes('TARGET_ACCOUNT_')) {
+      return json(res, 400, { error: 'Войдите по электронной почте в подтверждённый кабинет', code: 'INVALID_TARGET_ACCOUNT' });
+    }
     return json(res, 500, { error: 'Не удалось выполнить вход через Telegram' });
   }
 };

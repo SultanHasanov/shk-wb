@@ -16,6 +16,7 @@ import { NotFoundPage } from '../pages/NotFoundPage';
 import { UiInventoryPage } from '../pages/UiInventoryPage';
 import { ReferralCapturePage } from '../pages/ReferralCapturePage';
 import { BotCheckoutPage } from '../pages/BotCheckoutPage';
+import { TelegramAccountPage } from '../pages/TelegramAccountPage';
 import { ScrollToHash } from './ScrollToHash';
 import { useMetrikaPageviews } from '../lib/metrika';
 
@@ -75,6 +76,7 @@ export function App() {
           <Route path="forgot-password" element={<AuthPage mode="forgot" />} />
           <Route path="reset-password" element={<ResetPasswordPage />} />
           <Route path="bot-checkout" element={<BotCheckoutPage />} />
+          <Route path="telegram-account" element={<TelegramAccountPage />} />
         </Route>
 
         {/* Кабинет — сайдбар, только для вошедших */}

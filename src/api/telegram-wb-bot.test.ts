@@ -28,7 +28,8 @@ describe('Telegram sticker generator bot', () => {
   it('строит абсолютные Mini App URL', () => {
     process.env.PUBLIC_APP_URL = 'https://example.test/';
     expect(bot.publicUrl('/login')).toBe('https://example.test/login');
-    expect(bot.HOME_KEYBOARD.keyboard[2][0].web_app.url).toMatch(/^https:\/\//);
+    expect(bot.HOME_KEYBOARD.keyboard[3][0].web_app.url).toMatch(/^https:\/\//);
+    expect(bot.HOME_KEYBOARD.keyboard.flat().some(button => button.text === '👤 Аккаунт')).toBe(true);
   });
 
   it('валидирует префикс коробки и экранирует HTML', () => {

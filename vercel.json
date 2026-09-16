@@ -58,6 +58,7 @@
     ,{ "source": "/cookie", "destination": "/cookie.html" }
     ,{ "source": "/payment-result", "destination": "/" }
     ,{ "source": "/bot-checkout", "destination": "/" }
+    ,{ "source": "/telegram-account", "destination": "/" }
     ,{ "source": "/login", "destination": "/" }
     ,{ "source": "/register", "destination": "/" }
     ,{ "source": "/forgot-password", "destination": "/" }
@@ -96,7 +97,7 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
-      "source": "/:section(cabinet|login|register|forgot-password|reset-password|payment-result|r)/:path*",
+      "source": "/:section(cabinet|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r)/:path*",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]
