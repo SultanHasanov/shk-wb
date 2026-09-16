@@ -213,7 +213,10 @@ module.exports = async function handler(req, res) {
       if (!existing || existing.user_id === user.id) {
         return json(res, 200, {
           action: 'relink', targetEmail: maskedEmail(user.email),
-          summary: { orders: 0, history: 0, licenses: 0, codes: 0, generations: 0 },
+          summary: {
+            orders: 0, history: 0, licenses: 0, codes: 0, generations: 0,
+            referralBalanceKopecks: 0, referralOperations: 0, referralWithdrawals: 0, invitedUsers: 0,
+          },
         });
       }
       const source = await request(`/auth/v1/admin/users/${existing.user_id}`);
@@ -221,11 +224,7 @@ module.exports = async function handler(req, res) {
         return json(res, 409, { error: 'Текущий кабинет имеет собственный вход по почте. Для объединения обратитесь в поддержку.', code: 'SOURCE_ACCOUNT_NOT_TECHNICAL' });
       }
       const summary = await accountMergePreview(existing.user_id);
-      if (summary.financialConflict) {
-        return json(res, 409, { error: 'В текущем кабинете есть реферальные деньги или выплаты. Такое объединение выполнит поддержка.', code: 'TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT' });
-      }
-      const { financialConflict, ...publicSummary } = summary;
-      return json(res, 200, { action: 'merge', targetEmail: maskedEmail(user.email), summary: publicSummary });
+      return json(res, 200, { action: 'merge', targetEmail: maskedEmail(user.email), summary });
     }
 
     if (telegram.mode === 'link') {

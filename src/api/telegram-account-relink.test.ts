@@ -10,6 +10,10 @@ const mergeMigration = readFileSync(
   resolve(process.cwd(), 'supabase/migrations/20260916220000_merge_telegram_accounts.sql'),
   'utf8',
 );
+const referralMergeMigration = readFileSync(
+  resolve(process.cwd(), 'supabase/migrations/20260916230000_merge_telegram_referrals.sql'),
+  'utf8',
+);
 
 describe('Telegram account relink migration', () => {
   it('не удаляет технический аккаунт с покупками или пользовательскими данными', () => {
@@ -67,5 +71,35 @@ describe('Telegram account merge migration', () => {
   it('доступна только серверной роли', () => {
     expect(mergeMigration).toMatch(/revoke all on function[\s\S]+from public, anon, authenticated/);
     expect(mergeMigration).toMatch(/grant execute on function[\s\S]+to service_role/);
+  });
+});
+
+describe('Telegram referral merge migration', () => {
+  it('переносит реферальные деньги, выплаты и приглашённых в основной кабинет', () => {
+    expect(referralMergeMigration).toContain('update public.referral_ledger set user_id=p_target_user_id');
+    expect(referralMergeMigration).toContain('update public.referral_withdrawals set user_id=p_target_user_id');
+    expect(referralMergeMigration).toContain('update public.referral_attributions set referrer_user_id=p_target_user_id');
+    for (const field of ['available_kopecks', 'reserved_kopecks', 'earned_kopecks', 'paid_kopecks', 'debt_kopecks']) {
+      expect(referralMergeMigration).toContain(`${field}=${field}+source_ref.${field}`);
+    }
+  });
+
+  it('не теряет профиль и настройки технического кабинета при его удалении', () => {
+    expect(referralMergeMigration).toContain('insert into public.user_profiles');
+    expect(referralMergeMigration).toContain('delete from public.user_profiles where user_id=source_user_id');
+    expect(referralMergeMigration).toContain('insert into public.user_preferences');
+    expect(referralMergeMigration).toContain('delete from public.user_preferences where user_id=source_user_id');
+  });
+
+  it('сохраняет старый реферальный код как алиас и учитывает его при регистрации', () => {
+    expect(referralMergeMigration).toContain('create table if not exists public.referral_code_aliases');
+    expect(referralMergeMigration).toContain('from public.referral_code_aliases where referral_code=normalized');
+    expect(referralMergeMigration).toContain('values(source_ref.referral_code,p_target_user_id)');
+    expect(referralMergeMigration).toContain('REFERRAL_CODE_ALIAS_CONFLICT');
+  });
+
+  it('оставляет функции объединения и рефералов доступными только серверной роли', () => {
+    expect(referralMergeMigration).toMatch(/revoke all on function[\s\S]+from public,anon,authenticated/);
+    expect(referralMergeMigration).toMatch(/grant execute on function[\s\S]+to service_role/);
   });
 });

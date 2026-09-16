@@ -8,7 +8,17 @@ type AccountStatus = 'loading' | 'unlinked' | 'empty_technical' | 'linked' | 'ha
 type MergePreview = {
   action: 'merge' | 'relink';
   targetEmail: string;
-  summary: { orders: number; history: number; licenses: number; codes: number; generations: number };
+  summary: {
+    orders: number;
+    history: number;
+    licenses: number;
+    codes: number;
+    generations: number;
+    referralBalanceKopecks: number;
+    referralOperations: number;
+    referralWithdrawals: number;
+    invitedUsers: number;
+  };
 };
 
 export const TelegramAccountPage = observer(() => {
@@ -114,6 +124,12 @@ export const TelegramAccountPage = observer(() => {
               <div>Успешные заказы: <strong>{preview.summary.orders}</strong></div>
               <div>Записи истории: <strong>{preview.summary.history}</strong></div>
               <div>Лицензии: <strong>{preview.summary.licenses}</strong></div>
+              {preview.summary.referralBalanceKopecks > 0 && <div>
+                Реферальный баланс: <strong>{(preview.summary.referralBalanceKopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>
+              </div>}
+              {preview.summary.invitedUsers > 0 && <div>Приглашённые пользователи: <strong>{preview.summary.invitedUsers}</strong></div>}
+              {preview.summary.referralOperations > 0 && <div>Реферальные операции: <strong>{preview.summary.referralOperations}</strong></div>}
+              {preview.summary.referralWithdrawals > 0 && <div>Заявки на выплату: <strong>{preview.summary.referralWithdrawals}</strong></div>}
             </div>}
             {error && <Alert tone="error">{error}</Alert>}
             <Button type="button" size="lg" block loading={busy} onClick={() => void confirm()}>

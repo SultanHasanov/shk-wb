@@ -36,24 +36,22 @@ async function accountMergePreview(userId) {
     supabaseFetchWithMeta(`user_generation_history?user_id=eq.${q}&select=id&limit=1`),
     supabaseFetchWithMeta(`license_keys?owner_user_id=eq.${q}&select=key&limit=1`),
     supabaseFetchWithMeta(`cell_print_licenses?owner_user_id=eq.${q}&select=key&limit=1`),
-    supabaseFetch(`referral_ledger?user_id=eq.${q}&select=id&limit=1`),
-    supabaseFetch(`referral_withdrawals?user_id=eq.${q}&select=id&limit=1`),
-    supabaseFetch(`referral_attributions?referrer_user_id=eq.${q}&select=invited_user_id&limit=1`),
+    supabaseFetchWithMeta(`referral_ledger?user_id=eq.${q}&select=id&limit=1`),
+    supabaseFetchWithMeta(`referral_withdrawals?user_id=eq.${q}&select=id&limit=1`),
+    supabaseFetchWithMeta(`referral_attributions?referrer_user_id=eq.${q}&select=invited_user_id&limit=1`),
     supabaseFetch(`referral_accounts?user_id=eq.${q}&select=available_kopecks,reserved_kopecks,earned_kopecks,paid_kopecks,debt_kopecks&limit=1`),
   ]);
-  const financialConflict = Boolean(
-    ledger.length || withdrawals.length || invited.length || referrals.some(account =>
-      ['available_kopecks', 'reserved_kopecks', 'earned_kopecks', 'paid_kopecks', 'debt_kopecks']
-        .some(field => Number(account[field] || 0) !== 0),
-    ),
-  );
+  const referral = referrals[0] || {};
   return {
     orders: orders.count || 0,
     history: history.count || 0,
     licenses: (licenses.count || 0) + (cellLicenses.count || 0),
     codes: stickers.length,
     generations: stickers.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
-    financialConflict,
+    referralBalanceKopecks: Number(referral.available_kopecks || 0) + Number(referral.reserved_kopecks || 0),
+    referralOperations: ledger.count || 0,
+    referralWithdrawals: withdrawals.count || 0,
+    invitedUsers: invited.count || 0,
   };
 }
 
