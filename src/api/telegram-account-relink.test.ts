@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const migration = readFileSync(
-  resolve(process.cwd(), 'supabase/migrations/20260916180000_telegram_account_relink.sql'),
+  resolve(process.cwd(), 'supabase/migrations/20260916200000_allow_pending_orders_telegram_relink.sql'),
   'utf8',
 );
 
@@ -22,6 +22,13 @@ describe('Telegram account relink migration', () => {
       expect(migration).toContain(`public.${table}`);
     }
     expect(migration).toContain('TELEGRAM_ACCOUNT_NOT_EMPTY');
+    expect(migration).toContain("status in ('waiting_for_capture', 'succeeded')");
+    expect(migration).toContain("status in ('processing', 'completed')");
+  });
+
+  it('переносит незавершённые заказы вместо блокировки входа', () => {
+    expect(migration).toContain("status in ('pending', 'canceled')");
+    expect(migration).toContain('set user_id = p_target_user_id');
   });
 
   it('оставляет RPC доступной только серверной роли', () => {
