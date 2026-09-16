@@ -1,0 +1,154 @@
+/* Полоса объявления над шапкой. Акцентный градиент на белом сайте — самое
+   заметное место страницы, но полоса закрывается одним нажатием и больше не
+   возвращается: помнится id закрытого объявления, новое покажется снова. */
+.banner {
+  position: relative;
+  z-index: calc(var(--z-topbar) + 1);
+  color: #fff;
+  background: linear-gradient(96deg, var(--accent-dark) 0%, var(--accent) 58%, #e6339f 100%);
+  animation: drop var(--dur-slow) var(--ease);
+}
+
+.inner {
+  max-width: var(--content-wide);
+  margin: 0 auto;
+  min-height: 52px;
+  padding: var(--sp-3) var(--sp-12) var(--sp-3) var(--sp-8);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+}
+
+.head {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.icon {
+  flex: none;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+
+.text {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+}
+
+/* Длинное объявление не должно вырастать в абзац поверх шапки: показываем две
+   строки, остальное — по кнопке «Читать полностью». */
+.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.more {
+  margin-top: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: #fff;
+  opacity: 0.82;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.more:hover {
+  opacity: 1;
+}
+
+/* Белая пилюля на цветном фоне — единственный светлый элемент полосы, поэтому
+   взгляд попадает на неё раньше, чем на текст. */
+.cta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-full);
+  background: #fff;
+  color: var(--accent-dark);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(29, 29, 39, 0.18);
+}
+
+.cta:hover {
+  color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(29, 29, 39, 0.24);
+}
+
+.close {
+  position: absolute;
+  top: 50%;
+  right: var(--sp-4);
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+@media (max-width: 767px) {
+  .inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-3);
+    /* Справа сверху висит крестик — освобождаем под него первую строку */
+    padding: var(--sp-3) var(--sp-10) var(--sp-4) var(--sp-4);
+  }
+
+  .cta {
+    width: 100%;
+    justify-content: center;
+    padding: var(--sp-3) var(--sp-4);
+    font-size: var(--fs-14);
+  }
+
+  .close {
+    top: var(--sp-2);
+    right: var(--sp-2);
+    translate: 0 0;
+  }
+
+  .clamped {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+}
+
+@media print {
+  .banner {
+    display: none;
+  }
+}

@@ -1,0 +1,8 @@
+import { Link } from 'react-router-dom';
+import { Bell } from 'lucide-react';
+import { Badge,Button,Card,EmptyState } from '../../ui';
+import { CabinetError,CabinetLoading } from '../../components/CabinetState';
+import { dateTime,useCabinetMutation,useNotifications } from '../../api/cabinet';
+import { useDocumentMeta } from '../../lib/seo';
+
+export function NotificationsPage(){useDocumentMeta('Уведомления — кабинет');const query=useNotifications();const read=useCabinetMutation<{id?:string;readAll?:boolean}>('/api/cabinet/notifications','PATCH');if(query.isPending)return <div className="page"><CabinetLoading/></div>;if(query.isError)return <div className="page"><CabinetError error={query.error} retry={()=>query.refetch()}/></div>;return <div className="page"><header className="page-head"><h1>Уведомления</h1><p>Оплаты, сроки лицензий и важные события.</p></header>{query.data.items.some(n=>!n.readAt)&&<Button variant="secondary" onClick={()=>read.mutate({readAll:true})}>Отметить всё прочитанным</Button>}<div className="stack-lg section">{query.data.items.length?query.data.items.map(n=><Card key={n.id} accent={!n.readAt}><div className="row"><strong>{n.title}</strong>{!n.readAt&&<Badge tone="accent">Новое</Badge>}<span className="muted">{dateTime(n.createdAt)}</span></div><p>{n.body}</p><div className="row">{n.link&&<Link className="accent" to={n.link}>Открыть →</Link>}{!n.readAt&&<Button variant="ghost" size="sm" onClick={()=>read.mutate({id:n.id})}>Прочитано</Button>}</div></Card>):<Card><EmptyState icon={<Bell/>} title="Уведомлений нет" text="Здесь появятся события по вашему аккаунту."/></Card>}</div></div>}

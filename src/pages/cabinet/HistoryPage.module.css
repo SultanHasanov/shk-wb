@@ -1,0 +1,32 @@
+.previewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+
+.previewCard {
+  margin: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.previewCard img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  mix-blend-mode: multiply;
+}
+
+.previewCard figcaption {
+  overflow: hidden;
+  margin-top: var(--sp-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

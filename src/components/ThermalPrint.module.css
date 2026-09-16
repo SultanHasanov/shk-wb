@@ -1,0 +1,46 @@
+/* Блок термопечати внутри панели результата: та же подложка, что была у
+   .thermal-print-settings в старой статике. */
+.block {
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-muted, var(--surface));
+}
+
+.help {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  line-height: var(--lh-normal);
+}
+
+.custom {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: var(--sp-2);
+}
+
+.separator {
+  padding-bottom: var(--sp-3);
+  color: var(--text-tertiary);
+  font-weight: 800;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+@media (max-width: 767px) {
+  .actions > * {
+    flex: 1 1 100%;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+}

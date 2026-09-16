@@ -1,16 +1,44 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
   "functions": {
     "api/payments.js": { "includeFiles": "api/_private/*.exe" },
-    "api/stickers/pdf.js": { "maxDuration": 60 }
+    "api/stickers/pdf.js": { "maxDuration": 60 },
+    "api/stickers/image.js": { "includeFiles": "{node_modules/@resvg/resvg-js/**/*,server/assets/InterVariable.ttf}" },
+    "api/admin/data.js": { "maxDuration": 60 },
+    "api/auth.js": { "maxDuration": 60 }
   },
   "rewrites": [
+    { "source": "/api/telegram/webhook", "destination": "/api/auth?action=bot" },
+    { "source": "/api/auth/telegram", "destination": "/api/auth" },
+    { "source": "/api/referrals/capture", "destination": "/api/auth?action=referral" },
+    { "source": "/api/messages", "destination": "/api/visits?action=messages" },
+    { "source": "/api/cron/notifications", "destination": "/api/cabinet?action=cron" },
+    { "source": "/api/cabinet/bootstrap", "destination": "/api/cabinet?action=bootstrap" },
+    { "source": "/api/cabinet/assets", "destination": "/api/cabinet?action=assets" },
+    { "source": "/api/cabinet/assets/claim", "destination": "/api/cabinet?action=claim" },
+    { "source": "/api/cabinet/orders", "destination": "/api/cabinet?action=orders" },
+    { "source": "/api/cabinet/history/import", "destination": "/api/cabinet?action=history" },
+    { "source": "/api/cabinet/history", "destination": "/api/cabinet?action=history" },
+    { "source": "/api/cabinet/profile", "destination": "/api/cabinet?action=profile" },
+    { "source": "/api/cabinet/preferences", "destination": "/api/cabinet?action=preferences" },
+    { "source": "/api/cabinet/notifications", "destination": "/api/cabinet?action=notifications" },
+    { "source": "/api/cabinet/referrals", "destination": "/api/cabinet?action=referrals" },
+    { "source": "/api/cabinet/referrals/withdraw", "destination": "/api/cabinet?action=withdraw" },
+    { "source": "/api/cabinet/devices/:id", "destination": "/api/cabinet?action=device&id=:id" },
+    { "source": "/api/cabinet/telegram", "destination": "/api/cabinet?action=telegram" },
+    { "source": "/api/cabinet/account", "destination": "/api/cabinet?action=account" },
+    { "source": "/api/admin/cabinet/withdrawals", "destination": "/api/admin/data?cabinet=withdrawals" },
+    { "source": "/api/admin/cabinet/withdrawal", "destination": "/api/admin/data?cabinet=withdrawal" },
+    { "source": "/api/admin/cabinet/news", "destination": "/api/admin/data?cabinet=news" },
     { "source": "/api/payments/create", "destination": "/api/payments?action=create" },
     { "source": "/api/payments/webhook", "destination": "/api/payments?action=webhook" },
     { "source": "/api/payments/status", "destination": "/api/payments?action=status" },
     { "source": "/api/payments/download", "destination": "/api/payments?action=download" },
     { "source": "/api/payments/download-cell-print", "destination": "/api/payments?action=download-cell-print" },
+    { "source": "/api/payments/download-program", "destination": "/api/payments?action=download-program" },
     { "source": "/api/payments/config", "destination": "/api/payments?action=config" }
     ,{ "source": "/api/payments/promo", "destination": "/api/payments?action=promo" }
     ,{ "source": "/api/admin/stats", "destination": "/api/admin/data?resource=stats" }
@@ -20,7 +48,27 @@
     ,{ "source": "/api/sticker-stats", "destination": "/api/visits?action=stickerStats" }
     ,{ "source": "/api/cell-print/activate", "destination": "/api/cell-print?action=activate" }
     ,{ "source": "/api/cell-print/feed", "destination": "/api/cell-print?action=feed" }
+    ,{ "source": "/cell-print", "destination": "/cell-print.html" }
+    ,{ "source": "/program", "destination": "/program.html" }
+    ,{ "source": "/vozvratnye-stikery-wb", "destination": "/vozvratnye-stikery-wb.html" }
+    ,{ "source": "/qr-korobov-wb", "destination": "/qr-korobov-wb.html" }
+    ,{ "source": "/contacts", "destination": "/contacts.html" }
+    ,{ "source": "/offer", "destination": "/offer.html" }
+    ,{ "source": "/privacy", "destination": "/privacy.html" }
+    ,{ "source": "/cookie", "destination": "/cookie.html" }
+    ,{ "source": "/payment-result", "destination": "/" }
+    ,{ "source": "/bot-checkout", "destination": "/" }
+    ,{ "source": "/login", "destination": "/" }
+    ,{ "source": "/register", "destination": "/" }
+    ,{ "source": "/forgot-password", "destination": "/" }
+    ,{ "source": "/reset-password", "destination": "/" }
+    ,{ "source": "/r/:code", "destination": "/" }
+    ,{ "source": "/cabinet/:path*", "destination": "/" }
+    ,{ "source": "/cabinet", "destination": "/" }
+    ,{ "source": "/panel/:path*", "destination": "/" }
+    ,{ "source": "/panel", "destination": "/" }
   ],
+  "crons": [{ "path": "/api/cron/notifications", "schedule": "0 6 * * *" }],
   "redirects": [
     { "source": "/generator", "destination": "/", "permanent": true },
     { "source": "/generator.html", "destination": "/", "permanent": true },
@@ -33,6 +81,8 @@
       "source": "/(.*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-eval' https://telegram.org https://mc.yandex.ru; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://auth.sul-dev.ru wss://auth.sul-dev.ru https://api.telegram.org https://mc.yandex.ru https://mc.yandex.md wss://mc.yandex.ru; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src https://oauth.telegram.org https://t.me https://mc.yandex.ru; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), bluetooth=(self)" }
       ]
@@ -40,6 +90,14 @@
     {
       "source": "/admin-enigma/(.*)",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/panel/:path*",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
+    },
+    {
+      "source": "/:section(cabinet|login|register|forgot-password|reset-password|payment-result|r)/:path*",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]
 }

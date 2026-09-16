@@ -1,0 +1,125 @@
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-8);
+}
+
+/* Конфигуратор шире карточки-описания: в нём четыре поля и итог, и при равных
+   колонках он выходил заметно выше соседа. */
+.buy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.bullets {
+  margin: 0;
+  padding-left: var(--sp-5);
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* ---- Итог ---- */
+.total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-softer);
+  border-radius: var(--r-md);
+}
+
+.totalLabel {
+  display: block;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+}
+
+.perComputer {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.totalValueWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.totalValue {
+  font-size: var(--fs-30);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  line-height: var(--lh-snug);
+}
+
+/* ---- Таблица цен ---- */
+.priceBlock {
+  margin-top: var(--sp-6);
+}
+
+.priceNote {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  max-width: 76ch;
+  line-height: var(--lh-normal);
+}
+
+/* ---- Тарифы для сети ---- */
+.network {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-5);
+}
+
+.perYear {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+}
+
+@media (max-width: 900px) {
+  .buy {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .heroActions {
+    margin-top: var(--sp-6);
+  }
+
+  .heroActions > *,
+  .heroActions a {
+    flex: 1 1 100%;
+  }
+
+  .heroActions button {
+    width: 100%;
+  }
+
+  .totalValue {
+    font-size: var(--fs-24);
+  }
+}

@@ -1,0 +1,303 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--page);
+  font-size: var(--fs-16);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a {
+  transition: var(--dur) var(--ease);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+/* ---- Типографическая шкала ---- */
+h1,
+h2,
+h3,
+h4,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: var(--fs-36);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--fw-black);
+}
+
+h2 {
+  font-size: var(--fs-20);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--fw-bold);
+  margin-bottom: var(--sp-3);
+}
+
+h3 {
+  font-size: var(--fs-16);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-semibold);
+  margin-bottom: var(--sp-2);
+}
+
+/* ---- Раскладка страницы ---- */
+.page {
+  max-width: var(--content);
+  margin: 0 auto;
+  padding: var(--sp-10) var(--sp-8) var(--sp-16);
+}
+
+.page-head {
+  margin-bottom: var(--sp-6);
+}
+
+.page-head h1 {
+  margin-bottom: var(--sp-3);
+}
+
+.page-head p {
+  color: var(--text-muted);
+  max-width: 68ch;
+  line-height: var(--lh-normal);
+  margin-bottom: 0;
+}
+
+.eyebrow {
+  display: inline-block;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--accent-dark);
+  margin-bottom: var(--sp-3);
+}
+
+/* ---- Сетки ---- */
+.grid {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.stack-lg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.section {
+  margin-top: var(--sp-10);
+}
+
+/* ---- Текстовые утилиты ---- */
+.muted {
+  color: var(--text-muted);
+}
+
+.accent {
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+}
+
+.accent:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.metric {
+  font-size: var(--fs-30);
+  font-weight: var(--fw-black);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin: 0;
+}
+
+.metric-label {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--sp-1) 0;
+  border: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Ссылка «к содержимому» для клавиатуры — видна только в фокусе */
+.skip-link {
+  position: absolute;
+  left: var(--sp-4);
+  top: calc(-1 * var(--sp-16));
+  z-index: var(--z-toast);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--shadow-md);
+}
+
+.skip-link:focus {
+  top: var(--sp-4);
+}
+
+.mobile-only {
+  display: none;
+}
+
+/* ---- Брейкпоинты: 1024 / 768 / 480 ----
+   Раньше был единственный @media(max-width:767px), поэтому .grid-3 держал три
+   колонки от 768px и карточки статистики сжимались в кашу на планшете. */
+@media (max-width: 1023px) {
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .page {
+    padding: var(--sp-6) var(--sp-4) var(--sp-12);
+  }
+
+  h1 {
+    font-size: var(--fs-30);
+  }
+
+  .grid-2,
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .section {
+    margin-top: var(--sp-8);
+  }
+
+  .mobile-only {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 479px) {
+  h1 {
+    font-size: var(--fs-24);
+  }
+
+  .page {
+    padding: var(--sp-5) var(--sp-4) var(--sp-10);
+  }
+}
+
+/* ---- Печать ----
+   window.print() предлагается на экране генератора; без этих правил печатались
+   сайдбар, шапка и футер. */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .no-print,
+  header,
+  footer,
+  aside,
+  nav {
+    display: none !important;
+  }
+
+  .page {
+    max-width: none;
+    padding: 0;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  a[href]::after {
+    content: '';
+  }
+}

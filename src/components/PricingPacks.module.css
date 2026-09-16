@@ -1,0 +1,172 @@
+/* ---- Карточки тарифов ---- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: stretch;
+}
+
+.pack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-6) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.pack:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+}
+
+.pack:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.packActive {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.packActive:hover {
+  border-color: var(--accent);
+}
+
+/* Маркер «Чаще всего берут» — якорь для сравнения */
+.popular {
+  border-color: var(--accent-softer);
+}
+
+.ribbon {
+  position: absolute;
+  top: 0;
+  left: var(--sp-5);
+  transform: translateY(-50%);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.qty {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+}
+
+/* Цена за штуку — главный аргумент сравнения, поэтому она крупнее суммы */
+.perUnit {
+  font-size: var(--fs-36);
+  font-weight: var(--fw-black);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.perUnitLabel {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.total {
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  font-size: var(--fs-18);
+  font-weight: var(--fw-bold);
+}
+
+.totalLabel {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  font-weight: var(--fw-normal);
+}
+
+.check {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  color: var(--accent);
+}
+
+/* ---- Оформление заказа ---- */
+
+.checkout {
+  margin-top: var(--sp-6);
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.summaryText {
+  color: var(--text-muted);
+}
+
+.summaryTotal {
+  font-size: var(--fs-30);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--tracking-tight);
+}
+
+@media (max-width: 1023px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-5);
+  }
+}
+
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .perUnit {
+    font-size: var(--fs-30);
+  }
+
+  .summaryTotal {
+    font-size: var(--fs-24);
+  }
+}
+
+/* Строка сводки в модалке подтверждения покупки. */
+.confirmRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.confirmTotal {
+  font-size: var(--fs-24);
+  font-weight: 700;
+}

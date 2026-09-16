@@ -1,0 +1,75 @@
+/* Контейнер повторяет .page из global.css, а не использует его: у .page крупный
+   нижний отступ под последний блок страницы, а секции идут подряд, и между ними
+   он давал провалы под 150px. */
+.section,
+.inner {
+  max-width: var(--content);
+  margin: 0 auto;
+  padding: var(--sp-12) var(--sp-8);
+}
+
+.section {
+  scroll-margin-top: var(--sp-16);
+}
+
+.band {
+  background: var(--surface-sunken);
+  border-top: 1px solid var(--border);
+  scroll-margin-top: var(--sp-16);
+}
+
+.head {
+  margin-bottom: var(--sp-8);
+  max-width: 68ch;
+}
+
+.center {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+  max-width: 620px;
+}
+
+.title {
+  font-size: var(--fs-30);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--fw-black);
+  margin: 0;
+}
+
+.lead {
+  color: var(--text-muted);
+  line-height: var(--lh-normal);
+  margin: var(--sp-3) 0 0;
+}
+
+@media (max-width: 1023px) {
+  .section,
+  .inner {
+    padding-left: var(--sp-5);
+    padding-right: var(--sp-5);
+  }
+}
+
+@media (max-width: 767px) {
+  .section,
+  .inner {
+    padding: var(--sp-10) var(--sp-4);
+  }
+
+  .title {
+    font-size: var(--fs-24);
+  }
+
+  .head {
+    margin-bottom: var(--sp-6);
+  }
+}
+
+@media print {
+  .section,
+  .band {
+    display: none;
+  }
+}

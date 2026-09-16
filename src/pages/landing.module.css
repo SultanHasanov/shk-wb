@@ -1,0 +1,43 @@
+/* Общие блоки контентных лендингов: кнопки под hero и карточка призыва внизу.
+   Раньше жили в ReturnStickersPage.module.css; вторая такая страница копировала
+   бы их целиком — по той же причине, по которой из четырёх копий был выделен
+   компонент Section. */
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-8);
+}
+
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.cta h2 {
+  margin-bottom: var(--sp-2);
+}
+
+@media (max-width: 767px) {
+  .heroActions {
+    margin-top: var(--sp-6);
+  }
+
+  .heroActions > *,
+  .heroActions a {
+    flex: 1 1 100%;
+  }
+
+  .heroActions button {
+    width: 100%;
+  }
+
+  .cta a,
+  .cta button {
+    width: 100%;
+  }
+}

@@ -1,0 +1,59 @@
+/* auto-fit, а не фиксированные две колонки: на страницах продуктов в блоке
+   остаётся один пункт, и он должен занимать всю ширину, а не половину. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--sp-5);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+  transition:
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.card:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.icon {
+  color: var(--accent);
+}
+
+.cardTitle {
+  font-size: var(--fs-18);
+  font-weight: var(--fw-bold);
+  margin: 0;
+}
+
+.cardText {
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+  margin: 0;
+}
+
+.more {
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-14);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}

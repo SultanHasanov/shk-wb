@@ -1,0 +1,306 @@
+/* Оболочка админки. Своя, а не общая с кабинетом: там сайдбар завязан на
+   ui-стор со сворачиванием и на счётчик непрочитанных, здесь этого нет, а
+   разделов вдвое больше и им нужна группировка. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: var(--sp-4) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebarHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+  text-decoration: none;
+  padding: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+}
+
+/* Крестик внутри ящика: на телефоне подложка узкая, и промахнуться по ней легко. */
+.closeMenu {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2);
+  flex: none;
+}
+
+.closeMenu:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.group {
+  display: contents;
+}
+
+.burger {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2);
+  flex: none;
+}
+
+.burger:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.scrim {
+  display: none;
+}
+
+.groupTitle {
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-muted);
+  padding: var(--sp-3) var(--sp-2) var(--sp-1);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-14);
+}
+
+.nav:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.active {
+  background: var(--surface-muted);
+  color: var(--text);
+  font-weight: var(--fw-bold);
+}
+
+.bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.content {
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.head h1 {
+  margin: 0;
+  font-size: var(--fs-18);
+  flex: 1;
+  min-width: 0;
+}
+
+/* Сетка плиток статистики: на узком экране в один столбец. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+/* Плашка кассы за сегодня: главная цифра обзора, поэтому крупнее плиток. */
+.today {
+  border-left: 3px solid var(--accent);
+}
+
+.todayHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.todayValue {
+  margin: var(--sp-2) 0 var(--sp-1);
+  font-size: var(--fs-36);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.1;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: flex-end;
+}
+
+.grow {
+  flex: 1 1 260px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.spread {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background: var(--surface-muted);
+}
+
+.danger {
+  border: 1px solid var(--danger, #d92d20);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+}
+
+/* Спарклайн регистраций: инлайновый SVG, отдельного компонента не заводим. */
+.spark {
+  width: 100%;
+  height: 72px;
+  display: block;
+}
+
+.mutedNote {
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  margin: 0;
+}
+
+/* Колонка кнопок в таблицах: на десктопе не даём ей схлопнуться под кнопки,
+   на телефоне ширину диктует горизонтальный скролл .tableWrap. */
+.actionsCell {
+  min-width: 170px;
+}
+
+/* 1023px, а не 767px: остальная сетка проекта ломается именно здесь
+   (src/styles/global.css), и на 768–1023px рельс в 232px душил контент.
+   Раньше сайдбар здесь превращался в горизонтальную ленту — десять разделов
+   приходилось прокручивать вслепую, активный уезжал за край. Теперь, как и в
+   кабинете, это выезжающий ящик с бургером в шапке. */
+@media (max-width: 1023px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(280px, 84vw);
+    height: 100%;
+    z-index: var(--z-sidebar);
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    /* visibility, а не только transform: иначе с клавиатуры фокус уходил в
+       уехавший за край список разделов. Снимаем её после доезда. */
+    visibility: hidden;
+    transition:
+      transform var(--dur-slow) var(--ease),
+      visibility 0s linear var(--dur-slow);
+  }
+
+  .open .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    box-shadow: var(--shadow-lg);
+    transition:
+      transform var(--dur-slow) var(--ease),
+      visibility 0s;
+  }
+
+  .open .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: var(--z-scrim);
+  }
+
+  .burger,
+  .closeMenu {
+    display: inline-flex;
+  }
+
+  /* Шапка липкая: до кнопки меню на длинной таблице иначе не добраться. */
+  .head {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-topbar);
+  }
+}
+
+@media (max-width: 767px) {
+  .head {
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .head h1 {
+    font-size: var(--fs-16);
+  }
+
+  /* Кнопка выхода дублирует пункт в самом меню, а место в шапке телефона нужно
+     заголовку раздела. */
+  .headLogout {
+    display: none;
+  }
+
+  .actionsCell {
+    min-width: 0;
+  }
+}

@@ -1,4 +1,6 @@
-const { sendApiError, supabaseFetch } = require('./_supabase');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const { enforceRateLimit } = require('../server/_rate-limit');
+const { enforceProgramVersion } = require('../server/_program-version');
 
 function publicKey(row) {
   if (!row) return null;
@@ -12,6 +14,8 @@ function publicKey(row) {
 }
 
 module.exports = async function handler(req, res) {
+  if (!await enforceRateLimit(req,res,{scope:'program-license',limit:30,windowSeconds:60})) return;
+  if (!enforceProgramVersion(req, res)) return;
   const key = String((req.method === 'GET' ? req.query.key : req.body && req.body.key) || '').trim();
   if (!key || key.length > 100) return res.status(400).json({ error: 'Invalid key' });
 

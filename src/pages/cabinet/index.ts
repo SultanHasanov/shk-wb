@@ -1,0 +1,10 @@
+export { OverviewPage } from './OverviewPage';
+export { CabinetGeneratorPage } from './GeneratorPage';
+export { KeysPage } from './KeysPage';
+export { PackagesPage } from './PackagesPage';
+export { HistoryPage } from './HistoryPage';
+export { OrdersPage } from './OrdersPage';
+export { ReferralsPage } from './ReferralsPage';
+export { ProfilePage } from './ProfilePage';
+export { SettingsPage } from './SettingsPage';
+export { NotificationsPage } from './NotificationsPage';

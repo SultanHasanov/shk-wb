@@ -1,0 +1,164 @@
+/* Общие мелочи кабинета. Всё, что нужно больше чем одной странице. */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+}
+
+.filter {
+  max-width: 320px;
+  flex: 1 1 240px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+.sectionHead h2 {
+  margin: 0;
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+/* ---- Ключи ---- */
+.keyHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+}
+
+.keyCode {
+  font-size: var(--fs-18);
+  letter-spacing: 0.04em;
+}
+
+.keyMeta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-5);
+}
+
+/* ---- Пакеты ---- */
+.balance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: center;
+}
+
+.code {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-softer);
+  border-radius: var(--r-md);
+}
+
+.codeValue {
+  font-size: var(--fs-30);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.16em;
+}
+
+.codeLabel {
+  display: block;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+/* ---- Числа со знаком ---- */
+.plus {
+  color: var(--success);
+  font-weight: var(--fw-semibold);
+}
+
+.minus {
+  color: var(--text-muted);
+}
+
+/* ---- Профиль ---- */
+.profileHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+.profileName {
+  margin: 0;
+  font-size: var(--fs-20);
+  font-weight: var(--fw-bold);
+}
+
+.profileMail {
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+}
+
+/* ---- Опасная зона ---- */
+.danger {
+  border-color: var(--danger);
+  box-shadow: none;
+}
+
+.dangerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+
+/* ---- Прочее ---- */
+.rowActions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--text-tertiary);
+}
+
+/* ---- Рефералы ---- */
+.refLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* Без min-width:0 длинная ссылка распирает флекс и выдавливает кнопку за край */
+.refLink > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .balance {
+    grid-template-columns: 1fr;
+  }
+
+  /* На узком экране кнопка уходит под поле и растягивается на всю ширину */
+  .refLink {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

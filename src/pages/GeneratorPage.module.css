@@ -1,0 +1,381 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+.resultHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.resultHead h2 {
+  margin: 0;
+}
+
+.count {
+  font-size: var(--fs-13);
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+/* Плитки фиксированной пропорции: раньше это были сырые <img> в grid-3
+   с инлайновой рамкой, и картинки разного размера дёргали раскладку. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-3);
+}
+
+.tile {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-2);
+}
+
+.tile img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  mix-blend-mode: multiply;
+}
+
+.tileActions {
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.tileAction {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tileAction:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.tileAction:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.single {
+  aspect-ratio: auto;
+  min-height: 280px;
+}
+
+.actions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+
+.printOptions .actions {
+  margin-top: 0;
+  padding-top: var(--sp-4);
+}
+
+.printHelp {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+}
+
+.previewSection {
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.previewControls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+  .remaining {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---- Код доступа, свёрнутый по умолчанию ----
+   Раньше поле стояло третьим в форме, и каждый новичок упирался в него, хотя
+   кода у него нет и взять негде. */
+.codeToggle {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--accent-dark);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.codeToggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: var(--r-sm);
+}
+
+/* «Войдите» внутри красной плашки: подсвечено как кнопка, потому что это
+   единственный выход из ситуации «код куплен другим аккаунтом». */
+.alertLogin {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--danger);
+  color: #fff;
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(192, 57, 43, 0.3);
+}
+
+.alertLogin:hover {
+  background: #9e2f24;
+  color: #fff;
+}
+
+.historyNote {
+  margin: 0;
+  padding: var(--sp-3);
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border-radius: var(--r-md);
+  font-size: var(--fs-13);
+  line-height: var(--lh-normal);
+  text-align: center;
+}
+
+.historyNote a {
+  color: var(--accent-dark);
+  font-weight: var(--fw-medium);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- Пресеты количества ---- */
+.presets {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+
+.preset {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.preset:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.preset:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.presetActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+/* ---- Пример стикера в пустом состоянии ----
+   Человек должен видеть, что получит, до того как что-то введёт. */
+.sample {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8) var(--sp-5);
+  text-align: center;
+}
+
+/* Без фиксированной пропорции: у стикера товара 600×740, у QR коробки 600×900 —
+   общий aspect-ratio обрезал бы или растягивал один из них. */
+.sampleFrame {
+  width: 190px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+}
+
+.sampleImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+.sampleTitle {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+  margin: 0;
+}
+
+.sampleText {
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+  max-width: 340px;
+  margin: 0;
+}
+
+/* ---- Следующий шаг после успешной генерации ---- */
+.nextStep {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-14);
+  color: var(--text-muted);
+}
+
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tileAction {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* На печать уходят только стикеры */
+@media print {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .form,
+  .actions,
+  .resultHead,
+  .count,
+  .nextStep,
+  .sample {
+    display: none !important;
+  }
+
+  .tiles {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .tile {
+    border-color: #ccc;
+    background: #fff;
+    break-inside: avoid;
+  }
+
+  .tileActions {
+    display: none;
+  }
+}
+
+/* Выбор типа наклейки фотографиями, как на боевом сайте. */
+.kindPicker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+.kindCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  font: inherit;
+  color: var(--text-muted);
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.kindCard img {
+  width: 100%;
+  max-width: 128px;
+  height: 104px;
+  object-fit: contain;
+}
+
+.kindActive {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Настройки листа перед печатью: сетка и сколько штук из пачки. */
+.printOptions {
+  display: grid;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+/* Строка сводки в модалке подтверждения: подпись слева, значение справа. */
+.confirmRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}

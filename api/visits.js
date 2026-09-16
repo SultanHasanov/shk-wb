@@ -1,4 +1,5 @@
-const { sendApiError, supabaseFetch } = require('./_supabase');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const handleMessages = require('../server/_messages-handler');
 
 async function currentTotal() {
   const rows = await supabaseFetch('site_stats?select=total_visits&id=eq.1&limit=1');
@@ -24,6 +25,7 @@ function safeCount(value) {
 
 module.exports = async function handler(req, res) {
   try {
+    if (req.query && req.query.action === 'messages') return handleMessages(req, res);
     if (req.query && req.query.action === 'stickerStats') {
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       if (req.method !== 'GET') {

@@ -1,0 +1,39 @@
+.wrap {
+  max-width: 680px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-24);
+}
+
+.secret {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-softer);
+  border-radius: var(--r-md);
+}
+
+.secretLabel {
+  display: block;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-1);
+}
+
+.secretValue {
+  font-size: var(--fs-24);
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+@media (max-width: 560px) {
+  .secretValue {
+    font-size: var(--fs-18);
+  }
+}

@@ -1,0 +1,135 @@
+:root {
+  /* ---- Цвет ---- */
+  --accent: #cb11ab;
+  --accent-dark: #a30d89;
+  --accent-hover: #b30f96;
+  --accent-soft: #fdf1fa;
+  --accent-softer: #fae6f5;
+
+  --page: #f5f5f7;
+  --surface: #fff;
+  --surface-muted: #f4f4f7;
+  --surface-sunken: #ebebef;
+
+  --border: #e4e4ea;
+  --border-strong: #d3d3dc;
+
+  --text: #1d1d27;
+  --text-muted: #5f5f6d;
+  --text-tertiary: #86868f;
+  --text-on-accent: #fff;
+
+  --danger: #c0392b;
+  --danger-soft: #fff0ee;
+  --success: #1f7a45;
+  --success-soft: #e8f5ee;
+  --warning: #9a6700;
+  --warning-soft: #fff8e1;
+
+  /* ---- Типографика ----
+     Раньше был задан только h1:30px, остальное — браузерные дефолты, поэтому
+     h2 (24px) почти сливался с .metric (26px) и дашборд не читался. */
+  --font-sans:
+    'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-20: 20px;
+  --fs-24: 24px;
+  --fs-30: 30px;
+  --fs-36: 36px;
+  --fs-44: 44px;
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.35;
+  --lh-normal: 1.55;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+
+  --tracking-tight: -0.02em;
+  --tracking-wide: 0.04em;
+
+  /* ---- Отступы: сетка 4px ----
+     Заменяют магические числа 36/32/24/20/16/13/12/9/7px, разъехавшиеся по файлам. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-20: 80px;
+
+  /* ---- Радиусы: свод четырёх ad-hoc значений (7/9/10/12/14) к токенам ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-full: 999px;
+
+  /* Legacy-алиасы: старые имена ещё встречаются в модулях стилей */
+  --radius: var(--r-lg);
+  --radius-sm: var(--r-md);
+
+  /* ---- Глубина ----
+     Раньше существовала одна --shadow, и карточки её не использовали вовсе:
+     весь интерфейс был плоскими обводками 1px на сером. */
+  --shadow-xs: 0 1px 2px rgba(29, 29, 39, 0.05);
+  --shadow-sm: 0 2px 8px rgba(29, 29, 39, 0.06);
+  --shadow-md: 0 8px 24px rgba(29, 29, 39, 0.08);
+  --shadow-lg: 0 20px 48px rgba(29, 29, 39, 0.12);
+  --shadow-accent: 0 8px 22px rgba(203, 17, 171, 0.3);
+  --shadow: var(--shadow-md);
+
+  /* ---- Фокус ----
+     Отделён от декоративной подсветки: раньше .cardAccent использовал var(--focus),
+     из-за чего «выделенная карточка» была неотличима от фокуса с клавиатуры. */
+  --ring: 0 0 0 3px rgba(203, 17, 171, 0.16);
+  --focus: var(--ring);
+
+  /* ---- Слои ---- */
+  --z-base: 1;
+  --z-topbar: 20;
+  --z-scrim: 25;
+  --z-sidebar: 30;
+  --z-dropdown: 40;
+  --z-overlay: 50;
+  --z-toast: 60;
+
+  /* ---- Раскладка ---- */
+  --content: 1120px;
+  --content-wide: 1280px;
+  --sidebar: 260px;
+  --sidebar-collapsed: 72px;
+  --topbar-h: 64px;
+
+  /* ---- Движение ---- */
+  --ease: cubic-bezier(0.2, 0, 0.13, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 260ms;
+
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--page);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}

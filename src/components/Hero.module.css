@@ -1,0 +1,111 @@
+.hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(720px 320px at 78% -20%, var(--accent-softer) 0%, transparent 68%),
+    linear-gradient(160deg, var(--accent-soft) 0%, var(--surface) 46%);
+  border-bottom: 1px solid var(--border);
+}
+
+.inner {
+  max-width: var(--content);
+  margin: 0 auto;
+  padding: var(--sp-16) var(--sp-8) var(--sp-12);
+}
+
+.compact .inner {
+  padding-top: var(--sp-12);
+  padding-bottom: var(--sp-8);
+}
+
+.title {
+  max-width: 20ch;
+  margin-bottom: var(--sp-4);
+}
+
+/* Акцентная часть заголовка — как в старом лендинге */
+.title em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.copy {
+  color: var(--text-muted);
+  font-size: var(--fs-18);
+  line-height: var(--lh-normal);
+  max-width: 60ch;
+  margin: 0;
+}
+
+.copy strong {
+  color: var(--text);
+  font-weight: var(--fw-bold);
+}
+
+/* Строка доверия: восстановлена из старого index.html */
+.trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-6);
+  padding: 0;
+  list-style: none;
+}
+
+.trust li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-xs);
+}
+
+.trust svg {
+  color: var(--accent);
+  flex: none;
+}
+
+/* Hero — это <section>, поэтому общее правило печати (nav/header/footer/aside)
+   его не скрывает; при печати стикеров он не нужен. */
+@media print {
+  .hero {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .inner {
+    padding-left: var(--sp-5);
+    padding-right: var(--sp-5);
+  }
+}
+
+@media (max-width: 767px) {
+  .inner {
+    padding: var(--sp-10) var(--sp-4) var(--sp-8);
+  }
+
+  .compact .inner {
+    padding-top: var(--sp-8);
+    padding-bottom: var(--sp-6);
+  }
+
+  .title {
+    max-width: none;
+  }
+
+  .copy {
+    font-size: var(--fs-16);
+  }
+
+  .trust li {
+    font-size: var(--fs-12);
+    padding: var(--sp-1) var(--sp-3);
+  }
+}

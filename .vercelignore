@@ -13,8 +13,6 @@ image.png
 downloads/*
 account.html
 api/account.js
-api/_user-auth.js
 js/account.js
 supabase/migrations/20260824_user_accounts.sql
 !downloads/version.json
-!downloads/Подбор кодов setup 1.3.2.exe

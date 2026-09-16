@@ -1,0 +1,49 @@
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-5);
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-5) 0 0;
+}
+
+.step {
+  counter-increment: step;
+  position: relative;
+  padding: var(--sp-6) var(--sp-5) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.step::before {
+  content: counter(step);
+  position: absolute;
+  top: calc(var(--sp-5) * -1 + 4px);
+  left: var(--sp-5);
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-black);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-accent);
+}
+
+.stepTitle {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+
+.stepText {
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+  margin: 0;
+}

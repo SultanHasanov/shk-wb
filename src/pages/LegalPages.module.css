@@ -1,0 +1,83 @@
+/* Длинный текст читается по ширине строки, а не по ширине экрана: 68ch —
+   верхняя граница комфортной длины строки. */
+.doc {
+  max-width: 68ch;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--sp-10) var(--sp-10) var(--sp-8);
+}
+
+.updated {
+  margin: 0 0 var(--sp-8);
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  font-weight: var(--fw-bold);
+}
+
+.doc h2 {
+  font-size: var(--fs-18);
+  margin-top: var(--sp-8);
+  margin-bottom: var(--sp-3);
+}
+
+.doc h2:first-of-type {
+  margin-top: 0;
+}
+
+.doc p {
+  color: var(--text-muted);
+  line-height: var(--lh-normal);
+  margin-bottom: var(--sp-4);
+}
+
+.doc ul {
+  margin: 0 0 var(--sp-4);
+  padding-left: var(--sp-5);
+  color: var(--text-muted);
+  line-height: var(--lh-normal);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.doc code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  background: var(--surface-muted);
+  border-radius: var(--r-sm);
+  padding: 1px var(--sp-2);
+  color: var(--text);
+}
+
+.doc a {
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+}
+
+.doc a:hover {
+  color: var(--accent);
+}
+
+.rule {
+  height: 1px;
+  border: 0;
+  background: var(--border);
+  margin: var(--sp-8) 0 var(--sp-5);
+}
+
+.footer {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 767px) {
+  .doc {
+    padding: var(--sp-6) var(--sp-5);
+  }
+}

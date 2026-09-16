@@ -2,8 +2,48 @@
   "name": "wb-return-stickers",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build && node build-static.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "preview": "vite preview",
+    "format": "prettier --write src"
+  },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@hookform/resolvers": "^5.9.1",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-tooltip": "^1.2.16",
+    "@resvg/resvg-js": "^2.6.2",
+    "@supabase/supabase-js": "^2.112.4",
+    "@tanstack/react-query": "^5.102.8",
+    "lucide-react": "^0.468.0",
+    "mobx": "^6.16.1",
+    "mobx-react-lite": "^4.1.1",
     "pdf-lib": "^1.17.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-hook-form": "^7.86.0",
+    "react-router-dom": "^7.18.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^9.39.5",
+    "jsdom": "^26.1.0",
+    "playwright": "^1.62.1",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.7"
   }
 }

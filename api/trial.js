@@ -1,6 +1,10 @@
-const { sendApiError, supabaseFetch } = require('./_supabase');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const { enforceRateLimit } = require('../server/_rate-limit');
+const { enforceProgramVersion } = require('../server/_program-version');
 
 module.exports = async function handler(req, res) {
+  if (!await enforceRateLimit(req,res,{scope:'trial',limit:10,windowSeconds:3600})) return;
+  if (!enforceProgramVersion(req, res)) return;
   const hwid = String((req.method === 'GET' ? req.query.hwid : req.body && req.body.hwid) || '').trim();
   if (!/^[a-f0-9]{64}$/i.test(hwid)) return res.status(400).json({ error: 'Invalid hardware id' });
 

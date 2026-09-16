@@ -1,0 +1,1032 @@
+/* ============ Button ============ */
+.button {
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-4);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-14);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 42px;
+  white-space: nowrap;
+  transition: var(--dur) var(--ease);
+}
+
+.sm {
+  min-height: 34px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-13);
+  border-radius: var(--r-sm);
+}
+
+.lg {
+  min-height: 50px;
+  padding: 0 var(--sp-6);
+  font-size: var(--fs-16);
+}
+
+.block {
+  width: 100%;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(203, 17, 171, 0.36);
+}
+
+.primary:active:not(:disabled) {
+  transform: translateY(0);
+  background: var(--accent-dark);
+  box-shadow: var(--shadow-xs);
+}
+
+.secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--text-tertiary);
+}
+
+/* Раньше у .ghost и .danger не было :hover вообще — кнопки Menu/Bell/«Копировать»
+   ощущались мёртвыми. */
+.ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.danger {
+  background: var(--surface);
+  color: var(--danger);
+  border-color: var(--border);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ============ Spinner ============ */
+.spinner {
+  animation: spin 0.7s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============ Field / инпуты ============ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.label {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-3);
+  min-height: 42px;
+  transition: var(--dur) var(--ease);
+}
+
+.textarea {
+  min-height: 100px;
+  resize: vertical;
+  padding: var(--sp-3);
+  line-height: var(--lh-normal);
+}
+
+.input:hover:not(:disabled),
+.select:hover:not(:disabled),
+.textarea:hover:not(:disabled) {
+  border-color: var(--text-tertiary);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--accent);
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* Field проставляет aria-invalid — рамка краснеет автоматически.
+   Раньше существовал класс .inputError, который ни один компонент не применял,
+   поэтому при ошибке краснел только текст, а поле оставалось обычным. */
+.input[aria-invalid='true'],
+.select[aria-invalid='true'],
+.textarea[aria-invalid='true'] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.input[aria-invalid='true']:focus,
+.select[aria-invalid='true']:focus,
+.textarea[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.16);
+}
+
+/* Своя стрелка вместо браузерного хрома: нативный select не совпадал
+   по высоте и виду с .input */
+.select {
+  appearance: none;
+  padding-right: var(--sp-10);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235f5f6d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-3) center;
+}
+
+.help,
+.error {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+}
+
+.error {
+  color: var(--danger);
+  font-weight: var(--fw-medium);
+}
+
+/* ============ Card ============ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  box-shadow: var(--shadow-sm);
+}
+
+.cardFlush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cardInteractive {
+  transition: var(--dur) var(--ease);
+}
+
+.cardInteractive:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+}
+
+/* Использует собственную подсветку, а не кольцо фокуса: раньше .cardAccent
+   был box-shadow:var(--focus), и выделенная карточка выглядела как сфокусированная. */
+.cardAccent {
+  border-color: var(--accent);
+  box-shadow:
+    var(--shadow-md),
+    inset 0 0 0 1px var(--accent);
+}
+
+/* ============ Badge ============ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: max-content;
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  line-height: 1.4;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.accentBadge {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.errorBadge {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ============ Segmented ============ */
+.segmented {
+  display: inline-flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--surface-sunken);
+  border-radius: var(--r-md);
+  width: 100%;
+}
+
+.segment {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+  transition: var(--dur) var(--ease);
+}
+
+.segment:hover:not(.segmentActive) {
+  color: var(--text);
+}
+
+.segmentActive {
+  background: var(--surface);
+  color: var(--accent-dark);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ============ Tabs ============ */
+.tablist {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--surface-sunken);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+  transition: var(--dur) var(--ease);
+}
+
+.tab:hover:not(.tabActive) {
+  color: var(--text);
+}
+
+.tabActive {
+  background: var(--surface);
+  color: var(--accent-dark);
+  box-shadow: var(--shadow-xs);
+}
+
+.tabpanel {
+  margin-top: var(--sp-5);
+}
+
+/* Панель получает tabIndex=0 ради прокрутки с клавиатуры — но обводить её
+   кольцом фокуса не нужно, это не управляющий элемент. */
+.tabpanel:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ============ Accordion ============ */
+.accordion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.accordionItem {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.accordionItem[open] {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.accordionQ {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  list-style: none;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+/* Убираем нативный треугольник в WebKit и Firefox */
+.accordionQ::-webkit-details-marker {
+  display: none;
+}
+
+.accordionQ::marker {
+  content: '';
+}
+
+.accordionQ:hover {
+  background: var(--surface-muted);
+}
+
+.accordionQ:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.accordionChevron {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur) var(--ease);
+}
+
+.accordionItem[open] .accordionChevron {
+  transform: rotate(180deg);
+}
+
+.accordionA {
+  padding: 0 var(--sp-5) var(--sp-5);
+  color: var(--text-muted);
+  line-height: var(--lh-normal);
+  font-size: var(--fs-14);
+}
+
+.accordionA p {
+  margin: 0 0 var(--sp-3);
+}
+
+.accordionA > *:last-child {
+  margin-bottom: 0;
+}
+
+/* ============ Progress ============ */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.progressLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.track {
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  transition: width var(--dur-slow) var(--ease);
+}
+
+.barAccent {
+  background: var(--accent);
+}
+
+.barWarning {
+  background: var(--warning);
+}
+
+.barDanger {
+  background: var(--danger);
+}
+
+/* ============ Switch ============ */
+.switchRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+}
+
+.switchLabel {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.switchDesc {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+  max-width: 52ch;
+}
+
+/* appearance:none + ::before — рисуем дорожку и бегунок сами: нативный чекбокс
+   не умеет быть тумблером ни в одном браузере. */
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: var(--r-full);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  transition: var(--dur) var(--ease);
+}
+
+.switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--dur) var(--ease);
+}
+
+.switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch:checked::before {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============ Menu ============ */
+.menuRoot {
+  position: relative;
+}
+
+.menuTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text);
+  transition: var(--dur) var(--ease);
+}
+
+.menuTrigger:hover {
+  background: var(--surface-muted);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  min-width: 220px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--sp-1);
+  z-index: var(--z-dropdown);
+  animation: pop var(--dur) var(--ease);
+}
+
+.menuStart {
+  right: auto;
+  left: 0;
+}
+
+.menuLabel {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  text-align: left;
+}
+
+.menuItem:hover {
+  background: var(--surface-muted);
+}
+
+.menuDanger {
+  color: var(--danger);
+}
+
+.menuDanger:hover {
+  background: var(--danger-soft);
+}
+
+/* ============ Pagination ============ */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.paginationInfo {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+/* ============ Avatar ============ */
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  box-shadow: var(--shadow-accent);
+}
+
+/* ============ PriceTable ============ */
+.priceCaption {
+  caption-side: top;
+  text-align: left;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.priceTable td,
+.priceTable th {
+  text-align: center;
+}
+
+.priceRowHead {
+  position: static;
+  text-align: left !important;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.priceCellWrap {
+  padding: var(--sp-2) !important;
+}
+
+.priceCell {
+  display: block;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  white-space: nowrap;
+  transition: var(--dur-fast) var(--ease);
+}
+
+button.priceCell:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-softer);
+  color: var(--accent-dark);
+}
+
+.priceCellActive {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--text-on-accent) !important;
+  box-shadow: var(--shadow-accent);
+}
+
+/* ============ Alert ============ */
+.alert {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: var(--fs-13);
+  line-height: var(--lh-snug);
+}
+
+.alert svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.alertError {
+  background: var(--danger-soft);
+  border-color: rgba(192, 57, 43, 0.25);
+  color: var(--danger);
+}
+
+.alertWarning {
+  background: var(--warning-soft);
+  border-color: rgba(154, 103, 0, 0.25);
+  color: var(--warning);
+}
+
+.alertSuccess {
+  background: var(--success-soft);
+  border-color: rgba(31, 122, 69, 0.25);
+  color: var(--success);
+}
+
+.alertInfo {
+  background: var(--accent-soft);
+  border-color: var(--accent-softer);
+  color: var(--accent-dark);
+}
+
+/* ============ Stat ============ */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.statIcon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: var(--sp-3);
+}
+
+.statValue {
+  font-size: var(--fs-36);
+  font-weight: var(--fw-black);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.statLabel {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+/* ============ Table ============ */
+.tableWrap {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-13);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-muted);
+  text-align: left;
+  color: var(--text-tertiary);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  z-index: var(--z-base);
+}
+
+.table th,
+.table td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.table tbody tr:hover {
+  background: var(--surface-muted);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* На телефоне таблицу листают вбок внутри .tableWrap: nowrap оставляем (в
+   ячейках коды, ключи и даты — перенос делает их нечитаемыми), но ужимаем
+   отступы, чтобы за экран уезжало меньше. */
+@media (max-width: 767px) {
+  .table {
+    font-size: var(--fs-12);
+  }
+
+  .table th,
+  .table td {
+    padding: var(--sp-2) var(--sp-3);
+  }
+}
+
+/* ============ Skeleton ============ */
+.skeleton {
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, #eeeef1 25%, #f7f7f9 50%, #eeeef1 75%);
+  background-size: 200% 100%;
+  animation: shine 1.3s infinite;
+}
+
+@keyframes shine {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ============ EmptyState ============ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-2);
+  padding: var(--sp-12) var(--sp-5);
+  color: var(--text-muted);
+}
+
+.emptyIcon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: var(--sp-2);
+}
+
+.empty strong {
+  font-size: var(--fs-16);
+  color: var(--text);
+}
+
+.empty p {
+  margin: 0;
+  max-width: 44ch;
+  font-size: var(--fs-13);
+}
+
+.empty > *:last-child {
+  margin-top: var(--sp-3);
+}
+
+/* ============ Checkbox ============ */
+.check {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin: 0;
+  cursor: pointer;
+}
+
+.check label {
+  cursor: pointer;
+}
+
+.check a {
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+}
+
+/* ============ Modal ============ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(29, 29, 39, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: var(--z-overlay);
+  animation: fade var(--dur) var(--ease);
+}
+
+.dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: var(--sp-6);
+  width: min(520px, calc(100vw - var(--sp-8)));
+  max-height: calc(100vh - var(--sp-8));
+  overflow: auto;
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-overlay);
+  animation: pop var(--dur) var(--ease);
+}
+
+.dialog h2 {
+  margin-bottom: var(--sp-2);
+  padding-right: var(--sp-8);
+}
+
+/* Раньше было float:right, и крестик, отрисованный до заголовка, вставал над ним */
+.dialogClose {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1);
+  display: grid;
+  place-items: center;
+}
+
+.dialogClose:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.dialogDesc {
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  margin-bottom: var(--sp-4);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.97);
+  }
+}
+
+/* ============ Toast ============ */
+.toastViewport {
+  position: fixed;
+  right: var(--sp-5);
+  bottom: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--text);
+  color: #fff;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  pointer-events: auto;
+  animation: slideIn var(--dur-slow) var(--ease);
+}
+
+.toastError {
+  background: var(--danger);
+}
+
+.toastSuccess {
+  background: var(--success);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (max-width: 479px) {
+  .toastViewport {
+    left: var(--sp-4);
+    right: var(--sp-4);
+    bottom: var(--sp-4);
+  }
+}

@@ -1,0 +1,180 @@
+const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
+const { handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
+const { referralCookie } = require('../server/_user-auth');
+const crypto = require('crypto');
+const RATE_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT = 20;
+const attempts = new Map();
+
+function config() {
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const serviceKey = process.env.SUPABASE_SECRET_KEY;
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!url || !serviceKey || !publishableKey || !botToken) throw new Error('Auth environment variables are not configured');
+  return { url, serviceKey, publishableKey, botToken };
+}
+
+function json(res, status, body) {
+  res.status(status).json(body);
+}
+
+function clientIp(req) {
+  return String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+}
+
+function localRateLimited(req) {
+  const now = Date.now();
+  const key = clientIp(req);
+  const recent = (attempts.get(key) || []).filter(time => now - time < RATE_WINDOW_MS);
+  recent.push(now);
+  attempts.set(key, recent);
+  return recent.length > RATE_LIMIT;
+}
+
+async function rateLimited(req) {
+  const { botToken } = config();
+  const limiterKey = crypto.createHmac('sha256', botToken).update(clientIp(req)).digest('hex');
+  try {
+    return Boolean(await request('/rest/v1/rpc/consume_auth_rate_limit', {
+      method: 'POST', body: JSON.stringify({ p_key: limiterKey, p_limit: RATE_LIMIT, p_window_seconds: 60 }),
+    }));
+  } catch (error) {
+    console.warn('Durable auth rate limit unavailable, using local fallback', error.message);
+    return localRateLimited(req);
+  }
+}
+
+async function request(path, options = {}, usePublishable = false) {
+  const { url, serviceKey, publishableKey } = config();
+  const key = usePublishable ? publishableKey : serviceKey;
+  const response = await fetch(`${url}${path}`, {
+    ...options,
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.msg || data.message || data.error_description || 'Supabase request failed');
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+async function currentUser(req) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return null;
+  const { url, publishableKey } = config();
+  const response = await fetch(`${url}/auth/v1/user`, { headers: { apikey: publishableKey, Authorization: `Bearer ${token}` } });
+  return response.ok ? response.json() : null;
+}
+
+async function findIdentity(telegramId) {
+  const rows = await request(`/rest/v1/user_telegram_identities?telegram_user_id=eq.${telegramId}&select=user_id`);
+  return rows[0] || null;
+}
+
+async function saveIdentity(userId, telegram) {
+  return request('/rest/v1/user_telegram_identities?on_conflict=telegram_user_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      telegram_user_id: telegram.id,
+      username: telegram.username || null,
+      first_name: telegram.first_name || '',
+      last_name: telegram.last_name || null,
+      photo_url: telegram.photo_url || null,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
+async function createTelegramUser(telegram) {
+  const technicalEmail = `telegram-${telegram.id}@users.invalid`;
+  const user = await request('/auth/v1/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: technicalEmail,
+      email_confirm: true,
+      user_metadata: {
+        auth_source: 'telegram', telegram_id: String(telegram.id), username: telegram.username || null,
+        full_name: [telegram.first_name, telegram.last_name].filter(Boolean).join(' '), avatar_url: telegram.photo_url || null,
+      },
+    }),
+  });
+  try {
+    await saveIdentity(user.id, telegram);
+    return { id: user.id, email: technicalEmail };
+  } catch (error) {
+    await request(`/auth/v1/admin/users/${user.id}`, { method: 'DELETE' }).catch(() => {});
+    const identity = await findIdentity(telegram.id);
+    if (!identity) throw error;
+    return { id: identity.user_id, email: `telegram-${telegram.id}@users.invalid` };
+  }
+}
+
+async function magicLink(email) {
+  const result = await request('/auth/v1/admin/generate_link', {
+    method: 'POST', body: JSON.stringify({ type: 'magiclink', email }),
+  });
+  const tokenHash = result.properties?.hashed_token || result.hashed_token;
+  if (!tokenHash) throw new Error('Supabase did not return a token');
+  return tokenHash;
+}
+
+module.exports = async function handler(req, res) {
+  if (req.query?.action === 'bot') {
+    if (req.method === 'GET') return res.status(200).json({ ok: true, service: 'telegram-wb-bot' });
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    return handleTelegramUpdate(req, res);
+  }
+  if (req.query?.action === 'referral') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' });
+    const code = String(req.body?.code || '').trim().toUpperCase();
+    // Нижняя граница 6: новые коды короче, ранее выданные 10-символьные ещё в ходу
+    if (!/^[A-Z0-9]{6,16}$/.test(code)) return json(res, 400, { error: 'Некорректная реферальная ссылка', code: 'INVALID_REFERRAL_CODE' });
+    try {
+      const value = referralCookie(code);
+      res.setHeader('Set-Cookie', `shk_ref=${encodeURIComponent(value)}; Max-Age=${30 * 86400}; Path=/; HttpOnly; SameSite=Lax; Secure`);
+      return res.status(204).end();
+    } catch (error) {
+      console.error(error);
+      return json(res, 500, { error: 'Реферальная программа не настроена', code: 'REFERRAL_NOT_CONFIGURED' });
+    }
+  }
+  if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+  if (await rateLimited(req)) return json(res, 429, { error: 'Слишком много попыток. Повторите через минуту' });
+  try {
+    const input = req.body || {};
+    const { botToken } = config();
+    const webAppUser = validateTelegramWebApp(input.webAppData, botToken);
+    const telegram = webAppUser ? { ...webAppUser, mode: input.mode } : input;
+    if (!webAppUser && !validateTelegram(telegram, botToken)) return json(res, 401, { error: 'Не удалось подтвердить данные Telegram' });
+
+    if (telegram.mode === 'link') {
+      const user = await currentUser(req);
+      if (!user) return json(res, 401, { error: 'Сначала войдите в аккаунт' });
+      const existing = await findIdentity(telegram.id);
+      if (existing && existing.user_id !== user.id) return json(res, 409, { error: 'Этот Telegram уже привязан к другому аккаунту' });
+      await saveIdentity(user.id, telegram);
+      return json(res, 200, { linked: true });
+    }
+
+    let identity = await findIdentity(telegram.id);
+    let account;
+    if (identity) {
+      const user = await request(`/auth/v1/admin/users/${identity.user_id}`);
+      account = { id: user.id, email: user.email };
+      await saveIdentity(user.id, telegram);
+    } else {
+      account = await createTelegramUser(telegram);
+    }
+    const tokenHash = await magicLink(account.email);
+    if (webAppUser) await notifyMiniAppAuthorized(telegram.id).catch(error => console.warn('Unable to notify Telegram Mini App user', error.message));
+    return json(res, 200, { token_hash: tokenHash });
+  } catch (error) {
+    console.error('Telegram auth failed', error.message);
+    return json(res, 500, { error: 'Не удалось выполнить вход через Telegram' });
+  }
+};
