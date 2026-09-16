@@ -56,6 +56,24 @@ async function clearSession(telegramId) {
   await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
 }
 
+/** Сессия генератора исчезает, а эта запись остаётся для статистики и рассылок. */
+async function touchSubscriber(from, chatId) {
+  if (!from?.id || !chatId) return;
+  await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      telegram_user_id: Number(from.id),
+      chat_id: Number(chatId),
+      username: from.username || null,
+      first_name: from.first_name || '',
+      last_name: from.last_name || null,
+      last_seen_at: new Date().toISOString(),
+      blocked_at: null,
+    }),
+  });
+}
+
 function choiceKeyboard(rows) { return { inline_keyboard: rows }; }
 
 function kindKeyboard() {
@@ -250,6 +268,7 @@ async function notifyMiniAppAuthorized(telegramId) {
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
   if (!chatId) return;
+  await touchSubscriber(from, chatId);
   const data = String(callback.data || '');
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
   if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
@@ -297,6 +316,7 @@ async function handleCallback(callback) {
 async function handleMessage(message) {
   const from = message.from, chatId = message.chat.id, text = String(message.text || '').trim();
   if (message.chat.type !== 'private') return sendMessage(chatId, 'Используйте личный чат с ботом.');
+  await touchSubscriber(from, chatId);
   if (/^\/(start|help)(?:@\w+)?(?:\s+[A-Za-z0-9_-]+)?$/i.test(text)) {
     await clearSession(from.id);
     const userId = await findUser(from.id);

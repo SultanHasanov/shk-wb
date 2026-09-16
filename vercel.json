@@ -33,6 +33,8 @@
     { "source": "/api/admin/cabinet/withdrawals", "destination": "/api/admin/data?cabinet=withdrawals" },
     { "source": "/api/admin/cabinet/withdrawal", "destination": "/api/admin/data?cabinet=withdrawal" },
     { "source": "/api/admin/cabinet/news", "destination": "/api/admin/data?cabinet=news" },
+    { "source": "/api/admin/cabinet/telegram-audience", "destination": "/api/admin/data?cabinet=telegram-audience" },
+    { "source": "/api/admin/cabinet/telegram-broadcast", "destination": "/api/admin/data?cabinet=telegram-broadcast" },
     { "source": "/api/payments/create", "destination": "/api/payments?action=create" },
     { "source": "/api/payments/webhook", "destination": "/api/payments?action=webhook" },
     { "source": "/api/payments/status", "destination": "/api/payments?action=status" },

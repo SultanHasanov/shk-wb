@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useAdminNews, useAdminWithdrawals, useAdminWithdrawalUpdate } from '../../api/admin';
+import {
+  useAdminNews, useAdminTelegramAudience, useAdminTelegramBroadcast,
+  useAdminWithdrawals, useAdminWithdrawalUpdate,
+} from '../../api/admin';
 import { dateTime, money } from '../../api/cabinet';
 import {
   Alert, Badge, Button, Card, EmptyState, Field, Input, Skeleton, Table, Textarea, useToast,
@@ -20,6 +23,8 @@ export function AdminCabinetPage() {
   const withdrawals = useAdminWithdrawals();
   const update = useAdminWithdrawalUpdate();
   const news = useAdminNews();
+  const telegramAudience = useAdminTelegramAudience();
+  const telegramBroadcast = useAdminTelegramBroadcast();
 
   const act = (id: string, status: 'approved' | 'paid' | 'rejected') =>
     update.mutate({ id, status }, {
@@ -69,6 +74,48 @@ export function AdminCabinetPage() {
           <Card><EmptyState title="Заявок нет" text="Здесь появятся запросы на вывод реферального баланса." /></Card>
         )}
       </section>
+
+      <Card>
+        <h3>Рассылка в Telegram-боте</h3>
+        <p className={s.mutedNote}>
+          Активировали бота: <b>{telegramAudience.data?.activated ?? '—'}</b>. Доступно для рассылки:{' '}
+          <b>{telegramAudience.data?.available ?? '—'}</b>
+          {telegramAudience.data?.blocked ? ` · заблокировали бота: ${telegramAudience.data.blocked}` : ''}.
+          Каждому человеку уйдёт отдельное сообщение.
+        </p>
+        <form
+          className="stack"
+          onSubmit={event => {
+            event.preventDefault();
+            const formElement = event.currentTarget;
+            const form = new FormData(formElement);
+            const available = telegramAudience.data?.available ?? 0;
+            if (!window.confirm(`Отправить персональную рассылку ${available} получателям?`)) return;
+            telegramBroadcast.mutate({
+              text: String(form.get('text') || ''),
+              button: String(form.get('button') || ''),
+              url: String(form.get('url') || ''),
+            }, {
+              onSuccess: result => {
+                toast(`Отправлено: ${result.sent}. Ошибок: ${result.failed}. Недоступны: ${result.blocked}.`, result.failed ? 'default' : 'success');
+                if (!result.failed) formElement.reset();
+              },
+              onError: (error: Error) => toast(error.message, 'error'),
+            });
+          }}
+        >
+          <Field label="Текст" help="Переменные: {name}, {first_name}, {last_name}, {username}">
+            <Textarea name="text" rows={5} maxLength={3500} placeholder="Здравствуйте, {name}!" required />
+          </Field>
+          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} /></Field>
+          <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" /></Field>
+          <Button type="submit" loading={telegramBroadcast.isPending} disabled={!telegramAudience.data?.available}>
+            Отправить в Telegram
+          </Button>
+        </form>
+        {telegramAudience.isError && <Alert tone="error">Не удалось загрузить аудиторию бота.</Alert>}
+        {telegramBroadcast.isError && <Alert tone="error">{telegramBroadcast.error.message}</Alert>}
+      </Card>
 
       <Card>
         <h3>Новость пользователям кабинета</h3>

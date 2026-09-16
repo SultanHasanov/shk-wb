@@ -48,6 +48,7 @@ export const adminKeys = {
   pool: (kind: 'stickerPool' | 'boxPool', page: number) => ['admin', kind, page] as const,
   payments: ['admin', 'payments'] as const,
   withdrawals: ['admin', 'withdrawals'] as const,
+  telegramAudience: ['admin', 'telegram-audience'] as const,
 };
 
 /* ============ Общие типы ============ */
@@ -528,5 +529,27 @@ export function useAdminNews() {
         method: 'POST',
         body: JSON.stringify(body),
       }),
+  });
+}
+
+export type AdminTelegramAudience = { activated: number; available: number; blocked: number };
+export type AdminTelegramBroadcastResult = { sent: number; failed: number; blocked: number; total: number };
+
+export function useAdminTelegramAudience() {
+  return useQuery({
+    queryKey: adminKeys.telegramAudience,
+    queryFn: () => adminApi<AdminTelegramAudience>('/api/admin/cabinet/telegram-audience'),
+    staleTime: 30_000,
+  });
+}
+
+export function useAdminTelegramBroadcast() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { text: string; button?: string; url?: string }) =>
+      adminApi<AdminTelegramBroadcastResult>('/api/admin/cabinet/telegram-broadcast', {
+        method: 'POST', body: JSON.stringify(body),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminKeys.telegramAudience }),
   });
 }

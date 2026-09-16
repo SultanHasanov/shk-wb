@@ -14,6 +14,7 @@ async function telegramRequest(method, body) {
   if (!response.ok || data.ok !== true) {
     const error = new Error(data.description || `Telegram API error (${response.status})`);
     error.status = response.status;
+    error.details = data;
     throw error;
   }
   return data.result;
