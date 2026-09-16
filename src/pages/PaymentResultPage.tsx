@@ -9,7 +9,7 @@ import { Hero } from '../components/Hero';
 import { Alert, Button, Card, EmptyState, Skeleton, Spinner, useToast } from '../ui';
 import { formatTotal } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
-import { BOT_URL } from '../lib/telegram';
+import { BOT_URL, SUPPORT_URL, SUPPORT_USERNAME } from '../lib/telegram';
 import { cabinetKey } from '../api/cabinet';
 import { forgetPendingOrder } from '../lib/pending-orders';
 import s from './PaymentResultPage.module.css';
@@ -291,13 +291,17 @@ export const PaymentResultPage = observer(() => {
                       Заказ отменён или платёж не был завершён. Деньги, если они списались,
                       возвращаются банком автоматически.
                     </Alert>
+                    <p className="muted" style={{ margin: 0 }}>
+                      Не получается оплатить? Напишите нам в Telegram и опишите, что пошло не так
+                      (карта, СБП, ошибка банка) — поможем завершить покупку.
+                    </p>
                     <div className="row">
                       <Link to="/">
                         <Button>Попробовать снова</Button>
                       </Link>
-                      <Link to="/contacts">
-                        <Button variant="secondary">Написать в поддержку</Button>
-                      </Link>
+                      <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
+                        <Button variant="secondary">Написать в Telegram @{SUPPORT_USERNAME}</Button>
+                      </a>
                     </div>
                   </>
                 )}

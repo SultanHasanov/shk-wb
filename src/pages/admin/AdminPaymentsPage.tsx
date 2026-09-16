@@ -46,21 +46,6 @@ export function AdminPaymentsPage() {
       </Card>
 
       <Card>
-        <h3>Действующие пакеты</h3>
-        <Table>
-          <thead><tr><th>Генераций</th><th>Цена</th></tr></thead>
-          <tbody>
-            {data.packages.map(pack => (
-              <tr key={pack.quantity}>
-                <td>{pack.quantity}</td>
-                <td>{pack.total} ₽</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Card>
-
-      <Card>
         {/* Ступени цен серверный API умел всегда, а интерфейса к ним не было —
             цены правились только правкой констант в коде. */}
         <h3>Ступени цены за штуку</h3>

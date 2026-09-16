@@ -461,7 +461,6 @@ export type AdminPayments = {
   enabled: boolean;
   readiness: { yookassa: boolean; testMode: boolean };
   tiers: { id: number; kind: string; min_quantity: number; unit_price: number; active: boolean }[];
-  packages: { quantity: number; total: number }[];
   orders: AdminOrder[];
 };
 
