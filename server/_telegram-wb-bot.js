@@ -3,7 +3,7 @@ const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, sendDocument, sendMediaGroup, sendMessage, sendPhoto } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
 const { PACKAGE_PRICES } = require('./_payments');
-const { accountHasValuableData } = require('./_telegram-account');
+const { accountHasValuableData, isTechnicalTelegramUser } = require('./_telegram-account');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const HOME_KEYBOARD = {
@@ -83,10 +83,10 @@ function miniAppKeyboard() {
   ]);
 }
 
-function accountKeyboard(canRelink) {
+function accountKeyboard(canConnect) {
   const rows = [];
-  if (canRelink) rows.push([{ text: 'Подключить кабинет с покупкой', web_app: { url: publicUrl('/telegram-account') } }]);
-  rows.push([{ text: 'Объединить кабинеты через поддержку', url: 'https://t.me/roma_denosov' }]);
+  if (canConnect) rows.push([{ text: 'Подключить основной кабинет', web_app: { url: publicUrl('/telegram-account') } }]);
+  rows.push([{ text: 'Продолжить с текущим', callback_data: 'account:continue' }]);
   return choiceKeyboard(rows);
 }
 
@@ -219,15 +219,18 @@ async function showAccount(from, chatId) {
     await sendMessage(chatId, '<b>Аккаунт не подключён</b>\n\nЕсли вы уже покупали генерации на сайте, войдите в существующий кабинет.', { reply_markup: miniAppKeyboard() });
     return;
   }
-  const [rows, hasData] = await Promise.all([
+  const [rows, hasData, technical] = await Promise.all([
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used`),
     accountHasValuableData(userId),
+    isTechnicalTelegramUser(userId),
   ]);
   const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
-  const guidance = hasData
-    ? 'В этом кабинете уже есть покупки или история. Автоматическая смена скрыта, чтобы не потерять данные.'
-    : 'Если этот пустой кабинет был создан случайно, можно подключить кабинет с покупкой.';
-  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\n${guidance}`, { reply_markup: accountKeyboard(!hasData) });
+  const guidance = technical
+    ? hasData
+      ? 'Если вы уже пользовались сайтом с другим email, подключите основной кабинет — пакеты и история будут объединены.'
+      : 'Если этот кабинет был создан случайно, подключите основной кабинет.'
+    : 'Сайт и Telegram используют один кабинет.';
+  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\n${guidance}`, { reply_markup: accountKeyboard(technical) });
 }
 
 async function showHelp(chatId) {
@@ -250,6 +253,7 @@ async function handleCallback(callback) {
   const data = String(callback.data || '');
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
   if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'account:continue') { await answerCallbackQuery(callback.id); await sendMessage(chatId, 'Продолжайте работу с текущим кабинетом.', { reply_markup: HOME_KEYBOARD }); return; }
   const pageMatch = data.match(/^gen:page:([^:]+:\d+):(\d+)$/);
   if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[1], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[1], result, Number(pageMatch[2])); return; }
   const session = await getSession(from.id);

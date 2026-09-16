@@ -1,6 +1,6 @@
 const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
 const { handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
-const { accountHasValuableData } = require('../server/_telegram-account');
+const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
 const { referralCookie } = require('../server/_user-auth');
 const crypto = require('crypto');
 const RATE_WINDOW_MS = 60 * 1000;
@@ -107,6 +107,25 @@ async function relinkIdentity(userId, telegram) {
   return details;
 }
 
+async function mergeTelegramAccount(userId, telegram) {
+  const details = await request('/rest/v1/rpc/merge_telegram_account', {
+    method: 'POST',
+    body: JSON.stringify({ p_telegram_user_id: telegram.id, p_target_user_id: userId }),
+  });
+  await saveIdentity(userId, telegram);
+  if (details?.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
+    await request(`/auth/v1/admin/users/${details.sourceUserId}`, { method: 'DELETE' })
+      .catch(error => console.warn('Unable to delete merged Telegram account', error.message));
+  }
+  return details || {};
+}
+
+function maskedEmail(email) {
+  const [name, domain] = String(email || '').split('@');
+  if (!name || !domain) return 'email-кабинет';
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
 async function createTelegramUser(telegram) {
   const technicalEmail = `telegram-${telegram.id}@users.invalid`;
   const user = await request('/auth/v1/admin/users', {
@@ -171,14 +190,42 @@ module.exports = async function handler(req, res) {
 
     if (telegram.mode === 'status') {
       const identity = await findIdentity(telegram.id);
-      if (!identity) return json(res, 200, { state: 'unlinked', canRelink: true });
+      if (!identity) return json(res, 200, { state: 'unlinked', canConnect: true });
       const source = await request(`/auth/v1/admin/users/${identity.user_id}`);
       const technical = /^telegram-[0-9]+@users[.]invalid$/i.test(String(source.email || ''));
       const hasData = await accountHasValuableData(identity.user_id);
       return json(res, 200, {
         state: hasData ? 'has_data' : technical ? 'empty_technical' : 'linked',
-        canRelink: technical && !hasData,
+        canConnect: technical,
       });
+    }
+
+    if (telegram.mode === 'prepare_merge') {
+      const user = await currentUser(req);
+      if (!user?.email || user.email.endsWith('@users.invalid')) {
+        return json(res, 401, { error: 'Войдите по электронной почте в основной кабинет' });
+      }
+      const existing = await findIdentity(telegram.id);
+      const targetIdentity = await request(`/rest/v1/user_telegram_identities?user_id=eq.${encodeURIComponent(user.id)}&select=telegram_user_id&limit=1`);
+      if (targetIdentity.length && Number(targetIdentity[0].telegram_user_id) !== Number(telegram.id)) {
+        return json(res, 409, { error: 'К основному кабинету уже привязан другой Telegram', code: 'TARGET_ACCOUNT_HAS_TELEGRAM' });
+      }
+      if (!existing || existing.user_id === user.id) {
+        return json(res, 200, {
+          action: 'relink', targetEmail: maskedEmail(user.email),
+          summary: { orders: 0, history: 0, licenses: 0, codes: 0, generations: 0 },
+        });
+      }
+      const source = await request(`/auth/v1/admin/users/${existing.user_id}`);
+      if (!/^telegram-[0-9]+@users[.]invalid$/i.test(String(source.email || ''))) {
+        return json(res, 409, { error: 'Текущий кабинет имеет собственный вход по почте. Для объединения обратитесь в поддержку.', code: 'SOURCE_ACCOUNT_NOT_TECHNICAL' });
+      }
+      const summary = await accountMergePreview(existing.user_id);
+      if (summary.financialConflict) {
+        return json(res, 409, { error: 'В текущем кабинете есть реферальные деньги или выплаты. Такое объединение выполнит поддержка.', code: 'TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT' });
+      }
+      const { financialConflict, ...publicSummary } = summary;
+      return json(res, 200, { action: 'merge', targetEmail: maskedEmail(user.email), summary: publicSummary });
     }
 
     if (telegram.mode === 'link') {
@@ -201,6 +248,16 @@ module.exports = async function handler(req, res) {
       return json(res, 200, { linked: true, relinked: true });
     }
 
+    if (telegram.mode === 'merge') {
+      const user = await currentUser(req);
+      if (!user?.email || user.email.endsWith('@users.invalid')) {
+        return json(res, 401, { error: 'Сначала войдите в основной кабинет' });
+      }
+      const details = await mergeTelegramAccount(user.id, telegram);
+      await notifyMiniAppAuthorized(telegram.id).catch(error => console.warn('Unable to notify merged Telegram user', error.message));
+      return json(res, 200, { linked: true, merged: true, ...details });
+    }
+
     let identity = await findIdentity(telegram.id);
     let account;
     if (identity) {
@@ -217,6 +274,12 @@ module.exports = async function handler(req, res) {
     console.error('Telegram auth failed', error.message);
     if (String(error.message).includes('TELEGRAM_ACCOUNT_NOT_EMPTY')) {
       return json(res, 409, { error: 'В текущем Telegram-кабинете уже есть данные. Напишите в поддержку — мы безопасно объединим кабинеты.', code: 'TELEGRAM_ACCOUNT_NOT_EMPTY' });
+    }
+    if (String(error.message).includes('TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT')) {
+      return json(res, 409, { error: 'В текущем кабинете есть реферальные деньги или выплаты. Обратитесь в поддержку для ручной сверки.', code: 'TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT' });
+    }
+    if (String(error.message).includes('SOURCE_ACCOUNT_NOT_TECHNICAL')) {
+      return json(res, 409, { error: 'Автоматически объединить можно только кабинет, созданный через Telegram', code: 'SOURCE_ACCOUNT_NOT_TECHNICAL' });
     }
     if (String(error.message).includes('TARGET_ACCOUNT_HAS_TELEGRAM')) {
       return json(res, 409, { error: 'К этому кабинету уже привязан другой Telegram', code: 'TARGET_ACCOUNT_HAS_TELEGRAM' });

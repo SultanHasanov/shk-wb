@@ -1,4 +1,4 @@
-const { supabaseFetch } = require('./_supabase');
+const { supabaseFetch, supabaseFetchWithMeta } = require('./_supabase');
 
 function hasValuableAccountRows(rows) {
   return Boolean(
@@ -28,4 +28,45 @@ async function accountHasValuableData(userId) {
   return hasValuableAccountRows({ orders, stickers, licenses, cellLicenses, history, requests, ledger, withdrawals, invited, referrals });
 }
 
-module.exports = { accountHasValuableData, hasValuableAccountRows };
+async function accountMergePreview(userId) {
+  const q = encodeURIComponent(userId);
+  const [orders, stickers, history, licenses, cellLicenses, ledger, withdrawals, invited, referrals] = await Promise.all([
+    supabaseFetchWithMeta(`payment_orders?user_id=eq.${q}&status=eq.succeeded&select=id&limit=1`),
+    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${q}&select=generation_limit,generation_used`),
+    supabaseFetchWithMeta(`user_generation_history?user_id=eq.${q}&select=id&limit=1`),
+    supabaseFetchWithMeta(`license_keys?owner_user_id=eq.${q}&select=key&limit=1`),
+    supabaseFetchWithMeta(`cell_print_licenses?owner_user_id=eq.${q}&select=key&limit=1`),
+    supabaseFetch(`referral_ledger?user_id=eq.${q}&select=id&limit=1`),
+    supabaseFetch(`referral_withdrawals?user_id=eq.${q}&select=id&limit=1`),
+    supabaseFetch(`referral_attributions?referrer_user_id=eq.${q}&select=invited_user_id&limit=1`),
+    supabaseFetch(`referral_accounts?user_id=eq.${q}&select=available_kopecks,reserved_kopecks,earned_kopecks,paid_kopecks,debt_kopecks&limit=1`),
+  ]);
+  const financialConflict = Boolean(
+    ledger.length || withdrawals.length || invited.length || referrals.some(account =>
+      ['available_kopecks', 'reserved_kopecks', 'earned_kopecks', 'paid_kopecks', 'debt_kopecks']
+        .some(field => Number(account[field] || 0) !== 0),
+    ),
+  );
+  return {
+    orders: orders.count || 0,
+    history: history.count || 0,
+    licenses: (licenses.count || 0) + (cellLicenses.count || 0),
+    codes: stickers.length,
+    generations: stickers.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
+    financialConflict,
+  };
+}
+
+async function isTechnicalTelegramUser(userId) {
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) throw new Error('Supabase environment variables are not configured');
+  const response = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) throw new Error(`Unable to inspect Telegram account (${response.status})`);
+  const user = await response.json();
+  return /^telegram-[0-9]+@users[.]invalid$/i.test(String(user.email || ''));
+}
+
+module.exports = { accountHasValuableData, accountMergePreview, hasValuableAccountRows, isTechnicalTelegramUser };
