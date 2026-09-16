@@ -3,6 +3,7 @@ const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, sendDocument, sendMediaGroup, sendMessage, sendPhoto } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
 const { PACKAGE_PRICES } = require('./_payments');
+const { accountHasValuableData } = require('./_telegram-account');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const HOME_KEYBOARD = {
@@ -82,11 +83,11 @@ function miniAppKeyboard() {
   ]);
 }
 
-function accountKeyboard() {
-  return choiceKeyboard([
-    [{ text: 'Войти в другой кабинет', web_app: { url: publicUrl('/telegram-account') } }],
-    [{ text: 'Открыть кабинет', web_app: { url: publicUrl('/cabinet') } }],
-  ]);
+function accountKeyboard(canRelink) {
+  const rows = [];
+  if (canRelink) rows.push([{ text: 'Подключить кабинет с покупкой', web_app: { url: publicUrl('/telegram-account') } }]);
+  rows.push([{ text: 'Объединить кабинеты через поддержку', url: 'https://t.me/roma_denosov' }]);
+  return choiceKeyboard(rows);
 }
 
 async function sendLoginPrompt(from, chatId, text) {
@@ -218,9 +219,15 @@ async function showAccount(from, chatId) {
     await sendMessage(chatId, '<b>Аккаунт не подключён</b>\n\nЕсли вы уже покупали генерации на сайте, войдите в существующий кабинет.', { reply_markup: miniAppKeyboard() });
     return;
   }
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used`);
+  const [rows, hasData] = await Promise.all([
+    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used`),
+    accountHasValuableData(userId),
+  ]);
   const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
-  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\nЧтобы использовать покупки из другого кабинета, войдите в него по электронной почте.`, { reply_markup: accountKeyboard() });
+  const guidance = hasData
+    ? 'В этом кабинете уже есть покупки или история. Автоматическая смена скрыта, чтобы не потерять данные.'
+    : 'Если этот пустой кабинет был создан случайно, можно подключить кабинет с покупкой.';
+  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\n${guidance}`, { reply_markup: accountKeyboard(!hasData) });
 }
 
 async function showHelp(chatId) {

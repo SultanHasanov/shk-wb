@@ -1,5 +1,6 @@
 const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
 const { handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
+const { accountHasValuableData } = require('../server/_telegram-account');
 const { referralCookie } = require('../server/_user-auth');
 const crypto = require('crypto');
 const RATE_WINDOW_MS = 60 * 1000;
@@ -167,6 +168,18 @@ module.exports = async function handler(req, res) {
     const webAppUser = validateTelegramWebApp(input.webAppData, botToken);
     const telegram = webAppUser ? { ...webAppUser, mode: input.mode } : input;
     if (!webAppUser && !validateTelegram(telegram, botToken)) return json(res, 401, { error: 'Не удалось подтвердить данные Telegram' });
+
+    if (telegram.mode === 'status') {
+      const identity = await findIdentity(telegram.id);
+      if (!identity) return json(res, 200, { state: 'unlinked', canRelink: true });
+      const source = await request(`/auth/v1/admin/users/${identity.user_id}`);
+      const technical = /^telegram-[0-9]+@users[.]invalid$/i.test(String(source.email || ''));
+      const hasData = await accountHasValuableData(identity.user_id);
+      return json(res, 200, {
+        state: hasData ? 'has_data' : technical ? 'empty_technical' : 'linked',
+        canRelink: technical && !hasData,
+      });
+    }
 
     if (telegram.mode === 'link') {
       const user = await currentUser(req);

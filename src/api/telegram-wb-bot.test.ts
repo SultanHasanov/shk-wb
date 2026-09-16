@@ -11,6 +11,9 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
 const generation = require('../../server/_sticker-generation.js') as {
   normalizePrefix: (value: unknown) => string;
 };
+const telegramAccount = require('../../server/_telegram-account.js') as {
+  hasValuableAccountRows: (rows: Record<string, Array<Record<string, unknown>>>) => boolean;
+};
 
 describe('Telegram sticker generator bot', () => {
   afterEach(() => {
@@ -36,5 +39,12 @@ describe('Telegram sticker generator bot', () => {
     expect(generation.normalizePrefix(' trbx-1 ')).toBe('TRBX-1');
     expect(generation.normalizePrefix('плохой')).toBe('');
     expect(bot.escapeHtml('<&>')).toBe('&lt;&amp;&gt;');
+  });
+
+  it('отличает пустой Telegram-кабинет от кабинета с ценными данными', () => {
+    const empty = { orders: [], stickers: [], licenses: [], cellLicenses: [], history: [], requests: [], ledger: [], withdrawals: [], invited: [], referrals: [{ available_kopecks: 0 }] };
+    expect(telegramAccount.hasValuableAccountRows(empty)).toBe(false);
+    expect(telegramAccount.hasValuableAccountRows({ ...empty, orders: [{ id: 'paid' }] })).toBe(true);
+    expect(telegramAccount.hasValuableAccountRows({ ...empty, referrals: [{ earned_kopecks: 100 }] })).toBe(true);
   });
 });

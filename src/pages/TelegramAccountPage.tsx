@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { api } from '../api/client';
 import { useStores } from '../stores/root-store';
-import { Alert, Button, Card, Field, Input } from '../ui';
+import { Alert, Button, Card, Field, Input, Spinner } from '../ui';
+
+type AccountStatus = 'loading' | 'unlinked' | 'empty_technical' | 'linked' | 'has_data' | 'error';
 
 export const TelegramAccountPage = observer(() => {
   const { auth } = useStores();
@@ -11,6 +13,29 @@ export const TelegramAccountPage = observer(() => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const [status, setStatus] = useState<AccountStatus>('loading');
+  const [canRelink, setCanRelink] = useState(false);
+
+  useEffect(() => {
+    const webApp = window.Telegram?.WebApp;
+    if (!webApp?.initData) {
+      setStatus('error');
+      setError('Откройте эту страницу кнопкой «Аккаунт» в Telegram-боте.');
+      return;
+    }
+    webApp.ready();
+    webApp.expand();
+    api<{ state: Exclude<AccountStatus, 'loading' | 'error'>; canRelink: boolean }>('/api/auth/telegram', {
+      method: 'POST',
+      body: JSON.stringify({ webAppData: webApp.initData, mode: 'status' }),
+    }).then(result => {
+      setStatus(result.state);
+      setCanRelink(result.canRelink);
+    }).catch(reason => {
+      setStatus('error');
+      setError(reason instanceof Error ? reason.message : 'Не удалось проверить кабинет');
+    });
+  }, []);
 
   const connect = async () => {
     setError('');
@@ -42,12 +67,31 @@ export const TelegramAccountPage = observer(() => {
       <div className="stack">
         <div>
           <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>Аккаунт Telegram-бота</h1>
-          <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
+          {canRelink && <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
             Войдите в кабинет, где покупали генерации. Telegram будет подключён к нему, а пустой случайно созданный кабинет удалится автоматически.
-          </p>
+          </p>}
         </div>
-        {done ? (
+        {status === 'loading' ? (
+          <><Spinner /><p className="muted">Проверяем текущий кабинет…</p></>
+        ) : done ? (
           <Alert tone="success">Готово. Кабинет подключён — возвращаем вас в бот.</Alert>
+        ) : status === 'error' ? (
+          <Alert tone="error">{error}</Alert>
+        ) : !canRelink ? (
+          <>
+            <Alert tone="info">
+              {status === 'has_data'
+                ? 'В этом Telegram-кабинете уже есть покупки или история генераций. Автоматическая смена недоступна, чтобы не потерять данные.'
+                : 'Этот Telegram уже связан с постоянным кабинетом. Для объединения с другим кабинетом обратитесь в поддержку.'}
+            </Alert>
+            <Button type="button" block onClick={() => window.Telegram?.WebApp?.close()}>Вернуться в бот</Button>
+            <Button type="button" variant="secondary" block onClick={() => {
+              const webApp = window.Telegram?.WebApp;
+              const url = 'https://t.me/roma_denosov';
+              if (webApp?.openTelegramLink) webApp.openTelegramLink(url);
+              else webApp?.openLink(url);
+            }}>Объединить кабинеты через поддержку</Button>
+          </>
         ) : (
           <>
             {error && <Alert tone="error">{error}</Alert>}
