@@ -67,9 +67,9 @@ export const CELL_PRINT_DEVICES = [1, 2, 3, 5, 10, 20] as const;
 export type CellPrintMarketplaceScope = 'wb' | 'ozon' | 'both';
 
 export const CELL_PRINT_SCOPE_OPTIONS: readonly { value: CellPrintMarketplaceScope; label: string }[] = [
-  { value: 'wb', label: 'Только Wildberries' },
-  { value: 'ozon', label: 'Только Ozon' },
-  { value: 'both', label: 'Wildberries + Ozon (скидка 10%)' },
+  { value: 'wb', label: 'Wildberries' },
+  { value: 'ozon', label: 'Ozon' },
+  { value: 'both', label: 'WB + Ozon −10%' },
 ];
 
 /** Склонение «компьютер / компьютера / компьютеров». */

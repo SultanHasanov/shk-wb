@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Ban, Eye, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { type AdminUserDetail, useAdminUser, useAdminUserAction } from '../../api/admin';
+import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
 import { dateTime, money } from '../../api/cabinet';
+import type { CellPrintMarketplaceScope } from '../../lib/pricing';
 import { orderStatusLabel, payerLabel, productLabel, shortDate } from '../../lib/admin-users';
 import {
   Alert,
@@ -36,6 +38,7 @@ export function AdminUserPage() {
   const [grantOpen, setGrantOpen] = useState(false);
   const [individualOpen, setIndividualOpen] = useState(false);
   const [cellOpen, setCellOpen] = useState(false);
+  const [newCellMarketplaceScope, setNewCellMarketplaceScope] = useState<CellPrintMarketplaceScope>('wb');
   const [programOpen, setProgramOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -365,7 +368,13 @@ export function AdminUserPage() {
               {user.cellLicenses.map(license => (
                 <tr key={license.id}>
                   <td className="mono">{license.key}</td>
-                  <td>{{ wb: 'Wildberries', ozon: 'Ozon', both: 'WB + Ozon', legacy_unassigned: 'Не назначен (WB)' }[license.marketplaceScope]}</td>
+                  <td>
+                    <MarketplaceScopeToggle
+                      value={license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope}
+                      onChange={marketplaceScope => run(patchCell, { userId, id: license.id, marketplaceScope }, 'Права изменены')}
+                      disabled={patchCell.isPending}
+                    />
+                  </td>
                   <td>{license.durationDays} дн.</td>
                   <td>
                     {license.devices?.length ?? 0} из {license.deviceLimit}
@@ -373,10 +382,6 @@ export function AdminUserPage() {
                   <td>{license.expiresAt ? shortDate(license.expiresAt) : 'не активирован'}</td>
                   <td>
                     <div className={s.row}>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        const scope = window.prompt('Права ключа: wb, ozon или both', license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope)?.trim().toLowerCase();
-                        if (scope === 'wb' || scope === 'ozon' || scope === 'both') run(patchCell, { userId, id: license.id, marketplaceScope: scope }, 'Права изменены');
-                      }}>Права</Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -655,7 +660,7 @@ export function AdminUserPage() {
                 userId,
                 durationDays: Number(form.get('durationDays')),
                 deviceLimit: Number(form.get('deviceLimit')),
-                marketplaceScope: String(form.get('marketplaceScope') || 'wb') as 'wb' | 'ozon' | 'both',
+                marketplaceScope: newCellMarketplaceScope,
                 note: String(form.get('note') || ''),
               },
               'Ключ выдан',
@@ -682,7 +687,7 @@ export function AdminUserPage() {
             </Select>
           </Field>
           <Field label="Маркетплейс">
-            <Select name="marketplaceScope" defaultValue="wb"><option value="wb">Wildberries</option><option value="ozon">Ozon</option><option value="both">Wildberries + Ozon</option></Select>
+            <MarketplaceScopeToggle value={newCellMarketplaceScope} onChange={setNewCellMarketplaceScope} />
           </Field>
           <Field label="Пометка">
             <Input name="note" />

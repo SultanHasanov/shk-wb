@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Alert, Button, Checkbox, Field, Input, Modal, Select } from '../../ui';
 import { api } from '../../api/client';
+import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
 import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
-  CELL_PRINT_SCOPE_OPTIONS,
   type CellPrintMarketplaceScope,
   formatTotal,
   getCellPrintScopedPrice,
@@ -133,15 +133,11 @@ export function LicenseCheckoutModal({
         {checkout.kind === 'cell_print_license' && (
           <>
             <Field label="Для какого маркетплейса">
-              {checkout.targetKey ? (
-                <Input value={CELL_PRINT_SCOPE_OPTIONS.find(option => option.value === marketplaceScope)?.label ?? marketplaceScope} disabled />
-              ) : (
-                <Select value={marketplaceScope} onChange={e => setMarketplaceScope(e.target.value as CellPrintMarketplaceScope)}>
-                  {CELL_PRINT_SCOPE_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </Select>
-              )}
+              <MarketplaceScopeToggle
+                value={marketplaceScope}
+                onChange={setMarketplaceScope}
+                disabled={Boolean(checkout.targetKey)}
+              />
             </Field>
             <div className="grid grid-2">
               <Field label="Срок">

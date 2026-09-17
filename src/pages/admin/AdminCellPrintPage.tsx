@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import { RefreshCw, Trash2 } from 'lucide-react';
+import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
+import type { CellPrintMarketplaceScope } from '../../lib/pricing';
 import {
   type AdminCellDevice, type AdminCellLicense, useAdminResource, useAdminResourceMutation,
 } from '../../api/admin';
@@ -10,8 +13,6 @@ import s from '../../layout/AdminShell.module.css';
 
 const DURATIONS = [3, 7, 30, 90, 180, 365];
 const DEVICES = [1, 2, 3, 5, 10, 20];
-const SCOPE_LABELS = { wb: 'Wildberries', ozon: 'Ozon', both: 'Wildberries + Ozon', legacy_unassigned: 'Не назначен (временно WB)' } as const;
-
 type Promo = { id: number; code: string; discount: number; scope: string; limit: number; used: number; active: boolean };
 type Announcement = { id: number; text: string; url: string | null; level: string; active: boolean };
 type Release = { id: string; version: string; minimumVersion: string; downloadUrl: string; notes: string; mandatory: boolean };
@@ -19,6 +20,7 @@ type Release = { id: string; version: string; minimumVersion: string; downloadUr
 /** Все пять подразделов старой вкладки «Печать ячеек» на одной странице. */
 export function AdminCellPrintPage() {
   const toast = useToast();
+  const [newMarketplaceScope, setNewMarketplaceScope] = useState<CellPrintMarketplaceScope>('wb');
   const licenses = useAdminResource<AdminCellLicense>('cellLicense');
   const licenseMutation = useAdminResourceMutation<{ durationDays: number; deviceLimit: number; marketplaceScope: string; note: string }>('cellLicense');
   const activations = useAdminResource<AdminCellDevice>('cellActivation');
@@ -45,7 +47,7 @@ export function AdminCellPrintPage() {
             licenseMutation.create.mutate({
               durationDays: Number(form.get('durationDays')),
               deviceLimit: Number(form.get('deviceLimit')),
-              marketplaceScope: String(form.get('marketplaceScope') || 'wb'),
+              marketplaceScope: newMarketplaceScope,
               note: String(form.get('note') || ''),
             }, { onSuccess: () => toast('Ключ создан', 'success'), onError: fail });
           }}
@@ -61,9 +63,7 @@ export function AdminCellPrintPage() {
             </Select>
           </Field>
           <Field label="Маркетплейс">
-            <Select name="marketplaceScope" defaultValue="wb">
-              <option value="wb">Wildberries</option><option value="ozon">Ozon</option><option value="both">Wildberries + Ozon</option>
-            </Select>
+            <MarketplaceScopeToggle value={newMarketplaceScope} onChange={setNewMarketplaceScope} />
           </Field>
           <Field label="Пометка"><Input name="note" /></Field>
           <Button type="submit" loading={licenseMutation.create.isPending}>Создать ключ</Button>
@@ -80,17 +80,19 @@ export function AdminCellPrintPage() {
               {licenses.data.map(license => (
                 <tr key={license.id}>
                   <td className="mono">{license.key}</td>
-                  <td>{SCOPE_LABELS[license.marketplaceScope] ?? license.marketplaceScope}</td>
+                  <td>
+                    <MarketplaceScopeToggle
+                      value={license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope}
+                      onChange={marketplaceScope => licenseMutation.update.mutate({ id: license.id, marketplaceScope } as never, { onError: fail })}
+                      disabled={licenseMutation.update.isPending}
+                    />
+                  </td>
                   <td>{license.durationDays} дн.</td>
                   <td>{license.deviceLimit}</td>
                   <td>{license.expiresAt ? shortDate(license.expiresAt) : 'не активирован'}</td>
                   <td><Badge tone={license.active ? 'success' : 'error'}>{license.active ? 'Активен' : 'Отозван'}</Badge></td>
                   <td>
                     <div className={s.row}>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        const scope = window.prompt('Права ключа: wb, ozon или both', license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope)?.trim().toLowerCase();
-                        if (scope && ['wb', 'ozon', 'both'].includes(scope)) licenseMutation.update.mutate({ id: license.id, marketplaceScope: scope } as never, { onError: fail });
-                      }}>Права</Button>
                       <Button
                         variant="ghost" size="sm"
                         onClick={() => {

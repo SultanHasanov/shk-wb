@@ -65,6 +65,24 @@ describe('покупка и продление ключей в кабинете'
     expect(await screen.findByText('Тестовая остановка перед переходом в ЮKassa')).toBeInTheDocument();
   });
 
+  it('позволяет купить ключ только для Ozon и передаёт выбранные права серверу', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const buyButtons = await screen.findAllByRole('button', { name: 'Купить новый ключ' });
+    await user.click(buyButtons[1]);
+    await user.click(screen.getByRole('button', { name: 'Ozon' }));
+    await user.click(screen.getByRole('checkbox', { name: /Принимаю/ }));
+    await user.click(screen.getByRole('button', { name: 'Перейти к оплате' }));
+    await waitFor(() => expect(paymentBody).not.toBeNull());
+    expect(paymentBody).toMatchObject({
+      productKind: 'cell_print_license',
+      marketplaceScope: 'ozon',
+      durationDays: 30,
+      deviceLimit: 1,
+      returnTo: 'cabinet',
+    });
+  });
+
   it('не разрешает выбрать лимит ниже числа активных устройств', async () => {
     const user = userEvent.setup();
     renderPage();

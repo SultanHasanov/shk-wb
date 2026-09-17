@@ -23,6 +23,7 @@ import { Steps } from '../components/Steps';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { SpecList } from '../components/SpecList';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
+import { MarketplaceScopeToggle } from '../components/MarketplaceScopeToggle';
 import {
   Accordion,
   Alert,
@@ -40,7 +41,6 @@ import type { PriceCell } from '../ui';
 import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
-  CELL_PRINT_SCOPE_OPTIONS,
   computerWord,
   formatTotal,
   getCellPrintScopedPrice,
@@ -333,14 +333,10 @@ export const CellPrintPage = observer(() => {
               </Field>
 
               <Field label="Для какого маркетплейса">
-                <Select
+                <MarketplaceScopeToggle
                   value={p.marketplaceScope}
-                  onChange={e => (p.marketplaceScope = e.target.value as 'wb' | 'ozon' | 'both')}
-                >
-                  {CELL_PRINT_SCOPE_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </Select>
+                  onChange={value => (p.marketplaceScope = value)}
+                />
               </Field>
 
               <Field label="Количество компьютеров">
