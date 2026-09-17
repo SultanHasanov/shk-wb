@@ -209,6 +209,7 @@ async function getAssets(userId) {
       createdAt: x.created_at,
       durationDays: x.duration_days,
       deviceLimit: x.device_limit,
+      marketplaceScope: x.marketplace_scope || 'legacy_unassigned',
       activatedAt: x.activated_at,
       expiresAt: x.expires_at,
       devices: activations

@@ -64,6 +64,14 @@ export const CELL_PRINT_DURATIONS = [
 
 export const CELL_PRINT_DEVICES = [1, 2, 3, 5, 10, 20] as const;
 
+export type CellPrintMarketplaceScope = 'wb' | 'ozon' | 'both';
+
+export const CELL_PRINT_SCOPE_OPTIONS: readonly { value: CellPrintMarketplaceScope; label: string }[] = [
+  { value: 'wb', label: 'Только Wildberries' },
+  { value: 'ozon', label: 'Только Ozon' },
+  { value: 'both', label: 'Wildberries + Ozon (скидка 10%)' },
+];
+
 /** Склонение «компьютер / компьютера / компьютеров». */
 export function computerWord(count: number): string {
   const mod100 = count % 100;
@@ -78,6 +86,16 @@ export function getCellPrintPrice(days: number, devices: number): number {
   const total = CELL_PRINT_PRICES[days]?.[devices];
   if (total === undefined) throw new Error(`Нет тарифа на ${days} дней и ${devices} устройств`);
   return total;
+}
+
+/** WB и Ozon по отдельности стоят одинаково. Комплект дешевле двух отдельных ключей на 10%. */
+export function getCellPrintScopedPrice(
+  days: number,
+  devices: number,
+  scope: CellPrintMarketplaceScope,
+): number {
+  const singleMarketplacePrice = getCellPrintPrice(days, devices);
+  return scope === 'both' ? Math.round(singleMarketplacePrice * 2 * 0.9) : singleMarketplacePrice;
 }
 
 /** Экономия на компьютер относительно покупки того же срока по одному ПК.

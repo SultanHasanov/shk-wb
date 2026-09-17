@@ -5,8 +5,10 @@ import { api } from '../../api/client';
 import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
+  CELL_PRINT_SCOPE_OPTIONS,
+  type CellPrintMarketplaceScope,
   formatTotal,
-  getCellPrintPrice,
+  getCellPrintScopedPrice,
   getLicensePack,
   getPack,
   HEADLINE_PACK_LIST,
@@ -19,7 +21,7 @@ import {
 // Покупки самой программы здесь больше нет: установщик скачивается бесплатно.
 export type LicenseCheckout =
   | { kind: 'program_license'; targetKey?: string }
-  | { kind: 'cell_print_license'; targetKey?: string; deviceLimit?: number; activeDevices?: number }
+  | { kind: 'cell_print_license'; targetKey?: string; deviceLimit?: number; activeDevices?: number; marketplaceScope?: CellPrintMarketplaceScope }
   // Пополнение кода генератора: пул общий, поэтому у него единственный параметр —
   // сколько генераций добавить к уже имеющемуся коду.
   | { kind: 'stickers'; targetKey: string };
@@ -40,6 +42,9 @@ export function LicenseCheckoutModal({
   const [deviceLimit, setDeviceLimit] = useState(
     checkout.kind === 'cell_print_license' ? (checkout.deviceLimit ?? 1) : 1,
   );
+  const [marketplaceScope, setMarketplaceScope] = useState<CellPrintMarketplaceScope>(
+    checkout.kind === 'cell_print_license' ? (checkout.marketplaceScope ?? 'wb') : 'wb',
+  );
   const [promoCode, setPromoCode] = useState('');
   const [generations, setGenerations] = useState(POPULAR_PACK);
   const [accepted, setAccepted] = useState(false);
@@ -50,7 +55,7 @@ export function LicenseCheckoutModal({
       ? getLicensePack(iterations).total
       : checkout.kind === 'stickers'
         ? getPack(generations).total
-        : getCellPrintPrice(durationDays, deviceLimit);
+        : getCellPrintScopedPrice(durationDays, deviceLimit, marketplaceScope);
   const totalKopecks = Math.round(total * 100);
   const appliedKopecks = useBalance ? Math.min(totalKopecks, availableKopecks) : 0;
   const payableTotal = (totalKopecks - appliedKopecks) / 100;
@@ -80,6 +85,7 @@ export function LicenseCheckoutModal({
       if (checkout.kind === 'cell_print_license') {
         body.durationDays = durationDays;
         body.deviceLimit = deviceLimit;
+        body.marketplaceScope = marketplaceScope;
         body.promoCode = promoCode.trim().toUpperCase();
         if (checkout.targetKey) body.renewalTargetKey = checkout.targetKey;
       }
@@ -126,6 +132,17 @@ export function LicenseCheckoutModal({
 
         {checkout.kind === 'cell_print_license' && (
           <>
+            <Field label="Для какого маркетплейса">
+              {checkout.targetKey ? (
+                <Input value={CELL_PRINT_SCOPE_OPTIONS.find(option => option.value === marketplaceScope)?.label ?? marketplaceScope} disabled />
+              ) : (
+                <Select value={marketplaceScope} onChange={e => setMarketplaceScope(e.target.value as CellPrintMarketplaceScope)}>
+                  {CELL_PRINT_SCOPE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+              )}
+            </Field>
             <div className="grid grid-2">
               <Field label="Срок">
                 <Select

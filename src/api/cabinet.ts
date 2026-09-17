@@ -57,6 +57,7 @@ export type CellPrintAsset = {
   createdAt: string;
   durationDays: number;
   deviceLimit: number;
+  marketplaceScope?: 'wb' | 'ozon' | 'both' | 'legacy_unassigned';
   activatedAt: string | null;
   expiresAt: string | null;
   devices: Array<{ id: number; name: string; firstSeenAt: string; lastSeenAt: string }>;

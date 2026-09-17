@@ -15,6 +15,13 @@ function assetStatus(asset: UserAsset) {
   return { label: 'Активен', tone: 'success' as const };
 }
 
+const marketplaceLabel = (scope?: CellPrintAsset['marketplaceScope']) => ({
+  wb: 'Wildberries',
+  ozon: 'Ozon',
+  both: 'Wildberries + Ozon',
+  legacy_unassigned: 'Wildberries',
+}[scope ?? 'legacy_unassigned']);
+
 function DetachDeviceButton({ id, onDone }: { id: number; onDone: () => void }) {
   const mutation = useCabinetMutation<void>(`/api/cabinet/devices/${id}`, 'DELETE');
   return <Button variant="ghost" size="sm" loading={mutation.isPending} onClick={() => mutation.mutate(undefined, { onSuccess: onDone })}><Unlink size={15} />Отвязать</Button>;
@@ -68,7 +75,7 @@ export function KeysPage() {
       const used = asset.type === 'program' ? asset.used : asset.devices.length;
       const total = asset.type === 'program' ? asset.total : asset.deviceLimit;
       return <Card key={`${asset.type}:${asset.key}`}>
-        <div className="row"><strong className="mono">{asset.key}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast('Ключ скопирован', 'success'); }}><Copy size={15} />Копировать</Button><Badge>{asset.label}</Badge><Badge tone={status.tone}>{status.label}</Badge></div>
+        <div className="row"><strong className="mono">{asset.key}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast('Ключ скопирован', 'success'); }}><Copy size={15} />Копировать</Button><Badge>{asset.label}</Badge>{asset.type === 'cell_print' && <Badge>{marketplaceLabel(asset.marketplaceScope)}</Badge>}<Badge tone={status.tone}>{status.label}</Badge></div>
         <div className="grid grid-3 section">
           <div><strong>{asset.type === 'cell_print' ? `${asset.durationDays} дней` : 'Без срока'}</strong><div className="muted">срок ключа</div></div>
           <div><strong>{asset.type === 'cell_print' ? asset.expiresAt ? dateTime(asset.expiresAt) : 'После первой активации' : `${Math.max(0, asset.total - asset.used)} итераций`}</strong><div className="muted">остаток / окончание</div></div>
@@ -77,7 +84,7 @@ export function KeysPage() {
         <div className="row">
           {asset.type === 'cell_print' && <Button variant="secondary" onClick={() => setDevices(asset)}>Устройства</Button>}
           {asset.active && asset.type === 'program' && <Button onClick={() => setCheckout({ kind: 'program_license', targetKey: asset.key })}><RefreshCw size={16} />Пополнить итерации</Button>}
-          {asset.active && asset.type === 'cell_print' && <Button onClick={() => setCheckout({ kind: 'cell_print_license', targetKey: asset.key, deviceLimit: asset.deviceLimit, activeDevices: asset.devices.length })}><RefreshCw size={16} />Продлить</Button>}
+          {asset.active && asset.type === 'cell_print' && <Button onClick={() => setCheckout({ kind: 'cell_print_license', targetKey: asset.key, deviceLimit: asset.deviceLimit, activeDevices: asset.devices.length, marketplaceScope: asset.marketplaceScope === 'ozon' || asset.marketplaceScope === 'both' ? asset.marketplaceScope : 'wb' })}><RefreshCw size={16} />Продлить</Button>}
         </div>
       </Card>;
     }) : <Card><EmptyState icon={<KeyRound />} title="Ключей пока нет" text="Купите новый ключ или добавьте ранее приобретённый." /></Card>}</div>

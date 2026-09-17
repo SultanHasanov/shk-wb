@@ -9,6 +9,7 @@ import {
   formatPerUnit,
   formatTotal,
   getCellPrintPrice,
+  getCellPrintScopedPrice,
   getCellPrintSavingPercent,
   getLicensePack,
   getPack,
@@ -93,6 +94,12 @@ describe('ключи «Печати ячеек»', () => {
   it('считает цену тарифа', () => {
     expect(getCellPrintPrice(30, 1)).toBe(150);
     expect(getCellPrintPrice(365, 20)).toBe(10000);
+  });
+
+  it('считает одинаковую цену WB и Ozon и скидку 10% для комплекта', () => {
+    expect(getCellPrintScopedPrice(30, 1, 'wb')).toBe(150);
+    expect(getCellPrintScopedPrice(30, 1, 'ozon')).toBe(150);
+    expect(getCellPrintScopedPrice(30, 1, 'both')).toBe(270);
   });
 
   it('падает на несуществующем тарифе', () => {

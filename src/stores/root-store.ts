@@ -57,6 +57,7 @@ class PurchaseStore {
   productKind = 'cell_print_license';
   durationDays = 30;
   deviceLimit = 1;
+  marketplaceScope: 'wb' | 'ozon' | 'both' = 'wb';
   promoCode = '';
   constructor() {
     makeAutoObservable(this);

@@ -40,9 +40,10 @@ import type { PriceCell } from '../ui';
 import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
+  CELL_PRINT_SCOPE_OPTIONS,
   computerWord,
   formatTotal,
-  getCellPrintPrice,
+  getCellPrintScopedPrice,
   getCellPrintSavingPercent,
 } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
@@ -215,7 +216,7 @@ export const CellPrintPage = observer(() => {
   const { purchase: p } = useStores();
   const [accepted, setAccepted] = useState(false);
 
-  const total = getCellPrintPrice(p.durationDays, p.deviceLimit);
+  const total = getCellPrintScopedPrice(p.durationDays, p.deviceLimit, p.marketplaceScope);
   const perComputer = Math.round(total / p.deviceLimit);
   const saving = getCellPrintSavingPercent(p.durationDays, p.deviceLimit);
 
@@ -227,6 +228,7 @@ export const CellPrintPage = observer(() => {
           productKind: 'cell_print_license',
           durationDays: p.durationDays,
           deviceLimit: p.deviceLimit,
+          marketplaceScope: p.marketplaceScope,
           promoCode: p.promoCode,
           accepted,
         }),
@@ -326,6 +328,17 @@ export const CellPrintPage = observer(() => {
                     <option key={d.days} value={d.days}>
                       {d.label}
                     </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Для какого маркетплейса">
+                <Select
+                  value={p.marketplaceScope}
+                  onChange={e => (p.marketplaceScope = e.target.value as 'wb' | 'ozon' | 'both')}
+                >
+                  {CELL_PRINT_SCOPE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </Select>
               </Field>
@@ -445,7 +458,7 @@ export const CellPrintPage = observer(() => {
             rows={CELL_PRINT_DURATIONS.map(d => ({
               label: d.label,
               cells: CELL_PRINT_DEVICES.map<PriceCell>(n => ({
-                label: formatTotal(getCellPrintPrice(d.days, n)),
+                label: formatTotal(getCellPrintScopedPrice(d.days, n, p.marketplaceScope)),
                 active: p.durationDays === d.days && p.deviceLimit === n,
                 onSelect: () => {
                   p.durationDays = d.days;
@@ -470,7 +483,7 @@ export const CellPrintPage = observer(() => {
       >
         <div className={s.network}>
           {NETWORK_TIERS.map(devices => {
-            const yearly = getCellPrintPrice(365, devices);
+            const yearly = getCellPrintScopedPrice(365, devices, p.marketplaceScope);
             return (
               <Card key={devices} interactive>
                 <div className="stack">
