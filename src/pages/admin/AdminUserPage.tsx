@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Ban, Eye, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { type AdminUserDetail, useAdminUser, useAdminUserAction } from '../../api/admin';
 import { dateTime, money } from '../../api/cabinet';
@@ -138,6 +138,12 @@ export function AdminUserPage() {
             </div>
           </div>
           <div className={s.row}>
+            <Link to={`/panel/users/${userId}/preview`} target="_blank" rel="noreferrer">
+              <Button variant="secondary">
+                <Eye size={16} />
+                Предпросмотр кабинета
+              </Button>
+            </Link>
             {user.banned ? (
               <Button
                 variant="secondary"

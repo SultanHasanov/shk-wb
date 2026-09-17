@@ -8,4 +8,5 @@ export { AdminPaymentsPage } from './AdminPaymentsPage';
 export { AdminPoolPage } from './AdminPoolPage';
 export { AdminProgramPage } from './AdminProgramPage';
 export { AdminUserPage } from './AdminUserPage';
+export { AdminUserPreviewPage } from './AdminUserPreviewPage';
 export { AdminUsersPage } from './AdminUsersPage';
