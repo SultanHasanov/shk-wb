@@ -30,6 +30,7 @@ function publicOrder(row) {
     licenseIterations: row.license_iterations,
     durationDays: row.cell_print_duration_days,
     deviceLimit: row.cell_print_device_limit,
+    marketplaceScope: row.cell_print_marketplace_scope,
     renewal: Boolean(row.renewal_target_key),
     downloadUrl:
       row.status === 'succeeded'
@@ -117,6 +118,7 @@ module.exports = async function handler(req, res) {
         promoCode = String(req.body?.promoCode || '')
           .trim()
           .toUpperCase();
+      let marketplaceScope = String(req.body?.marketplaceScope || 'wb').toLowerCase();
       const renewalTargetKey = String(req.body?.renewalTargetKey || '')
         .trim()
         .toUpperCase();
@@ -136,6 +138,7 @@ module.exports = async function handler(req, res) {
       )
         return res.status(400).json({ error: 'Выберите пакет итераций' });
       if (cellKinds.includes(productKind)) {
+        if (!['wb','ozon','both'].includes(marketplaceScope)) return res.status(400).json({error:'Выберите Wildberries, Ozon или комплект'});
         if (productKind === 'cell_print_program') {
           if (cellDays !== 3 || deviceLimit !== 1)
             return res.status(400).json({ error: 'Некорректный пробный пакет' });
@@ -164,10 +167,11 @@ module.exports = async function handler(req, res) {
             return res.status(404).json({ error: 'Активный ключ для пополнения не найден' });
         } else {
           const owned = await supabaseFetch(
-            `cell_print_licenses?key=eq.${encodeURIComponent(renewalTargetKey)}&owner_user_id=eq.${encodeURIComponent(user.id)}&active=eq.true&select=id,key,duration_days&limit=1`,
+            `cell_print_licenses?key=eq.${encodeURIComponent(renewalTargetKey)}&owner_user_id=eq.${encodeURIComponent(user.id)}&active=eq.true&select=id,key,duration_days,marketplace_scope&limit=1`,
           );
           if (!owned.length)
             return res.status(404).json({ error: 'Активный ключ для продления не найден' });
+          marketplaceScope=owned[0].marketplace_scope==='legacy_unassigned'?'wb':owned[0].marketplace_scope;
           if (Number(owned[0].duration_days || 0) + cellDays > 4000)
             return res
               .status(409)
@@ -206,7 +210,7 @@ module.exports = async function handler(req, res) {
                   (['cell_print_program', 'cell_print_bundle'].includes(productKind) ? 150 : 0) +
                   (productKind === 'cell_print_program'
                     ? 0
-                    : CELL_PRINT_PRICES[cellDays][deviceLimit]),
+                    : Math.round(CELL_PRINT_PRICES[cellDays][deviceLimit]*(marketplaceScope==='both'?1.8:1))),
               }
             : await pricing(stickerPacks);
       if (cellKinds.includes(productKind) && promoCode) {
@@ -255,6 +259,7 @@ module.exports = async function handler(req, res) {
         orderPayload.cell_print_duration_days =
           cellDays + (productKind === 'cell_print_bundle' ? 3 : 0);
         orderPayload.cell_print_device_limit = deviceLimit;
+        orderPayload.cell_print_marketplace_scope = marketplaceScope;
         if (promoCode) orderPayload.promo_code = promoCode;
       }
       if(renewalTargetKey)orderPayload.renewal_target_key=renewalTargetKey;

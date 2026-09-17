@@ -172,7 +172,7 @@ async function getAssets(userId) {
       `license_keys?owner_user_id=eq.${q(userId)}&select=id,key,usage_limit,used,active,created_at&order=created_at.desc`,
     ),
     supabaseFetch(
-      `cell_print_licenses?owner_user_id=eq.${q(userId)}&select=id,key,duration_days,device_limit,active,activated_at,expires_at,created_at&order=created_at.desc`,
+      `cell_print_licenses?owner_user_id=eq.${q(userId)}&select=id,key,duration_days,device_limit,marketplace_scope,active,activated_at,expires_at,created_at&order=created_at.desc`,
     ),
   ]);
   const ids = cell.map(x => x.id);
@@ -229,7 +229,7 @@ function orderLabel(row) {
   if (row.product_kind === 'program_license')
     return `${row.renewal_target_key ? 'Пополнение' : 'Подбор кодов'} · ${row.license_iterations} итераций`;
   if (String(row.product_kind).startsWith('cell_print'))
-    return `${row.renewal_target_key ? 'Продление' : 'Печать ячеек'} · ${row.cell_print_duration_days || 0} дней · ${row.cell_print_device_limit || 0} устройств`;
+    return `${row.renewal_target_key ? 'Продление' : 'Печать ячеек'} · ${{wb:'Wildberries',ozon:'Ozon',both:'WB + Ozon'}[row.cell_print_marketplace_scope]||'Wildberries'} · ${row.cell_print_duration_days || 0} дней · ${row.cell_print_device_limit || 0} устройств`;
   return 'Программа «Подбор кодов»';
 }
 function mapOrder(row) {

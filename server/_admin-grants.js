@@ -85,7 +85,7 @@ const RESOURCES = {
     },
     fromDb(row) { return {id:row.id,code:row.code,limit:row.usage_limit,used:row.used,active:row.active,note:row.note,createdAt:row.created_at}; },
   },
-  cellLicense:{table:'cell_print_licenses',toDb(body){const out={};if('durationDays'in body)out.duration_days=Number(body.durationDays);if('deviceLimit'in body)out.device_limit=Number(body.deviceLimit);if('active'in body)out.active=Boolean(body.active);if('note'in body)out.note=String(body.note||'').trim();if('source'in body)out.source=body.source;return out;},fromDb(r){return{id:r.id,key:r.key,durationDays:r.duration_days,deviceLimit:r.device_limit,active:r.active,activatedAt:r.activated_at,expiresAt:r.expires_at,note:r.note,ownerUserId:r.owner_user_id??null,createdAt:r.created_at};}},
+  cellLicense:{table:'cell_print_licenses',toDb(body){const out={};if('durationDays'in body)out.duration_days=Number(body.durationDays);if('deviceLimit'in body)out.device_limit=Number(body.deviceLimit);if('marketplaceScope'in body)out.marketplace_scope=body.marketplaceScope;if('active'in body)out.active=Boolean(body.active);if('note'in body)out.note=String(body.note||'').trim();if('source'in body)out.source=body.source;return out;},fromDb(r){return{id:r.id,key:r.key,durationDays:r.duration_days,deviceLimit:r.device_limit,marketplaceScope:r.marketplace_scope||'legacy_unassigned',active:r.active,activatedAt:r.activated_at,expiresAt:r.expires_at,note:r.note,ownerUserId:r.owner_user_id??null,createdAt:r.created_at};}},
   cellActivation:{table:'cell_print_activations',toDb(){return{};},fromDb(r){return{id:r.id,licenseId:r.license_id,deviceHash:r.device_hash,firstSeenAt:r.first_seen_at,lastSeenAt:r.last_seen_at};}},
   cellPromo:{table:'cell_print_promocodes',toDb(body){const out={};if('code'in body)out.code=String(body.code||'').trim().toUpperCase();if('discount'in body)out.discount_percent=Number(body.discount);if('scope'in body)out.scope=body.scope;if('limit'in body)out.usage_limit=Number(body.limit);if('expiresAt'in body)out.expires_at=body.expiresAt||null;if('active'in body)out.active=Boolean(body.active);if('note'in body)out.note=String(body.note||'').trim();return out;},fromDb(r){return{id:r.id,code:r.code,discount:r.discount_percent,scope:r.scope,limit:r.usage_limit,used:r.used,expiresAt:r.expires_at,active:r.active,note:r.note};}},
   cellAnnouncement:{table:'cell_print_announcements',toDb(body){const out={};for(const f of ['text','url','button','level','active'])if(f in body)out[f]=body[f];if('startsAt'in body)out.starts_at=body.startsAt||null;if('endsAt'in body)out.ends_at=body.endsAt||null;return out;},fromDb(r){return{id:r.id,text:r.text,url:r.url,button:r.button,level:r.level,startsAt:r.starts_at,endsAt:r.ends_at,active:r.active};}},
@@ -187,10 +187,10 @@ async function createProgramKey({ key, limit, note = '', ownerUserId = null }) {
 }
 
 /** Ключ печати ячеек делает сервер: CP-XXXX-XXXX-XXXX из случайных байтов. */
-async function createCellLicense({ durationDays, deviceLimit, note = '', ownerUserId = null }) {
+async function createCellLicense({ durationDays, deviceLimit, marketplaceScope = 'wb', note = '', ownerUserId = null }) {
   const days = Number(durationDays);
   const devices = Number(deviceLimit);
-  if (!CELL_DURATIONS.includes(days) || !CELL_DEVICE_LIMITS.includes(devices)) {
+  if (!CELL_DURATIONS.includes(days) || !CELL_DEVICE_LIMITS.includes(devices) || !['wb','ozon','both'].includes(marketplaceScope)) {
     return { error: 'Выберите срок и число устройств' };
   }
   for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -202,7 +202,7 @@ async function createCellLicense({ durationDays, deviceLimit, note = '', ownerUs
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify({
           key, source: 'admin',
-          ...RESOURCES.cellLicense.toDb({ durationDays: days, deviceLimit: devices, note }),
+          ...RESOURCES.cellLicense.toDb({ durationDays: days, deviceLimit: devices, marketplaceScope, note }),
           ...(ownerUserId ? { owner_user_id: ownerUserId } : {}),
         }),
       });

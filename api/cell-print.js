@@ -16,6 +16,8 @@ function activationFailure(res,error){
   if(msg.includes('Device limit'))return res.status(409).json({error:'Достигнут лимит устройств'});
   return res.status(403).json({error:'Ключ недействителен или отозван'});
 }
+function versionTuple(value){return String(value||'0').split('.').map(x=>Number(x)||0);}
+function versionAtLeast(value,minimum){const a=versionTuple(value),b=versionTuple(minimum);for(let i=0;i<Math.max(a.length,b.length);i++){if((a[i]||0)!==(b[i]||0))return(a[i]||0)>(b[i]||0);}return true;}
 
 module.exports = async function handler(req,res){
   const action=String(req.query.action||'');
@@ -23,6 +25,7 @@ module.exports = async function handler(req,res){
     if(action==='activate'&&req.method==='POST'){
       if(!await enforceRateLimit(req,res,{scope:'cell-activate',limit:20,windowSeconds:300}))return;
       const key=String(req.body?.key||'').trim().toUpperCase();
+      if(!versionAtLeast(req.body?.appVersion,'1.5.0'))return res.status(426).json({error:'Требуется обновление программы до версии 1.5.0'});
       const deviceHash=String(req.body?.deviceHash||'').trim().toLowerCase();
       const legacyHash=String(req.body?.legacyDeviceHash||'').trim().toLowerCase();
       if(!/^CP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)||!/^[0-9a-f]{64}$/.test(deviceHash))return res.status(400).json({error:'Проверьте ключ и устройство'});

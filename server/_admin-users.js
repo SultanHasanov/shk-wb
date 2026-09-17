@@ -265,7 +265,7 @@ module.exports = async function handler(req, res) {
       if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
       const created = await createCellLicense({
         durationDays: req.body?.durationDays, deviceLimit: req.body?.deviceLimit,
-        note: req.body?.note, ownerUserId: userId,
+        marketplaceScope: req.body?.marketplaceScope || 'wb', note: req.body?.note, ownerUserId: userId,
       });
       if (created.error) return badRequest(res, created.error);
       await recordAdminAction(req, 'grantCellLicense', userId, { key: created.row.key, durationDays: created.row.duration_days });
