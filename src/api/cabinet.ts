@@ -78,6 +78,9 @@ export type Order = {
   licenseKey: string | null;
   renewal: boolean;
   receiptUrl: string | null;
+  individualOrderId?: string;
+  creditedUnits?: number;
+  payable?: boolean;
 };
 export type GenerationEntry = {
   id: string;

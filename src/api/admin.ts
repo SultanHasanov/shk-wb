@@ -218,6 +218,10 @@ export type AdminUserDetail = {
   programKeys: AdminProgramKey[];
   cellLicenses: AdminCellLicense[];
   orders: AdminOrder[];
+  customOrders: Array<{
+    id:string; title:string; quantity:number; total_amount:number; paid_amount:number;
+    amount_due:number; credited_units:number; status:string; created_at:string;
+  }>;
   referral: {
     code: string | null;
     availableKopecks: number;

@@ -109,7 +109,7 @@ async function listUsers(req, res) {
 
 async function userDetail(req, res, userId) {
   const q = encodeURIComponent(userId);
-  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, referral, attributions, notifications, historyCount, actions] = await Promise.all([
+  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions] = await Promise.all([
     getAuthUser(userId),
     supabaseFetch(`user_profiles?user_id=eq.${q}&select=*&limit=1`),
     supabaseFetch(`user_preferences?user_id=eq.${q}&select=*&limit=1`),
@@ -118,6 +118,7 @@ async function userDetail(req, res, userId) {
     supabaseFetch(`license_keys?owner_user_id=eq.${q}&select=*&order=created_at.desc`),
     supabaseFetch(`cell_print_licenses?owner_user_id=eq.${q}&select=*&order=created_at.desc`),
     supabaseFetch(`payment_orders?user_id=eq.${q}&select=*&order=created_at.desc&limit=50`),
+    supabaseFetch(`individual_sticker_orders?user_id=eq.${q}&select=id,title,quantity,total_amount,paid_amount,amount_due,credited_units,status,payment_order_id,fulfilled_at,created_at&order=created_at.desc&limit=50`),
     supabaseFetch(`referral_accounts?user_id=eq.${q}&select=*&limit=1`),
     supabaseFetch(`referral_attributions?referrer_user_id=eq.${q}&select=invited_user_id,attributed_at&order=attributed_at.desc&limit=100`),
     supabaseFetch(`in_app_notifications?user_id=eq.${q}&select=id,kind,title,created_at,read_at&order=created_at.desc&limit=20`),
@@ -200,6 +201,7 @@ async function userDetail(req, res, userId) {
       devices: activations.filter(a => a.license_id === row.id).map(RESOURCES.cellActivation.fromDb),
     })),
     orders,
+    customOrders,
     referral: {
       code: account.referral_code || null,
       availableKopecks: Number(account.available_kopecks || 0),
@@ -237,6 +239,33 @@ module.exports = async function handler(req, res) {
       await notifyUser(userId, 'Вам выдан код доступа',
         `Код ${created.row.code} — ${created.row.generation_limit} генераций. Он уже доступен в кабинете.`);
       return res.status(201).json(RESOURCES.stickerAccess.fromDb(created.row));
+    }
+    if (req.method === 'POST' && action === 'createIndividualStickerOrder') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const title = String(req.body?.title || '').trim();
+      const rawCodes = Array.isArray(req.body?.codes)
+        ? req.body.codes
+        : String(req.body?.codes || '').match(/(?<!\d)\d{11}(?!\d)/g) || [];
+      const codes = [...new Set(rawCodes.map(value => String(value)))];
+      const totalAmount = Number(req.body?.totalAmount);
+      const creditUnits = Number(req.body?.creditUnits || 0);
+      if (!title || title.length > 160 || !codes.length || codes.length > 10000 ||
+          codes.some(code => !/^\d{11}$/.test(code)) || !Number.isFinite(totalAmount) || totalAmount < 0 ||
+          !Number.isInteger(creditUnits) || creditUnits < 0 || creditUnits > codes.length)
+        return badRequest(res, 'Проверьте название, номера, сумму и число зачтённых генераций');
+      const created = await supabaseFetch('rpc/create_individual_sticker_order', {
+        method: 'POST', body: JSON.stringify({
+          p_user_id: userId, p_title: title, p_codes: codes,
+          p_total_amount: totalAmount, p_credit_units: creditUnits,
+        }),
+      });
+      const orderId = String(created);
+      await recordAdminAction(req, 'createIndividualStickerOrder', userId, {
+        orderId, quantity: codes.length, totalAmount, creditUnits,
+      });
+      await notifyUser(userId, 'Выставлен индивидуальный заказ',
+        `${title}: ${codes.length} стикеров. После оплаты они появятся в истории и станут доступны для скачивания.`, '/cabinet/orders');
+      return res.status(201).json({ id: orderId, quantity: codes.length });
     }
     if (req.method === 'POST' && action === 'topupSticker') {
       const codeId = Number(req.body?.codeId);

@@ -79,9 +79,10 @@ function drawProductSticker(page,font,code,qr,slot,layout){
 
 module.exports = async function handler(req,res){
   if(req.method!=='GET')return res.status(405).end();
-  const batch=String(req.query?.batch||''),historyId=String(req.query?.history||''),customCode=String(req.query?.code||'');
+  const batch=String(req.query?.batch||''),historyId=String(req.query?.history||''),customCode=String(req.query?.code||''),individualId=String(req.query?.individual||''),individualPart=Number(req.query?.part||0);
   const token=String(req.query?.token||''),expires=Number(req.query?.expires||0);
-  if(!historyId&&!customCode&&!/^[0-9a-f-]{36}$/i.test(batch))return res.status(400).end();
+  if(!historyId&&!customCode&&!individualId&&!/^[0-9a-f-]{36}$/i.test(batch))return res.status(400).end();
+  if(individualId&&(!/^[0-9a-f-]{36}$/i.test(individualId)||!Number.isInteger(individualPart)||individualPart<0||individualPart>19))return res.status(400).end();
   if(historyId&&!/^\d+$/.test(historyId))return res.status(400).end();
   let boxMode=String(req.query?.variant||'')==='box',prefix=String(req.query?.prefix||'TRBX').toUpperCase();
   const requestedColumns=Number(req.query?.columns||DEFAULT_COLUMNS);
@@ -94,7 +95,19 @@ module.exports = async function handler(req,res){
   const selected=requestedCodes.length?new Set(requestedCodes):null;
   try{
     let all;
-    if(customCode){
+    if(individualId){
+      if(!process.env.STICKER_CLIENT_SECRET)return res.status(500).end();
+      const now=Math.floor(Date.now()/1000);
+      if(!Number.isInteger(expires)||expires<now||expires>now+3700)return res.status(403).end();
+      const signedValue=`individual:${individualId}:${individualPart}:${expires}`;
+      const expected=crypto.createHmac('sha256',process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
+      const left=Buffer.from(token),right=Buffer.from(expected);
+      if(left.length!==right.length||!crypto.timingSafeEqual(left,right))return res.status(403).end();
+      const orders=await supabaseFetch(`individual_sticker_orders?id=eq.${encodeURIComponent(individualId)}&status=eq.paid&select=codes,quantity&limit=1`);
+      if(!orders.length)return res.status(404).end();
+      const codes=Array.isArray(orders[0].codes)?orders[0].codes:[];
+      all=codes.slice(individualPart*500,individualPart*500+500).map(code=>({code:String(code)}));
+    }else if(customCode){
       if(!/^\d{1,12}$/.test(customCode)||!process.env.STICKER_CLIENT_SECRET)return res.status(400).end();
       const now=Math.floor(Date.now()/1000);
       if(!Number.isInteger(expires)||expires<now||expires>now+3700)return res.status(403).end();

@@ -93,12 +93,15 @@ module.exports = async function handler(req, res) {
       await maybeBindReferral(req, user);
       const requestedKind = String(req.body?.productKind || '');
       const cellKinds = ['cell_print_program', 'cell_print_license', 'cell_print_bundle'];
+      const individualOrderId = String(req.body?.individualOrderId || '');
       // Саму программу больше не продаём — установщик отдаётся свободно через
       // action=download-program. Заказы вида 'program' остались только в истории.
       if (requestedKind === 'program')
         return res.status(400).json({ error: 'Программа скачивается бесплатно' });
       const productKind =
-        requestedKind === 'program_license'
+        requestedKind === 'individual_stickers'
+          ? 'individual_stickers'
+          : requestedKind === 'program_license'
           ? 'program_license'
           : cellKinds.includes(requestedKind)
             ? requestedKind
@@ -128,6 +131,22 @@ module.exports = async function handler(req, res) {
       const resultPath = returnTarget === 'cabinet' ? '/cabinet/payment-result' : '/payment-result';
       if (returnTarget === 'telegram' && !user)
         return res.status(401).json({ error: 'Для оплаты через Telegram войдите в аккаунт' });
+      let individualOrder = null;
+      if (productKind === 'individual_stickers') {
+        if (!user) return res.status(401).json({ error: 'Войдите в кабинет для оплаты заказа' });
+        if (!/^[0-9a-f-]{36}$/i.test(individualOrderId))
+          return res.status(400).json({ error: 'Некорректный индивидуальный заказ' });
+        const rows = await supabaseFetch(
+          `individual_sticker_orders?id=eq.${encodeURIComponent(individualOrderId)}&user_id=eq.${encodeURIComponent(user.id)}&status=eq.pending_payment&select=*&limit=1`,
+        );
+        individualOrder = rows[0] || null;
+        if (!individualOrder) return res.status(404).json({ error: 'Заказ не найден или уже оплачен' });
+        if (individualOrder.payment_order_id) {
+          const existing = await getOrderBy('id', individualOrder.payment_order_id);
+          if (existing?.confirmation_url && !['canceled','succeeded'].includes(existing.status))
+            return res.status(200).json({ confirmationUrl: existing.confirmation_url, token: existing.public_token });
+        }
+      }
       const allowed = value =>
         Number.isInteger(value) && Object.prototype.hasOwnProperty.call(PACKAGE_PRICES, value);
       if (productKind === 'stickers' && (!stickerPacks.length || !stickerPacks.every(allowed)))
@@ -193,7 +212,12 @@ module.exports = async function handler(req, res) {
       if (!settings[0]?.enabled || !hasYookassa())
         return res.status(503).json({ error: 'Оплата пока не подключена' });
       let calculated =
-        productKind === 'program_license'
+        productKind === 'individual_stickers'
+          ? {
+              individualOrder: { id: individualOrder.id, quantity: individualOrder.quantity },
+              total: Number(individualOrder.amount_due),
+            }
+          : productKind === 'program_license'
           ? {
               license: { iterations: licenseIterations, total: LICENSE_PRICES[licenseIterations] },
               total: LICENSE_PRICES[licenseIterations],
@@ -254,6 +278,8 @@ module.exports = async function handler(req, res) {
         provider_status: 'pending',
         fulfillment_status: 'pending',
       };
+      if (productKind === 'individual_stickers')
+        orderPayload.individual_sticker_order_id = individualOrder.id;
       if (productKind === 'program_license') orderPayload.license_iterations = licenseIterations;
       if (cellKinds.includes(productKind)) {
         orderPayload.cell_print_duration_days =
@@ -269,6 +295,10 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify(orderPayload),
       });
       let order = inserted[0];
+      if (productKind === 'individual_stickers')
+        await supabaseFetch(`individual_sticker_orders?id=eq.${encodeURIComponent(individualOrder.id)}`, {
+          method: 'PATCH', body: JSON.stringify({ payment_order_id: order.id, updated_at: new Date().toISOString() }),
+        });
       if (cellKinds.includes(productKind) && promoCode) {
         const scope =
           productKind === 'cell_print_program'
@@ -305,7 +335,9 @@ module.exports = async function handler(req, res) {
       }
       try {
         const description =
-          productKind === 'program_license'
+          productKind === 'individual_stickers'
+            ? `Индивидуальный заказ: ${individualOrder.quantity} стикеров, заказ ${order.id}`
+            : productKind === 'program_license'
             ? `${renewalTargetKey ? 'Пополнение' : 'Ключ'} программы: ${licenseIterations} итераций, заказ ${order.id}`
             : cellKinds.includes(productKind)
               ? `${renewalTargetKey ? 'Продление' : 'Печать ячеек'}: ${cellDays} дней, ${deviceLimit} устройств, заказ ${order.id}`

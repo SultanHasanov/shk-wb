@@ -224,6 +224,8 @@ async function getAssets(userId) {
 }
 
 function orderLabel(row) {
+  if (row.product_kind === 'individual_stickers')
+    return `Индивидуальный заказ · ${Number(row.pricing_snapshot?.individualOrder?.quantity || 0)} шт.`;
   if (row.product_kind === 'stickers')
     return `${row.renewal_target_key ? 'Пополнение кода' : 'Пакет генераций'} · ${Number(row.range_quantity || 0) + Number(row.custom_quantity || 0)} шт.`;
   if (row.product_kind === 'program_license')
@@ -253,10 +255,35 @@ function mapOrder(row) {
 }
 
 async function getOrders(userId, count = 25, cursor = '') {
-  const rows = await supabaseFetch(
-    `payment_orders?user_id=eq.${q(userId)}${cursor}&select=*&order=created_at.desc&limit=${count}`,
-  );
-  return rows.map(mapOrder);
+  const [rows, custom] = await Promise.all([
+    supabaseFetch(
+      `payment_orders?user_id=eq.${q(userId)}${cursor}&product_kind=neq.individual_stickers&select=*&order=created_at.desc&limit=${count}`,
+    ),
+    supabaseFetch(
+      `individual_sticker_orders?user_id=eq.${q(userId)}&select=id,title,quantity,total_amount,paid_amount,amount_due,credited_units,status,payment_order_id,fulfilled_at,created_at&order=created_at.desc&limit=${count}`,
+    ),
+  ]);
+  const individual = custom.map(row => ({
+    id: row.id,
+    publicToken: '',
+    createdAt: row.created_at,
+    paidAt: row.fulfilled_at,
+    status: row.status === 'paid' ? 'succeeded' : row.status === 'canceled' ? 'canceled' : 'pending',
+    productKind: 'individual_stickers',
+    product: `${row.title} · ${row.quantity} шт.`,
+    amount: Number(row.amount_due),
+    grossAmount: Number(row.total_amount),
+    referralCreditKopecks: Math.round(Number(row.paid_amount) * 100),
+    accessCode: null,
+    licenseKey: null,
+    renewal: false,
+    receiptUrl: null,
+    individualOrderId: row.id,
+    creditedUnits: Number(row.credited_units || 0),
+    payable: row.status === 'pending_payment',
+  }));
+  return [...individual, ...rows.map(mapOrder)]
+    .sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt)).slice(0,count);
 }
 
 /* getProgramEntitlement убран: установщик «Подбора кодов» скачивается свободно

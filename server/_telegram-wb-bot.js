@@ -16,6 +16,7 @@ const HOME_KEYBOARD = {
   resize_keyboard: true,
   is_persistent: true,
 };
+HOME_KEYBOARD.keyboard[2].push({ text: '📦 Мои индивидуальные заказы' });
 
 function publicUrl(path) {
   const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.vercel.app' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.vercel.app';
@@ -255,6 +256,27 @@ async function showHelp(chatId) {
   await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
 }
 
+async function showIndividualOrders(from, chatId) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendMessage(chatId, 'Сначала подключите кабинет.', { reply_markup: miniAppKeyboard() });
+  const orders = await supabaseFetch(`individual_sticker_orders?user_id=eq.${encodeURIComponent(userId)}&select=id,title,quantity,amount_due,status&order=created_at.desc&limit=10`);
+  if (!orders.length) return sendMessage(chatId, 'Индивидуальных заказов пока нет.', { reply_markup: HOME_KEYBOARD });
+  for (const order of orders) {
+    const paid = order.status === 'paid';
+    const rows = [[{ text: paid ? '🌐 Посмотреть каждый стикер' : `💳 Оплатить ${Number(order.amount_due).toFixed(2)} ₽`, web_app: { url: publicUrl(paid ? '/cabinet/history' : '/cabinet/orders') } }]];
+    if (paid) {
+      const parts = Math.ceil(Number(order.quantity) / 500);
+      const expires = Math.floor(Date.now()/1000)+3600;
+      for (let part=0;part<parts;part+=1) {
+        const signedValue=`individual:${order.id}:${part}:${expires}`;
+        const token=crypto.createHmac('sha256',process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
+        rows.push([{text:`📄 PDF ${part+1} из ${parts}`,url:publicUrl(`/api/stickers/pdf?individual=${encodeURIComponent(order.id)}&part=${part}&expires=${expires}&token=${encodeURIComponent(token)}`)}]);
+      }
+    }
+    await sendMessage(chatId, `<b>${escapeHtml(order.title)}</b>\n${order.quantity} стикеров\nСтатус: ${paid?'оплачен ✅':'ожидает оплаты'}`, { reply_markup: choiceKeyboard(rows) });
+  }
+}
+
 async function notifyMiniAppAuthorized(telegramId) {
   const session = await getSession(telegramId);
   if (session?.draft?.authPromptMessageId) await deleteMessage(session.chat_id, session.draft.authPromptMessageId);
@@ -271,6 +293,7 @@ async function handleCallback(callback) {
   await touchSubscriber(from, chatId);
   const data = String(callback.data || '');
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
+  if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
   if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
   if (data === 'account:continue') { await answerCallbackQuery(callback.id); await sendMessage(chatId, 'Продолжайте работу с текущим кабинетом.', { reply_markup: HOME_KEYBOARD }); return; }
   const pageMatch = data.match(/^gen:page:([^:]+:\d+):(\d+)$/);
@@ -328,6 +351,7 @@ async function handleMessage(message) {
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
   if (/^\/generate(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
   if (/^\/account(?:@\w+)?$/i.test(text)) return showAccount(from, chatId);
+  if (/^\/orders(?:@\w+)?$/i.test(text) || text === '📦 Мои индивидуальные заказы') return showIndividualOrders(from, chatId);
   if (text === '➕ Создать ШК') return startGeneration(from, chatId);
   if (text === '🏷 Стикеры для товаров') return startForCategory(from, chatId, 'product');
   if (text === '📦 QR для коробок') return startForCategory(from, chatId, 'box');

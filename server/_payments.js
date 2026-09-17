@@ -46,6 +46,9 @@ async function completeOrder(order, payment) {
     let completed={...order,provider_status:'succeeded'};
     if(order.product_kind==='program'){
       completed={...completed,status:'succeeded'};
+    }else if(order.product_kind==='individual_stickers'){
+      await supabaseFetch('rpc/complete_individual_sticker_order',{method:'POST',body:JSON.stringify({p_payment_order_id:order.id})});
+      completed={...completed,status:'succeeded'};
     }else if(order.product_kind==='program_license'){
       const key=await supabaseFetch('rpc/complete_program_license_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
       completed={...completed,status:'succeeded',program_license_key:String(key)};
@@ -71,7 +74,11 @@ async function notifyCompleted(order){
   if(!order.user_id)return;
   const prefs=await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(order.user_id)}&select=notify_order_status&limit=1`).catch(()=>[]);
   await createNotification({userId:order.user_id,kind:'order',title:'Заказ успешно оплачен',body:`Заказ ${String(order.id).slice(0,8)} готов. Данные покупки доступны в личном кабинете.`,link:'/cabinet/orders',dedupeKey:`order-succeeded:${order.id}`,email:order.email||null,emailEnabled:prefs[0]?.notify_order_status!==false}).catch(()=>{});
-  if(order.product_kind==='stickers'){
+  if(order.product_kind==='individual_stickers'){
+    const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
+    const telegramId=identities[0]?.telegram_user_id;
+    if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nСтикеры доступны в истории кабинета и через кнопку «Мои заказы» в боте.',{reply_markup:{inline_keyboard:[[{text:'📦 Мои заказы',callback_data:'orders:list'}],[{text:'🌐 Открыть кабинет',web_app:{url:'https://shk-wb.vercel.app/cabinet/history'}}]]}}).catch(()=>{});
+  }else if(order.product_kind==='stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
     if(telegramId){

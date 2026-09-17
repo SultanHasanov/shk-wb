@@ -34,6 +34,7 @@ export function AdminUserPage() {
   const query = useAdminUser(userId);
 
   const [grantOpen, setGrantOpen] = useState(false);
+  const [individualOpen, setIndividualOpen] = useState(false);
   const [cellOpen, setCellOpen] = useState(false);
   const [programOpen, setProgramOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
@@ -43,6 +44,7 @@ export function AdminUserPage() {
   const grantSticker = useAdminUserAction<{ userId: string; name: string; limit: number }>(
     'grantSticker',
   );
+  const createIndividual = useAdminUserAction<{userId:string;title:string;codes:string;totalAmount:number;creditUnits:number}>('createIndividualStickerOrder');
   const topup = useAdminUserAction<{ userId: string; codeId: number; add: number }>('topupSticker');
   const patchCode = useAdminUserAction<{
     userId: string;
@@ -204,6 +206,14 @@ export function AdminUserPage() {
             Сохранить
           </Button>
         </form>
+      </Card>
+
+      <Card>
+        <div className={s.spread}>
+          <h3>Индивидуальные заказы стикеров</h3>
+          <Button size="sm" onClick={() => setIndividualOpen(true)}><Plus size={16}/>Создать заказ</Button>
+        </div>
+        {user.customOrders?.length ? <Table><thead><tr><th>Заказ</th><th>Стикеры</th><th>Зачтено</th><th>К оплате</th><th>Статус</th></tr></thead><tbody>{user.customOrders.map(order=><tr key={order.id}><td>{order.title}</td><td>{order.quantity}</td><td>{order.credited_units} шт.</td><td>{money(Math.round(Number(order.amount_due)*100))}</td><td><Badge tone={order.status==='paid'?'success':'warning'}>{order.status==='paid'?'Оплачен':'Ожидает оплаты'}</Badge></td></tr>)}</tbody></Table>:<p className={s.mutedNote}>Индивидуальных заказов нет.</p>}
       </Card>
 
       <Card>
@@ -580,6 +590,16 @@ export function AdminUserPage() {
           <Button type="submit" loading={grantSticker.isPending}>
             Выдать
           </Button>
+        </form>
+      </Modal>
+
+      <Modal open={individualOpen} onOpenChange={setIndividualOpen} title="Создать индивидуальный заказ" description="Номера будут закрыты до оплаты. Остаток генераций резервируется сразу.">
+        <form className="stack" onSubmit={event=>{event.preventDefault();const form=new FormData(event.currentTarget);run(createIndividual,{userId,title:String(form.get('title')||''),codes:String(form.get('codes')||''),totalAmount:Number(form.get('totalAmount')||0),creditUnits:Number(form.get('creditUnits')||0)},'Индивидуальный заказ выставлен',()=>setIndividualOpen(false));}}>
+          <Field label="Название"><Input name="title" defaultValue="Индивидуальный заказ стикеров" required/></Field>
+          <Field label="Номера" help="По одному в строке. Повторы будут удалены."><Textarea name="codes" rows={10} required/></Field>
+          <Field label="Полная стоимость, ₽"><Input name="totalAmount" type="number" min="0" step="0.01" required/></Field>
+          <Field label="Зачесть генераций из текущего пакета"><Input name="creditUnits" type="number" min="0" defaultValue="0" required/></Field>
+          <Button type="submit" loading={createIndividual.isPending}>Выставить заказ</Button>
         </form>
       </Modal>
 

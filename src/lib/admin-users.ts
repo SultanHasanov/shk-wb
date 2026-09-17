@@ -38,6 +38,7 @@ export function fillDailySeries(
 
 const PRODUCT_LABELS: Record<string, string> = {
   stickers: 'Пакеты генераций',
+  individual_stickers: 'Индивидуальные стикеры',
   program: 'Программа «Подбор кодов»',
   program_license: 'Итерации «Подбора кодов»',
   cell_print_license: 'Ключи «Печати ячеек»',
