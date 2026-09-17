@@ -168,6 +168,7 @@ export type AdminCellLicense = {
   key: string;
   durationDays: number;
   deviceLimit: number;
+  marketplaceScope: 'wb' | 'ozon' | 'both' | 'legacy_unassigned';
   active: boolean;
   activatedAt: string | null;
   expiresAt: string | null;

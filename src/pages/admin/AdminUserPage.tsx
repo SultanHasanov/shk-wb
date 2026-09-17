@@ -60,6 +60,7 @@ export function AdminUserPage() {
     userId: string;
     durationDays: number;
     deviceLimit: number;
+    marketplaceScope: 'wb' | 'ozon' | 'both';
     note: string;
   }>('grantCellLicense');
   const patchCell = useAdminUserAction<{
@@ -67,6 +68,7 @@ export function AdminUserPage() {
     id: number;
     extendDays?: number;
     deviceLimit?: number;
+    marketplaceScope?: 'wb' | 'ozon' | 'both';
     active?: boolean;
   }>('cellLicense', 'PATCH');
   const notify = useAdminUserAction<{ userId: string; title: string; body: string }>('notify');
@@ -337,7 +339,7 @@ export function AdminUserPage() {
             <thead>
               <tr>
                 <th>Ключ</th>
-                <th>Срок</th>
+                <th>Права</th><th>Срок</th>
                 <th>Устройства</th>
                 <th>Действует до</th>
                 <th />
@@ -347,6 +349,7 @@ export function AdminUserPage() {
               {user.cellLicenses.map(license => (
                 <tr key={license.id}>
                   <td className="mono">{license.key}</td>
+                  <td>{{ wb: 'Wildberries', ozon: 'Ozon', both: 'WB + Ozon', legacy_unassigned: 'Не назначен (WB)' }[license.marketplaceScope]}</td>
                   <td>{license.durationDays} дн.</td>
                   <td>
                     {license.devices?.length ?? 0} из {license.deviceLimit}
@@ -354,6 +357,10 @@ export function AdminUserPage() {
                   <td>{license.expiresAt ? shortDate(license.expiresAt) : 'не активирован'}</td>
                   <td>
                     <div className={s.row}>
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        const scope = window.prompt('Права ключа: wb, ozon или both', license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope)?.trim().toLowerCase();
+                        if (scope === 'wb' || scope === 'ozon' || scope === 'both') run(patchCell, { userId, id: license.id, marketplaceScope: scope }, 'Права изменены');
+                      }}>Права</Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -622,6 +629,7 @@ export function AdminUserPage() {
                 userId,
                 durationDays: Number(form.get('durationDays')),
                 deviceLimit: Number(form.get('deviceLimit')),
+                marketplaceScope: String(form.get('marketplaceScope') || 'wb') as 'wb' | 'ozon' | 'both',
                 note: String(form.get('note') || ''),
               },
               'Ключ выдан',
@@ -646,6 +654,9 @@ export function AdminUserPage() {
                 </option>
               ))}
             </Select>
+          </Field>
+          <Field label="Маркетплейс">
+            <Select name="marketplaceScope" defaultValue="wb"><option value="wb">Wildberries</option><option value="ozon">Ozon</option><option value="both">Wildberries + Ozon</option></Select>
           </Field>
           <Field label="Пометка">
             <Input name="note" />

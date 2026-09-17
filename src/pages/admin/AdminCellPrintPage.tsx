@@ -10,6 +10,7 @@ import s from '../../layout/AdminShell.module.css';
 
 const DURATIONS = [3, 7, 30, 90, 180, 365];
 const DEVICES = [1, 2, 3, 5, 10, 20];
+const SCOPE_LABELS = { wb: 'Wildberries', ozon: 'Ozon', both: 'Wildberries + Ozon', legacy_unassigned: 'Не назначен (временно WB)' } as const;
 
 type Promo = { id: number; code: string; discount: number; scope: string; limit: number; used: number; active: boolean };
 type Announcement = { id: number; text: string; url: string | null; level: string; active: boolean };
@@ -19,7 +20,7 @@ type Release = { id: string; version: string; minimumVersion: string; downloadUr
 export function AdminCellPrintPage() {
   const toast = useToast();
   const licenses = useAdminResource<AdminCellLicense>('cellLicense');
-  const licenseMutation = useAdminResourceMutation<{ durationDays: number; deviceLimit: number; note: string }>('cellLicense');
+  const licenseMutation = useAdminResourceMutation<{ durationDays: number; deviceLimit: number; marketplaceScope: string; note: string }>('cellLicense');
   const activations = useAdminResource<AdminCellDevice>('cellActivation');
   const activationMutation = useAdminResourceMutation<never>('cellActivation');
   const promos = useAdminResource<Promo>('cellPromo');
@@ -44,6 +45,7 @@ export function AdminCellPrintPage() {
             licenseMutation.create.mutate({
               durationDays: Number(form.get('durationDays')),
               deviceLimit: Number(form.get('deviceLimit')),
+              marketplaceScope: String(form.get('marketplaceScope') || 'wb'),
               note: String(form.get('note') || ''),
             }, { onSuccess: () => toast('Ключ создан', 'success'), onError: fail });
           }}
@@ -58,6 +60,11 @@ export function AdminCellPrintPage() {
               {DEVICES.map(devices => <option key={devices} value={devices}>{devices}</option>)}
             </Select>
           </Field>
+          <Field label="Маркетплейс">
+            <Select name="marketplaceScope" defaultValue="wb">
+              <option value="wb">Wildberries</option><option value="ozon">Ozon</option><option value="both">Wildberries + Ozon</option>
+            </Select>
+          </Field>
           <Field label="Пометка"><Input name="note" /></Field>
           <Button type="submit" loading={licenseMutation.create.isPending}>Создать ключ</Button>
         </form>
@@ -68,17 +75,22 @@ export function AdminCellPrintPage() {
         <h3>Ключи</h3>
         {licenses.isPending ? <Skeleton height={160} /> : licenses.data?.length ? (
           <Table>
-            <thead><tr><th>Ключ</th><th>Срок</th><th>Устройства</th><th>Действует до</th><th>Статус</th><th /></tr></thead>
+            <thead><tr><th>Ключ</th><th>Права</th><th>Срок</th><th>Устройства</th><th>Действует до</th><th>Статус</th><th /></tr></thead>
             <tbody>
               {licenses.data.map(license => (
                 <tr key={license.id}>
                   <td className="mono">{license.key}</td>
+                  <td>{SCOPE_LABELS[license.marketplaceScope] ?? license.marketplaceScope}</td>
                   <td>{license.durationDays} дн.</td>
                   <td>{license.deviceLimit}</td>
                   <td>{license.expiresAt ? shortDate(license.expiresAt) : 'не активирован'}</td>
                   <td><Badge tone={license.active ? 'success' : 'error'}>{license.active ? 'Активен' : 'Отозван'}</Badge></td>
                   <td>
                     <div className={s.row}>
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        const scope = window.prompt('Права ключа: wb, ozon или both', license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope)?.trim().toLowerCase();
+                        if (scope && ['wb', 'ozon', 'both'].includes(scope)) licenseMutation.update.mutate({ id: license.id, marketplaceScope: scope } as never, { onError: fail });
+                      }}>Права</Button>
                       <Button
                         variant="ghost" size="sm"
                         onClick={() => {
