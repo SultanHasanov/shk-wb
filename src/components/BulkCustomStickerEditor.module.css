@@ -1,0 +1,55 @@
+.summary,
+.actions,
+.progressHead {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.list {
+  display: grid;
+  gap: var(--sp-2);
+  max-height: 360px;
+  overflow: auto;
+}
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.bad input {
+  border-color: var(--danger);
+}
+.duplicate input {
+  border-color: var(--warning);
+}
+.progress {
+  height: 10px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.jobs {
+  display: grid;
+  gap: var(--sp-3);
+}
+.job {
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+@media (max-width: 600px) {
+  .item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .item > span {
+    grid-column: 1/-1;
+  }
+}

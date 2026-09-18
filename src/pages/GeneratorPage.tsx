@@ -13,6 +13,7 @@ import { PricingPacks } from '../components/PricingPacks';
 import { GeneratedCounter } from '../components/GeneratedCounter';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { TelegramBotPromo } from '../components/TelegramBotPromo';
+import { BulkCustomStickerEditor } from '../components/BulkCustomStickerEditor';
 import {
   Accordion,
   Alert,
@@ -202,6 +203,9 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   // Пусто — печатаем всю пачку; иначе первые N из неё.
   const [printCount, setPrintCount] = useState<number | ''>('');
   const [previewCount, setPreviewCount] = useState(0);
+  // Одиночная генерация сохраняет прежнюю форму и серверный маршрут. Редактор очереди
+  // включается явно, чтобы быстрый сценарий по одному номеру не стал сложнее.
+  const [customInputMode, setCustomInputMode] = useState<'single' | 'list'>('single');
   const cabinet = useQuery({
     queryKey: ['cabinet', 'bootstrap'],
     queryFn: () => api<CabinetBootstrap>('/api/cabinet/bootstrap'),
@@ -298,6 +302,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   const invalidCustomCode = g.mode === 'custom' && g.code.length !== codeLength;
   // Пустое поле количества — это 0 в сторе: нажатие ловило бы 400 от API.
   const invalidQuantity = g.mode === 'range' && g.quantity < 1;
+  const bulkCustomMode =
+    g.kind === 'product' && g.mode === 'custom' && customInputMode === 'list';
 
   // Печать и скачивание идут одним и тем же PDF: раньше «Печать» звала
   // window.print(), и в кабинете выходил пустой лист — печатные стили прячут
@@ -358,6 +364,18 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             ]}
           />
 
+          {g.kind === 'product' && g.mode === 'custom' && (
+            <Segmented
+              label="Количество своих номеров"
+              value={customInputMode}
+              onChange={value => setCustomInputMode(value as 'single' | 'list')}
+              options={[
+                { value: 'single', label: 'Один номер' },
+                { value: 'list', label: 'Список номеров' },
+              ]}
+            />
+          )}
+
           {g.mode === 'range' ? (
             <div>
               <Field
@@ -400,6 +418,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 ))}
               </div>
             </div>
+          ) : bulkCustomMode ? (
+            <BulkCustomStickerEditor authenticated={auth.isAuthenticated} onNeedPackages={onNeedPackages} />
           ) : (
             <Field
               label={g.kind === 'box' ? 'Номер коробки' : 'Номер ШК'}
@@ -427,7 +447,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
           {/* Код доступа обязателен: генерация без него не проходит на сервере,
               поэтому поле показывается сразу, а не прячется за ссылкой. */}
-          <Field label="Код доступа" help="Код из личного кабинета или со страницы оплаты">
+          {!bulkCustomMode && <><Field label="Код доступа" help="Код из личного кабинета или со страницы оплаты">
             <Input
               maxLength={36}
               value={g.accessCode}
@@ -471,7 +491,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             onClick={() => setConfirmOpen(true)}
           >
             {mutation.isPending ? 'Генерируем…' : 'Сгенерировать'}
-          </Button>
+          </Button></>}
 
           <p className={s.historyNote}>
             {auth.isAuthenticated ? (

@@ -330,8 +330,8 @@ export function HistoryPage() {
                         {g.category === 'box' ? 'QR коробок' : 'Товары'}
                       </Badge>
                     </td>
-                    <td>{g.mode === 'range' ? 'Массово' : 'По номеру'}</td>
-                    <td>{g.quantity}</td>
+                    <td>{g.customJobId ? `Свой список · пачка ${(g.customJobPart ?? 0) + 1}` : g.mode === 'range' ? 'Массово' : 'По номеру'}</td>
+                    <td>{g.customJob ? <><strong>{g.quantity}</strong><div className="muted">Всего: {g.customJob.generated} из {g.customJob.total}, осталось {g.customJob.remaining}</div></> : g.quantity}</td>
                     <td className="mono">
                       {g.code || g.codes?.slice(0, 2).join(' — ') || g.batchId || '—'}
                     </td>

@@ -22,6 +22,7 @@
     { "source": "/api/cabinet/orders", "destination": "/api/cabinet?action=orders" },
     { "source": "/api/cabinet/history/import", "destination": "/api/cabinet?action=history" },
     { "source": "/api/cabinet/history", "destination": "/api/cabinet?action=history" },
+    { "source": "/api/cabinet/custom-sticker-jobs", "destination": "/api/cabinet?action=custom-sticker-jobs" },
     { "source": "/api/cabinet/profile", "destination": "/api/cabinet?action=profile" },
     { "source": "/api/cabinet/preferences", "destination": "/api/cabinet?action=preferences" },
     { "source": "/api/cabinet/notifications", "destination": "/api/cabinet?action=notifications" },

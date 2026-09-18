@@ -64,6 +64,10 @@ const ImportEntry = z
       .optional(),
   })
   .strict();
+const CustomJobInput = z.object({
+  jobId: z.string().uuid().nullable().optional(),
+  codes: z.array(z.string().regex(/^\d{11}$/)).min(1),
+}).strict();
 
 function action(req) {
   return String(req.query?.action || 'bootstrap');
@@ -356,6 +360,11 @@ async function history(req, res, user) {
       rows = await supabaseFetch(
         `user_generation_history?user_id=eq.${q(user.id)}${kind}${before(req)}&select=*&order=created_at.desc&limit=${pageSize}`,
       );
+    const jobIds = [...new Set(rows.map(r => r.payload?.customJobId).filter(Boolean))];
+    const jobRows = jobIds.length
+      ? await supabaseFetch(`custom_sticker_jobs?id=in.(${jobIds.map(q).join(',')})&user_id=eq.${q(user.id)}&select=id,total_count,generated_count,status`)
+      : [];
+    const jobs = new Map(jobRows.map(job => [job.id, job]));
     return res.json({
       items: rows.map(r => ({
         id: String(r.id),
@@ -363,6 +372,12 @@ async function history(req, res, user) {
         mode: r.mode,
         createdAt: r.created_at,
         ...r.payload,
+        ...(r.payload?.customJobId && jobs.get(r.payload.customJobId) ? { customJob: {
+          total: Number(jobs.get(r.payload.customJobId).total_count || 0),
+          generated: Number(jobs.get(r.payload.customJobId).generated_count || 0),
+          remaining: Math.max(0, Number(jobs.get(r.payload.customJobId).total_count || 0) - Number(jobs.get(r.payload.customJobId).generated_count || 0)),
+          status: jobs.get(r.payload.customJobId).status,
+        }} : {}),
         printedCodes: r.printed_codes || [],
       })),
       nextCursor: rows.length === pageSize ? rows[rows.length - 1].created_at : null,
@@ -441,6 +456,64 @@ async function history(req, res, user) {
       }),
     });
     return res.status(201).json({ imported: sanitized.length });
+  }
+  return res.status(405).end();
+}
+
+function mapCustomJob(row, items = []) {
+  const batches = new Map();
+  for (const item of items) {
+    if (!item.history_id) continue;
+    const key = String(item.history_id);
+    if (!batches.has(key)) batches.set(key, { historyId: key, count: 0 });
+    batches.get(key).count++;
+  }
+  return {
+    id: row.id,
+    status: row.status,
+    total: Number(row.total_count || 0),
+    generated: Number(row.generated_count || 0),
+    remaining: Math.max(0, Number(row.total_count || 0) - Number(row.generated_count || 0)),
+    error: row.error || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    codes: row.status === 'draft' ? items.map(item => String(item.code)) : undefined,
+    batches: [...batches.values()],
+  };
+}
+
+async function customStickerJobs(req, res, user) {
+  if (req.method === 'PUT') {
+    const parsed = CustomJobInput.safeParse(req.body);
+    if (!parsed.success) return bad(res, parsed);
+    if (new Set(parsed.data.codes).size !== parsed.data.codes.length)
+      return res.status(400).json({ error: 'Номера должны быть уникальными', code: 'DUPLICATE_CODES' });
+    const id = await supabaseFetch('rpc/save_custom_sticker_job', {
+      method: 'POST',
+      body: JSON.stringify({ p_user_id: user.id, p_job_id: parsed.data.jobId || null, p_codes: parsed.data.codes }),
+    });
+    const rows = await supabaseFetch(`custom_sticker_jobs?id=eq.${q(id)}&user_id=eq.${q(user.id)}&select=*&limit=1`);
+    return res.status(parsed.data.jobId ? 200 : 201).json(mapCustomJob(rows[0], parsed.data.codes.map(code => ({ code }))));
+  }
+  if (req.method === 'POST') {
+    const jobId = String(req.body?.jobId || '');
+    if (!z.string().uuid().safeParse(jobId).success) return res.status(400).json({ error: 'Некорректная очередь', code: 'VALIDATION_ERROR' });
+    const result = await supabaseFetch('rpc/process_custom_sticker_job', {
+      method: 'POST', body: JSON.stringify({ p_user_id: user.id, p_job_id: jobId }),
+    });
+    return res.json(result);
+  }
+  if (req.method === 'GET') {
+    const requested = String(req.query?.jobId || '');
+    const filter = requested && z.string().uuid().safeParse(requested).success ? `&id=eq.${q(requested)}` : '';
+    const jobs = await supabaseFetch(`custom_sticker_jobs?user_id=eq.${q(user.id)}${filter}&select=*&order=updated_at.desc&limit=${requested ? 1 : 10}`);
+    if (requested && !jobs.length) return res.status(404).json({ error: 'Очередь не найдена', code: 'NOT_FOUND' });
+    const result = [];
+    for (const job of jobs) {
+      const items = await supabaseFetch(`custom_sticker_job_items?job_id=eq.${q(job.id)}&select=position,code,history_id&order=position.asc`);
+      result.push(mapCustomJob(job, items));
+    }
+    return res.json(requested ? result[0] : { items: result });
   }
   return res.status(405).end();
 }
@@ -706,6 +779,7 @@ module.exports = async function handler(req, res) {
       });
     }
     if (a === 'history') return history(req, res, user);
+    if (a === 'custom-sticker-jobs') return customStickerJobs(req, res, user);
     if (a === 'profile') return handleProfile(req, res, user);
     if (a === 'preferences') return handlePreferences(req, res, user);
     if (a === 'notifications') return handleNotifications(req, res, user);

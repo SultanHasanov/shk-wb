@@ -96,6 +96,9 @@ export type GenerationEntry = {
   codes?: string[];
   imported?: boolean;
   printedCodes?: string[];
+  customJobId?: string;
+  customJobPart?: number;
+  customJob?: { total: number; generated: number; remaining: number; status: string };
 };
 export type Notification = {
   id: string;

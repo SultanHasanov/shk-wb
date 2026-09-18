@@ -16,7 +16,6 @@ const HOME_KEYBOARD = {
   resize_keyboard: true,
   is_persistent: true,
 };
-HOME_KEYBOARD.keyboard[2].push({ text: '📦 Мои индивидуальные заказы' });
 
 function publicUrl(path) {
   const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.vercel.app' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.vercel.app';
