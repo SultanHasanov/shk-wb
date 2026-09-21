@@ -483,7 +483,7 @@ module.exports = async function handler(req, res) {
       const stat = fs.statSync(installer);
       res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
       res.setHeader('Content-Length', String(stat.size));
-      res.setHeader('Content-Disposition', 'attachment; filename="cell-print-1.5.4.exe"');
+      res.setHeader('Content-Disposition', 'attachment; filename="cell-print-1.5.5.exe"');
       res.setHeader('Cache-Control', 'no-store');
       return fs.createReadStream(installer).pipe(res);
     }
