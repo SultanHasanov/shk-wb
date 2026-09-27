@@ -12,19 +12,39 @@ const apiDir = path.join(root, 'api');
 const config = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'));
 const port = Number(process.env.PORT || 3000);
 
+// Индекс скобки, закрывающей ту, что стоит в source[start]; учитывает вложенные
+// группы вроде "((?!api/).*)".
+function closingParen(source, start) {
+  for (let depth = 0, i = start; i < source.length; i++) {
+    if (source[i] === '\\') i++;
+    else if (source[i] === '(') depth++;
+    else if (source[i] === ')' && --depth === 0) return i;
+  }
+  throw new Error(`Unbalanced parentheses in vercel.json pattern: ${source}`);
+}
+
 // Шаблон Vercel (":id", ":path*", ":section(a|b)", "(.*)") → RegExp.
 function compile(source) {
   let pattern = '';
   for (let i = 0; i < source.length; ) {
-    const rest = source.slice(i);
-    const param = /^\/:(\w+)(\([^)]*\))?(\*)?/.exec(rest);
+    const param = /^\/:(\w+)/.exec(source.slice(i));
     if (param) {
-      const [whole, name, group, star] = param;
-      const body = group ? group.slice(1, -1) : star ? '.*' : '[^/]+';
+      const name = param[1];
+      i += param[0].length;
+      let body = '[^/]+';
+      if (source[i] === '(') {
+        const end = closingParen(source, i);
+        body = source.slice(i + 1, end);
+        i = end + 1;
+      }
+      const star = source[i] === '*';
+      if (star) {
+        if (body === '[^/]+') body = '.*';
+        i += 1;
+      }
       pattern += star ? `(?:/(?<${name}>${body}))?` : `/(?<${name}>${body})`;
-      i += whole.length;
-    } else if (rest.startsWith('(')) {
-      const end = source.indexOf(')', i);
+    } else if (source[i] === '(') {
+      const end = closingParen(source, i);
       pattern += source.slice(i, end + 1);
       i = end + 1;
     } else {
@@ -35,9 +55,18 @@ function compile(source) {
   return new RegExp(`^${pattern}$`);
 }
 
+// Условия "has" из vercel.json. Поддерживается только host — остальные типы
+// здесь не используются, и правило с ними не применяется вовсе.
+function conditionsMet(rule, req) {
+  if (!rule.has) return true;
+  const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+  return rule.has.every((condition) => condition.type === 'host' && condition.value.toLowerCase() === host);
+}
+
 function substitute(destination, match) {
   return destination.replace(/:(\w+)/g, (whole, name) =>
-    match.groups && name in match.groups ? encodeURIComponent(match.groups[name] || '') : whole,
+    // Значения берутся из уже закодированного pathname — повторно не кодируем.
+    match.groups && name in match.groups ? match.groups[name] || '' : whole,
   );
 }
 
@@ -81,6 +110,7 @@ app.use((req, res, next) => {
   let pathname = url.pathname;
 
   for (const rule of redirects) {
+    if (!conditionsMet(rule, req)) continue;
     const match = rule.re.exec(pathname);
     if (match) return res.redirect(rule.permanent ? 308 : 307, substitute(rule.destination, match) + url.search);
   }
@@ -91,11 +121,12 @@ app.use((req, res, next) => {
     if (staticFile(pathname)) return res.redirect(308, clean + url.search);
   }
 
-  for (const rule of headers) if (rule.re.test(pathname)) for (const { key, value } of rule.headers) res.setHeader(key, value);
+  for (const rule of headers) if (conditionsMet(rule, req) && rule.re.test(pathname)) for (const { key, value } of rule.headers) res.setHeader(key, value);
 
   // Как на Vercel: сначала файловая система (статика и функции), потом rewrites.
   if (!staticFile(pathname) && !apiHandler(pathname)) {
     for (const rule of rewrites) {
+      if (!conditionsMet(rule, req)) continue;
       const match = rule.re.exec(pathname);
       if (!match) continue;
       const target = new URL(substitute(rule.destination, match), 'http://localhost');

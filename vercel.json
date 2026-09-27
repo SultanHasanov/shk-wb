@@ -74,6 +74,8 @@
   ],
   "crons": [{ "path": "/api/cron/notifications", "schedule": "0 6 * * *" }],
   "redirects": [
+    { "source": "/", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }], "destination": "https://shk-wb.ru/", "permanent": true },
+    { "source": "/:path((?!api/).*)", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }], "destination": "https://shk-wb.ru/:path", "permanent": true },
     { "source": "/generator", "destination": "/", "permanent": true },
     { "source": "/generator.html", "destination": "/", "permanent": true },
     { "source": "/index-live", "destination": "/", "permanent": true },
