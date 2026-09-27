@@ -12,7 +12,7 @@ const { enforceRateLimit } = require('../server/_rate-limit');
 
 // Реферальная ссылка публичная и должна переживать каждый Vercel-деплой.
 // VERCEL_URL здесь использовать нельзя: он содержит технический адрес сборки.
-const REFERRAL_ORIGIN = String(process.env.PUBLIC_REFERRAL_URL || 'https://shk-wb.vercel.app').replace(
+const REFERRAL_ORIGIN = String(process.env.PUBLIC_REFERRAL_URL || 'https://shk-wb.ru').replace(
   /\/$/,
   '',
 );

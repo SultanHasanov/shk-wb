@@ -1,0 +1,20 @@
+[Unit]
+Description=shk-wb.ru (Node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=shkwb
+WorkingDirectory=/srv/shk-wb/current
+EnvironmentFile=/srv/shk-wb/.env
+Environment=NODE_ENV=production PORT=3000
+# На сервере 1 ГБ памяти: ограничиваем кучу Node, остальное — nginx и система.
+ExecStart=/usr/bin/node --max-old-space-size=448 selfhost/server.cjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

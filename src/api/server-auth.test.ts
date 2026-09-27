@@ -14,7 +14,7 @@ describe('серверный контур кабинета',()=>{
   it('использует постоянный домен проекта в production',()=>{process.env.VERCEL_ENV='production';process.env.VERCEL_URL='shk-random-deploy.vercel.app';process.env.VERCEL_PROJECT_PRODUCTION_URL='shk-wb.vercel.app';expect(publicOrigin({headers:{}})).toBe('https://shk-wb.vercel.app')});
   it('формирует реферальные ссылки только на постоянном публичном домене',()=>{
     const cabinet=readFileSync(resolve(root,'api/cabinet.js'),'utf8');
-    expect(cabinet).toMatch(/const REFERRAL_ORIGIN\s*=[^\n]*'https:\/\/shk-wb\.vercel\.app'/);
+    expect(cabinet).toMatch(/const REFERRAL_ORIGIN\s*=[^\n]*'https:\/\/shk-wb\.ru'/);
     // Любой origin, выведенный из запроса, снова привяжет ссылку к адресу сборки,
     // поэтому проверяем не конкретный вызов, а отсутствие такого источника вообще.
     expect(cabinet).not.toMatch(/publicOrigin/);

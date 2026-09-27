@@ -18,7 +18,7 @@ const HOME_KEYBOARD = {
 };
 
 function publicUrl(path) {
-  const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.vercel.app' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.vercel.app';
+  const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.ru' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.ru';
   const origin = String(process.env.PUBLIC_APP_URL || fallback).replace(/\/$/, '');
   return `${origin}${path.startsWith('/') ? path : `/${path}`}`;
 }

@@ -18,7 +18,7 @@
  * автоматически из отрендеренного аккордеона, поэтому не может разойтись с тем,
  * что видит посетитель.
  */
-export const ORIGIN = 'https://shk-wb.vercel.app';
+export const ORIGIN = 'https://shk-wb.ru';
 
 export const SITE_NAME = 'ШК ВБ';
 

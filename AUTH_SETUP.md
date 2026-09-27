@@ -5,9 +5,12 @@
 1. Выполните миграции `supabase/migrations/20260830_telegram_auth.sql` и `supabase/migrations/20260831_cabinet_integration.sql` по порядку.
 2. В **Authentication → Providers → Email** включите Email/Password и отключите обязательное подтверждение email.
 3. В **Authentication → URL Configuration** задайте:
-   - Site URL: `https://shk-wb.vercel.app`
-   - Redirect URLs: `https://shk-wb.vercel.app/**`, `https://*-*.vercel.app/**` и `http://127.0.0.1:5173/**`
+   - Site URL: `https://shk-wb.ru`
+   - Redirect URLs: `https://shk-wb.ru/**`, `https://www.shk-wb.ru/**`, `https://shk-wb.vercel.app/**`, `https://*-*.vercel.app/**` и `http://127.0.0.1:5173/**`
 4. Подключите production SMTP для `auth.sul-dev.ru` и настройте русский шаблон Reset Password.
+5. `*.supabase.co` из России открывается нестабильно, поэтому браузер ходит в Supabase через прокси `https://shk-wb.ru/supabase/` (см. `selfhost/nginx.conf`). Ссылки в письмах тоже должны вести через прокси: в **Authentication → Emails → Templates** замените `{{ .ConfirmationURL }}` на
+   - Reset Password: `{{ .SiteURL }}/supabase/auth/v1/verify?token={{ .TokenHash }}&type=recovery&redirect_to={{ .RedirectTo }}`
+   - Change Email Address: `{{ .SiteURL }}/supabase/auth/v1/verify?token={{ .TokenHash }}&type=email_change&redirect_to={{ .RedirectTo }}`
 
 ## Переменные окружения
 
