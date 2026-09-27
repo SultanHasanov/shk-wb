@@ -74,6 +74,8 @@
   ],
   "crons": [{ "path": "/api/cron/notifications", "schedule": "0 6 * * *" }],
   "redirects": [
+    { "source": "/", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }, { "type": "cookie", "key": "shk_ref", "value": "(?<ref>[A-Z0-9]{6,16})[.].*" }], "destination": "https://shk-wb.ru/r/:ref", "permanent": false },
+    { "source": "/:path((?!api/|r/).*)", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }, { "type": "cookie", "key": "shk_ref", "value": "(?<ref>[A-Z0-9]{6,16})[.].*" }], "destination": "https://shk-wb.ru/r/:ref", "permanent": false },
     { "source": "/", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }], "destination": "https://shk-wb.ru/", "permanent": true },
     { "source": "/:path((?!api/).*)", "has": [{ "type": "host", "value": "shk-wb.vercel.app" }], "destination": "https://shk-wb.ru/:path", "permanent": true },
     { "source": "/generator", "destination": "/", "permanent": true },

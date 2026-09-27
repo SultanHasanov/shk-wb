@@ -1,0 +1,75 @@
+# Выкладка shk-wb.ru на VPS при каждом push в main.
+# Сборка идёт здесь, а не на сервере: у VPS 1 ГБ памяти и 5 ГБ диска, а
+# пререндеру нужен Chromium. На сервер уезжает готовый dist + api + server,
+# дальше selfhost/release.sh ставит зависимости, переключает релиз и
+# откатывается на предыдущий, если новый не поднялся.
+#
+# Секреты репозитория:
+#   DEPLOY_HOST                   — IP сервера
+#   DEPLOY_SSH_KEY                — приватный ключ для root@DEPLOY_HOST
+#   DEPLOY_KNOWN_HOSTS            — вывод ssh-keyscan для DEPLOY_HOST
+#   VITE_SUPABASE_PUBLISHABLE_KEY — публичный ключ Supabase для браузера
+#   VITE_TELEGRAM_BOT_USERNAME    — имя бота для виджета входа
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm test
+
+      - name: Install Chromium for prerender
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+        env:
+          # Браузер ходит в Supabase через прокси nginx на нашем домене.
+          VITE_SUPABASE_URL: https://shk-wb.ru/supabase
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_TELEGRAM_BOT_USERNAME: ${{ secrets.VITE_TELEGRAM_BOT_USERNAME }}
+
+      - name: Package release
+        run: tar -czf shk-wb.tar.gz dist api server selfhost vercel.json package.json package-lock.json
+
+      - name: Upload and switch release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh_opts="-i $HOME/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=20"
+          release="$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
+          scp $ssh_opts shk-wb.tar.gz "root@$DEPLOY_HOST:/tmp/shk-wb.tar.gz"
+          ssh $ssh_opts "root@$DEPLOY_HOST" bash -s -- "$release" < selfhost/release.sh
+
+      - name: Smoke test
+        run: |
+          for path in / /cell-print /api/payments/config; do
+            code="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "https://shk-wb.ru$path")"
+            echo "$path → $code"
+            [ "$code" = 200 ] || exit 1
+          done

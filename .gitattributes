@@ -1,0 +1,4 @@
+# Скрипты и конфиги выполняются на Linux-сервере — CRLF их ломает.
+*.sh text eol=lf
+selfhost/** text eol=lf
+.github/** text eol=lf
