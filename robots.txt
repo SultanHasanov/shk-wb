@@ -3,4 +3,4 @@ Allow: /
 Disallow: /admin-enigma/
 Disallow: /api/
 
-Sitemap: https://shk-wb.vercel.app/sitemap.xml
+Sitemap: https://shk-wb.ru/sitemap.xml

@@ -30,7 +30,7 @@ if (existsSync('downloads/version.json')) {
 // offer.html, privacy.html и payment-result.html больше не копируются: это
 // маршруты React (/offer, /privacy, /payment-result), а старые файлы перекрыли
 // бы их собой — Vercel отдаёт файл раньше, чем применяет rewrite.
-for (const file of ['robots.txt', 'sitemap.xml']) {
+for (const file of ['robots.txt', 'sitemap.xml', 'favicon.ico']) {
   if (existsSync(file)) copyFileSync(file, resolve(output, file));
 }
 
