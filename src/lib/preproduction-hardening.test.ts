@@ -12,6 +12,12 @@ describe('предрелизная защита', () => {
     expect(read('vite.config.ts')).toContain('sourcemap: false');
   });
 
+  it('не перенаправляет служебный файл обновления с Vercel', () => {
+    const config = read('vercel.json');
+    expect(config).toContain('(?!api/|r/|downloads/)');
+    expect(config).toContain('(?!api/|downloads/)');
+  });
+
   it('создаёт шестизначные коды и сохраняет уже выданные STK-коды', () => {
     const migration = read('supabase/migrations/20260908_six_digit_access_codes.sql');
     expect(migration).toContain("lpad(floor(random() * 1000000)::integer::text, 6, '0')");
