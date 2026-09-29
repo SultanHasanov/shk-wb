@@ -461,7 +461,7 @@ module.exports = async function handler(req, res) {
       res.setHeader('Content-Length', String(stat.size));
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${isCell ? 'cell-print-1.2.1.exe' : 'program-windows-1.3.2.exe'}"`,
+        `attachment; filename="${isCell ? 'cell-print-1.2.1.exe' : 'program-windows-1.3.4.exe'}"`,
       );
       res.setHeader('Cache-Control', 'private, no-store');
       return fs.createReadStream(installer).pipe(res);
@@ -474,7 +474,7 @@ module.exports = async function handler(req, res) {
       const stat = fs.statSync(installer);
       res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
       res.setHeader('Content-Length', String(stat.size));
-      res.setHeader('Content-Disposition', 'attachment; filename="program-windows-1.3.2.exe"');
+      res.setHeader('Content-Disposition', 'attachment; filename="program-windows-1.3.4.exe"');
       res.setHeader('Cache-Control', 'no-store');
       return fs.createReadStream(installer).pipe(res);
     }

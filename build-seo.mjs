@@ -159,7 +159,7 @@ export const PUBLIC_PAGES = {
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Windows 7, Windows 10, Windows 11',
         // Держать в согласии с downloads/version.json
-        softwareVersion: '1.3.3',
+        softwareVersion: '1.3.4',
         inLanguage: 'ru-RU',
         description:
           'Программа для сотрудников ПВЗ: поиск кода клиента по номеру ячейки, проверка отзывов и просмотр товаров заказа по доступным рабочим данным.',
