@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
-const { createNotification } = require('./_notifications');
+const { createNotification, sendEmail } = require('./_notifications');
 const { sendMessage } = require('./_telegram-api');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
@@ -71,9 +71,17 @@ async function completeOrder(order, payment) {
   }
 }
 async function notifyCompleted(order){
+  const secret=order.access_code||order.program_license_key||order.cell_print_license_key||null;
+  const secretLabel=order.access_code?'Код доступа':'Ключ активации';
+  const deliveryLine=secret?` ${secretLabel}: ${secret}.`:'';
+  const body=`Заказ ${String(order.id).slice(0,8)} готов.${deliveryLine} Данные покупки доступны в личном кабинете.`;
+  if(order.user_id){
+    const prefs=await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(order.user_id)}&select=notify_order_status&limit=1`).catch(()=>[]);
+    await createNotification({userId:order.user_id,kind:'order',title:'Заказ успешно оплачен',body,link:'/cabinet/orders',dedupeKey:`order-succeeded:${order.id}`,email:order.email||null,emailEnabled:prefs[0]?.notify_order_status!==false}).catch(()=>{});
+  }else if(order.email){
+    await sendEmail({userId:null,notificationId:null,to:order.email,subject:'Заказ успешно оплачен',text:body,dedupeKey:`email:order-succeeded:${order.id}`}).catch(()=>{});
+  }
   if(!order.user_id)return;
-  const prefs=await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(order.user_id)}&select=notify_order_status&limit=1`).catch(()=>[]);
-  await createNotification({userId:order.user_id,kind:'order',title:'Заказ успешно оплачен',body:`Заказ ${String(order.id).slice(0,8)} готов. Данные покупки доступны в личном кабинете.`,link:'/cabinet/orders',dedupeKey:`order-succeeded:${order.id}`,email:order.email||null,emailEnabled:prefs[0]?.notify_order_status!==false}).catch(()=>{});
   if(order.product_kind==='individual_stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
@@ -83,7 +91,8 @@ async function notifyCompleted(order){
     const telegramId=identities[0]?.telegram_user_id;
     if(telegramId){
       const quantity=Number(order.range_quantity||0)+Number(order.custom_quantity||0);
-      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен. Можно продолжить генерацию.`,{reply_markup:{inline_keyboard:[[{text:'➕ Создать ШК',callback_data:'gen:start'}]]}}).catch(()=>{});
+      const codeLine=order.access_code?`\nКод доступа: <code>${order.access_code}</code>\n`:'';
+      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно продолжить генерацию.`,{reply_markup:{inline_keyboard:[[{text:'➕ Создать ШК',callback_data:'gen:start'}]]}}).catch(()=>{});
     }
   }
 }

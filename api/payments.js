@@ -129,6 +129,9 @@ module.exports = async function handler(req, res) {
       // Принимаем только фиксированный признак, а не URL от клиента: иначе это открытый редирект.
       const returnTarget = String(req.body?.returnTo || '');
       const resultPath = returnTarget === 'cabinet' ? '/cabinet/payment-result' : '/payment-result';
+      const checkoutEmail = String(req.body?.email || '').trim().toLowerCase();
+      if (checkoutEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(checkoutEmail))
+        return res.status(400).json({ error: 'Введите корректную электронную почту' });
       if (returnTarget === 'telegram' && !user)
         return res.status(401).json({ error: 'Для оплаты через Telegram войдите в аккаунт' });
       let individualOrder = null;
@@ -274,7 +277,7 @@ module.exports = async function handler(req, res) {
         idempotence_key: idempotence,
         product_kind: productKind,
         user_id: user?.id || null,
-        email: user?.email?.endsWith('@users.invalid') ? null : user?.email || null,
+        email: user?.email?.endsWith('@users.invalid') ? checkoutEmail || null : user?.email || checkoutEmail || null,
         provider_status: 'pending',
         fulfillment_status: 'pending',
       };
@@ -289,6 +292,32 @@ module.exports = async function handler(req, res) {
         if (promoCode) orderPayload.promo_code = promoCode;
       }
       if(renewalTargetKey)orderPayload.renewal_target_key=renewalTargetKey;
+      const requestedCredit = Math.max(
+        0,
+        Math.min(Number.MAX_SAFE_INTEGER, Number(req.body?.referralCreditKopecks || 0)),
+      );
+      // Mini App can be reopened several times while the previous YooKassa checkout is
+      // still valid. Reuse that checkout instead of filling the admin list with copies
+      // which YooKassa will cancel about an hour later. Balance payments are excluded:
+      // their reservation belongs to one concrete order.
+      if (user && requestedCredit === 0 && !promoCode && !renewalTargetKey) {
+        const recentSince = new Date(Date.now() - 55 * 60 * 1000).toISOString();
+        const existing = await supabaseFetch(
+          `payment_orders?user_id=eq.${encodeURIComponent(user.id)}` +
+            `&product_kind=eq.${encodeURIComponent(productKind)}` +
+            `&status=eq.pending&amount=eq.${encodeURIComponent(calculated.total)}` +
+            `&range_quantity=eq.${encodeURIComponent(orderPayload.range_quantity)}` +
+            `&custom_quantity=eq.${encodeURIComponent(orderPayload.custom_quantity)}` +
+            `&created_at=gte.${encodeURIComponent(recentSince)}` +
+            '&confirmation_url=not.is.null&select=public_token,confirmation_url&order=created_at.desc&limit=1',
+        );
+        if (existing[0]?.confirmation_url)
+          return res.status(200).json({
+            confirmationUrl: existing[0].confirmation_url,
+            token: existing[0].public_token,
+            reused: true,
+          });
+      }
       const inserted = await supabaseFetch('payment_orders', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
@@ -311,10 +340,6 @@ module.exports = async function handler(req, res) {
           body: JSON.stringify({ p_order_id: order.id, p_code: promoCode, p_scope: scope }),
         });
       }
-      const requestedCredit = Math.max(
-        0,
-        Math.min(Number.MAX_SAFE_INTEGER, Number(req.body?.referralCreditKopecks || 0)),
-      );
       if (user && requestedCredit > 0) {
         await supabaseFetch('rpc/apply_referral_credit', {
           method: 'POST',

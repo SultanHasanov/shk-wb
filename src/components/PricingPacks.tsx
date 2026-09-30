@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { observer } from 'mobx-react-lite';
 import { Link, useLocation } from 'react-router-dom';
 import { CircleCheck } from 'lucide-react';
-import { Alert, Button, Checkbox, Modal } from '../ui';
+import { Alert, Button, Checkbox, Field, Input, Modal } from '../ui';
 import {
   formatPerUnit,
   formatTotal,
@@ -66,6 +66,7 @@ export const PackPurchase = observer(() => {
   const [quantity, setQuantity] = useState<number>(POPULAR_PACK);
   const [accepted, setAccepted] = useState(false);
   const [useBalance, setUseBalance] = useState(false);
+  const [email, setEmail] = useState('');
   // Оплата уводит на ЮKassa, поэтому состав заказа показываем до ухода со страницы.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { auth } = useStores();
@@ -90,6 +91,7 @@ export const PackPurchase = observer(() => {
           accepted,
           referralCreditKopecks: useBalance ? Number.MAX_SAFE_INTEGER : 0,
           returnTo: inCabinet ? 'cabinet' : 'public',
+          email: auth.isAuthenticated ? undefined : email.trim(),
         }),
       }),
     // Заказ запоминаем до ухода на ЮKassa: у покупки без входа других следов не
@@ -198,14 +200,18 @@ export const PackPurchase = observer(() => {
             )}
 
             {!auth.isAuthenticated && (
-              <Alert tone="info">
-                Код доступа выдадим сразу после оплаты. Без входа он останется только в этом
-                браузере.
-              </Alert>
+              <>
+                <Field label="Электронная почта" help="После оплаты отправим сюда код доступа.">
+                  <Input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} />
+                </Field>
+                <Alert tone="info">
+                  Код доступа также покажем сразу после оплаты в этом браузере.
+                </Alert>
+              </>
             )}
 
             <div className="row">
-              <Button loading={checkout.isPending} onClick={() => checkout.mutate()}>
+              <Button loading={checkout.isPending} disabled={!auth.isAuthenticated && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())} onClick={() => checkout.mutate()}>
                 {payableTotal > 0 ? 'Перейти к оплате' : 'Оплатить балансом'}
               </Button>
               <Button variant="secondary" onClick={() => setConfirmOpen(false)}>

@@ -46,6 +46,7 @@ async function pay(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox', { name: /Принимаю/ }));
   const open = screen.getAllByRole('button', { name: 'Перейти к оплате' });
   await user.click(open[open.length - 1]);
+  await user.type(screen.getByRole('textbox', { name: 'Электронная почта' }), 'buyer@example.com');
   const confirm = screen.getAllByRole('button', { name: 'Перейти к оплате' });
   await user.click(confirm[confirm.length - 1]);
   await waitFor(() => expect(paymentBody).not.toBeNull());
@@ -60,6 +61,7 @@ describe('покупка пакетов генераций', () => {
       productKind: 'stickers',
       quantity: 200,
       returnTo: 'public',
+      email: 'buyer@example.com',
     });
     // Пул общий, тип и режим на цену не влияют: если эти поля вернутся в тело
     // запроса, значит вернулось и разделение лимитов.
