@@ -88,8 +88,8 @@ const QUANTITY_PRESETS = [10, 50, 100] as const;
 
 /** Снимки реальных наклеек — те же, что на боевом сайте. */
 const KIND_OPTIONS = [
-  { value: 'product', label: 'Стикеры для товаров', image: '/images/tab-products.png' },
-  { value: 'box', label: 'QR для возвратных коробок', image: '/images/tab-return-boxes.png' },
+  { value: 'product', label: 'Стикеры для товаров', image: '/images/tab-products-v2.webp' },
+  { value: 'box', label: 'QR для возвратных коробок', image: '/images/tab-return-boxes-v2.webp' },
 ] as const;
 
 /**

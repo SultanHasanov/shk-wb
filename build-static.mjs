@@ -149,6 +149,9 @@ function injectSeo(html, route, faq, override) {
   const description =
     override?.description ?? html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '';
   const image = `${ORIGIN}${page.image.path}`;
+  const imageType = page.image.path.endsWith('.jpg') || page.image.path.endsWith('.jpeg')
+    ? 'image/jpeg'
+    : page.image.path.endsWith('.webp') ? 'image/webp' : 'image/png';
   const graph = faq ? [...page.graph, faq] : page.graph;
 
   const head = [
@@ -161,7 +164,7 @@ function injectSeo(html, route, faq, override) {
     `<meta property="og:description" content="${escapeAttribute(description)}"/>`,
     `<meta property="og:url" content="${url}"/>`,
     `<meta property="og:image" content="${image}"/>`,
-    '<meta property="og:image:type" content="image/png"/>',
+    `<meta property="og:image:type" content="${imageType}"/>`,
     `<meta property="og:image:width" content="${page.image.width}"/>`,
     `<meta property="og:image:height" content="${page.image.height}"/>`,
     `<meta property="og:image:alt" content="${escapeAttribute(page.image.alt)}"/>`,

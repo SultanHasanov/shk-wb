@@ -21,7 +21,7 @@ export function TelegramBotPromo({ variant = 'full' }: { variant?: 'full' | 'com
       {variant === 'full' && (
         <img
           className={s.avatar}
-          src="/images/telegram-bot-avatar.png"
+          src="/images/telegram-bot-avatar-112.webp"
           alt=""
           width={56}
           height={56}

@@ -35,9 +35,9 @@ export const SITE_NAME = 'ШК ВБ';
 export const GOOGLE_SITE_VERIFICATION = '';
 
 const OG_GENERATOR = {
-  path: '/images/og-generator-v3.png',
-  width: 1728,
-  height: 910,
+  path: '/images/og-generator-v4.jpg',
+  width: 1200,
+  height: 632,
   alt: 'Генератор QR-кодов и стикеров — создание и скачивание готовых стикеров',
 };
 

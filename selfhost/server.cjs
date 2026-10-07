@@ -171,7 +171,8 @@ app.use((req, res, next) => {
   const file = staticFile(req.resolvedPath);
   if (!file) return next();
   // Файлы из assets/ собирает Vite с хэшем в имени — их можно кэшировать навсегда.
-  const immutable = req.resolvedPath.startsWith('/assets/');
+  const immutable = req.resolvedPath.startsWith('/assets/')
+    || (req.resolvedPath.startsWith('/images/') && /\.(?:webp|jpg)$/i.test(req.resolvedPath));
   res.setHeader('Cache-Control', immutable ? 'public, max-age=31536000, immutable' : 'public, max-age=0, must-revalidate');
   res.sendFile(file, { dotfiles: 'deny', lastModified: true, cacheControl: false });
 });

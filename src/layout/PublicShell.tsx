@@ -103,7 +103,7 @@ export const PublicShell = observer(() => {
             <a className={s.tg} href={CHANNEL_URL} target="_blank" rel="noopener noreferrer">
               <img
                 className={s.tgAva}
-                src="/images/telegram-wb-tools-avatar.png"
+                src="/images/telegram-wb-tools-avatar-112.webp"
                 alt="Аватар канала WB Tools"
                 width={26}
                 height={26}
