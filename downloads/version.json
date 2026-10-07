@@ -1,8 +1,8 @@
 {
-  "version": "1.3.4",
+  "version": "1.3.13",
   "minimum_version": "1.3.3",
   "mandatory": true,
-  "win10_url": "https://shk-wb.vercel.app/api/payments/download-program",
-  "win7_url": "https://shk-wb.vercel.app/api/payments/download-program",
-  "notes": "Исправлен выбор ежедневного кода: устаревшие коды больше не показываются и не списывают итерацию."
+  "win10_url": "https://shk-wb.ru/api/payments/download-program",
+  "win7_url": "https://shk-wb.ru/api/payments/download-program",
+  "notes": "Добавлен выбор конкретного клиента перед поиском кода и подробный прогресс: процент, скорость, прошедшее и оставшееся время."
 }
