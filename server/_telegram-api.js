@@ -5,9 +5,17 @@ function botToken() {
 }
 
 async function telegramRequest(method, body) {
-  const response = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, {
+  const token = botToken();
+  const relayBase = String(process.env.TELEGRAM_API_BASE || '').trim().replace(/\/$/, '');
+  const url = relayBase
+    ? `${relayBase}/api/${method}`
+    : `https://api.telegram.org/bot${token}/${method}`;
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(relayBase ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
