@@ -7,6 +7,7 @@ function botToken() {
 async function telegramRequest(method, body) {
   const token = botToken();
   const relayBase = String(process.env.TELEGRAM_API_BASE || '').trim().replace(/\/$/, '');
+  const proxiedBody = proxyTelegramMedia(method, body, relayBase);
   const url = relayBase
     ? `${relayBase}/api/${method}`
     : `https://api.telegram.org/bot${token}/${method}`;
@@ -16,7 +17,7 @@ async function telegramRequest(method, body) {
       'Content-Type': 'application/json',
       ...(relayBase ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(proxiedBody),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok !== true) {
@@ -26,6 +27,36 @@ async function telegramRequest(method, body) {
     throw error;
   }
   return data.result;
+}
+
+function proxyMediaUrl(value, relayBase) {
+  if (!relayBase || typeof value !== 'string') return value;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'shk-wb.ru') return value;
+  if (!['/api/stickers/image', '/api/stickers/pdf'].includes(url.pathname)) return value;
+  return `${relayBase}/media?url=${encodeURIComponent(url.toString())}`;
+}
+
+function proxyTelegramMedia(method, body, relayBase) {
+  if (!body || typeof body !== 'object') return body;
+  if (method === 'sendPhoto') {
+    return { ...body, photo: proxyMediaUrl(body.photo, relayBase) };
+  }
+  if (method === 'sendDocument') {
+    return { ...body, document: proxyMediaUrl(body.document, relayBase) };
+  }
+  if (method === 'sendMediaGroup' && Array.isArray(body.media)) {
+    return {
+      ...body,
+      media: body.media.map(item => ({ ...item, media: proxyMediaUrl(item.media, relayBase) })),
+    };
+  }
+  return body;
 }
 
 function sendMessage(chatId, text, options = {}) {
