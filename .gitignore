@@ -37,6 +37,10 @@ __pycache__/
 # Локальные эксперименты и вспомогательные файлы
 /image.png
 /wb-rating-client-id.user.js
+/.wb-bot-local-state.json
+/.wb-bot-local-state.json.tmp
+# HAR-дампы сетевого трафика WB: содержат токены и ПДн клиентов — никогда не коммитить
+*.har
 
 # Отдельный черновик проекта и локальные служебные файлы
 /_work-admin-pvz/

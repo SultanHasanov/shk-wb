@@ -1,17 +1,46 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, sendDocument, sendMediaGroup, sendMessage, sendPhoto } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
 const { PACKAGE_PRICES } = require('./_payments');
 const { accountHasValuableData, isTechnicalTelegramUser } = require('./_telegram-account');
+const wbPvz = require('./_wb-pvz');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const GOODS_SNAPSHOT_TTL_MS = 2 * 60 * 1000;
+const localWbConnections = new Map();
+const localGoodsSnapshots = new Map();
+let localConnectionsLoaded = false;
+
+function loadLocalConnections() {
+  if (localConnectionsLoaded || process.env.WB_CONNECTION_STORE !== 'file') return;
+  localConnectionsLoaded = true;
+  const file = process.env.WB_CONNECTION_FILE;
+  if (!file) return;
+  try {
+    const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const row of Array.isArray(rows) ? rows : []) localWbConnections.set(Number(row.telegram_user_id), row);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('Cannot read local WB connection store', error.message);
+  }
+}
+
+function persistLocalConnections() {
+  if (process.env.WB_CONNECTION_STORE !== 'file' || !process.env.WB_CONNECTION_FILE) return;
+  const file = path.resolve(process.env.WB_CONNECTION_FILE);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify([...localWbConnections.values()]), { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(temporary, file);
+}
 const HOME_KEYBOARD = {
   keyboard: [
     [{ text: '🏷 Стикеры для товаров' }, { text: '📦 QR для коробок' }],
     [{ text: '➕ Создать ШК' }, { text: '💳 Остаток' }],
     [{ text: '👤 Аккаунт' }, { text: '🆘 Помощь' }],
-    [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
+    [{ text: '⭐ Отзывы ПВЗ' }, { text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -28,6 +57,7 @@ function escapeHtml(value) {
 }
 
 async function claimUpdate(updateId) {
+  if (process.env.TELEGRAM_LOCAL_POLLING === '1') return true;
   const rows = await supabaseFetch('telegram_bot_updates?on_conflict=update_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' }, body: JSON.stringify({ update_id: Number(updateId) }) });
   return Array.isArray(rows) && rows.length > 0;
 }
@@ -56,8 +86,59 @@ async function clearSession(telegramId) {
   await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
 }
 
+async function getWbConnection(telegramId) {
+  if (process.env.WB_CONNECTION_STORE === 'memory' || process.env.WB_CONNECTION_STORE === 'file') {
+    loadLocalConnections();
+    const row = localWbConnections.get(Number(telegramId));
+    return row ? { ...row, session: wbPvz.decryptSession(row.encrypted_session) } : null;
+  }
+  const rows = await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
+  const row = rows[0] || null;
+  if (!row) return null;
+  try { row.session = wbPvz.decryptSession(row.encrypted_session); }
+  catch { row.session = null; }
+  return row;
+}
+
+async function saveWbConnection(from, chatId, state, session, extra = {}) {
+  if (process.env.WB_CONNECTION_STORE === 'memory' || process.env.WB_CONNECTION_STORE === 'file') {
+    loadLocalConnections();
+    const row = {
+      telegram_user_id: Number(from.id), chat_id: Number(chatId), state,
+      encrypted_session: session ? wbPvz.encryptSession(session) : null,
+      selected_point_id: session?.pointId || null, last_error: extra.lastError || null,
+      updated_at: new Date().toISOString(),
+    };
+    localWbConnections.set(Number(from.id), row);
+    persistLocalConnections();
+    return row;
+  }
+  const rows = await supabaseFetch('telegram_wb_connections?on_conflict=telegram_user_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({
+      telegram_user_id: Number(from.id), chat_id: Number(chatId), state,
+      encrypted_session: session ? wbPvz.encryptSession(session) : null,
+      selected_point_id: session?.pointId || null, last_error: extra.lastError || null,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  return rows[0];
+}
+
+async function deleteWbConnection(telegramId) {
+  if (process.env.WB_CONNECTION_STORE === 'memory' || process.env.WB_CONNECTION_STORE === 'file') {
+    loadLocalConnections();
+    localWbConnections.delete(Number(telegramId));
+    persistLocalConnections();
+    return;
+  }
+  await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
+}
+
 /** Сессия генератора исчезает, а эта запись остаётся для статистики и рассылок. */
 async function touchSubscriber(from, chatId) {
+  if (process.env.TELEGRAM_LOCAL_POLLING === '1') return;
   if (!from?.id || !chatId) return;
   await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
     method: 'POST',
@@ -255,6 +336,249 @@ async function showHelp(chatId) {
   await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
 }
 
+function reviewFilterKeyboard() {
+  return choiceKeyboard([
+    [1, 2, 3, 4, 5].map(star => ({ text: `${star} ⭐`, callback_data: `rv:filter:${star}` })),
+    [{ text: 'Все оценки', callback_data: 'rv:filter:all' }],
+    [{ text: 'Сменить ПВЗ', callback_data: 'rv:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
+  ]);
+}
+
+function pointKeyboard(points) {
+  return choiceKeyboard([
+    ...points.slice(0, 30).map(point => [{ text: `ПВЗ ${point.id}`, callback_data: `rv:point:${point.id}` }]),
+    [{ text: 'Отмена', callback_data: 'rv:cancel' }],
+  ]);
+}
+
+function reviewStars(key) {
+  return key === 'all' ? [1, 2, 3, 4, 5] : [Number(key)].filter(star => star >= 1 && star <= 5);
+}
+
+function formatWbDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return escapeHtml(String(value).slice(0, 19));
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+function formatPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('7')) return `+7 ${digits.slice(1, 4)} ${digits.slice(4, 7)}-${digits.slice(7, 9)}-${digits.slice(9)}`;
+  return digits ? `+${digits}` : '—';
+}
+
+/** WB отдаёт середину номера заглушкой из нулей — меняем только группу, целиком из нулей. */
+function maskWbPhone(value) {
+  return formatPhone(value).replace(/\b0+\b/g, zeros => '*'.repeat(zeros.length));
+}
+
+function reviewText(review, position, total) {
+  const stars = Math.max(0, Math.min(5, Number(review.stars || 0)));
+  const comment = String(review.comment || '').trim();
+  const reasons = Array.isArray(review.reasons_text) ? review.reasons_text.filter(Boolean).join(', ') : '';
+  const parts = [
+    `<b>Отзыв ${position} из ${total}</b>`,
+    `${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)} · ${formatWbDate(review.rate_dt)}`,
+  ];
+  if (comment) parts.push(`\n${escapeHtml(comment)}`);
+  if (reasons) parts.push(`\nПричины: ${escapeHtml(reasons)}`);
+  if (!comment && !reasons) parts.push('\n<i>Без комментария</i>');
+  return parts.join('\n');
+}
+
+const PICKUP_STATUSES = ['GOODS_RECIEVED', 'GOODS_RECEIVED'];
+const REFUSAL_STATUSES = ['GOODS_RETURNED', 'GOODS_RETURN_ERROR'];
+
+/** Возвращает 'received' (клиент забрал), 'returned' (отказ) или null. */
+function pickupAction(status) {
+  const value = String(status || '').toUpperCase();
+  if (PICKUP_STATUSES.includes(value)) return 'received';
+  if (REFUSAL_STATUSES.includes(value)) return 'returned';
+  return null;
+}
+
+function findPickupEvents(goods, userIds) {
+  const wanted = new Set((Array.isArray(userIds) ? userIds : [userIds])
+    .map(value => String(value || '').trim()).filter(Boolean));
+  return (Array.isArray(goods) ? goods : [])
+    .filter(item => wanted.has(String(item?.buyer_id ?? item?.user_id ?? ''))
+      || wanted.has(String(item?.buyer_sid ?? item?.user_sid ?? ''))
+      || wanted.has(String(item?.buyer?.user_id ?? ''))
+      || wanted.has(String(item?.buyer?.user_sid ?? '')))
+    .filter(item => pickupAction(item?.status))
+    .sort((left, right) => new Date(right.status_updated || 0) - new Date(left.status_updated || 0));
+}
+
+/**
+ * WB обезличивает поле user_sid (возвращает "0"), но sid клиента зашит
+ * в первых 8 hex-символах id отзыва: int(id[:8], 16). Так же, как это делает
+ * десктоп-программа «подбор кодов».
+ */
+function decodeReviewClientId(ratingId) {
+  const match = /^([0-9a-f]{8})-/i.exec(String(ratingId || ''));
+  return match ? Number.parseInt(match[1], 16) : null;
+}
+
+function reviewAuthorIds(review) {
+  return [...new Set([review?.user_id, review?.user_sid, decodeReviewClientId(review?.id)]
+    .map(Number).filter(value => Number.isSafeInteger(value) && value > 0)
+  )];
+}
+
+async function loadPickupEvents(telegramId, connection, userIds) {
+  const cacheKey = Number(telegramId);
+  let snapshot = localGoodsSnapshots.get(cacheKey);
+  if (!snapshot || Date.now() - snapshot.loadedAt > GOODS_SNAPSHOT_TTL_MS) {
+    const goods = [];
+    let cursor = 0;
+    for (let page = 0; page < 20; page += 1) {
+      const result = await wbPvz.loadGoodsInPickPoint(connection.session, cursor);
+      goods.push(...result.goods);
+      if (!result.goods.length || result.cursor == null || result.cursor <= cursor) break;
+      cursor = result.cursor;
+    }
+    snapshot = { goods, loadedAt: Date.now() };
+    localGoodsSnapshots.set(cacheKey, snapshot);
+  }
+  return findPickupEvents(snapshot.goods, userIds);
+}
+
+async function showReviewFilters(from, chatId) {
+  const connection = await getWbConnection(from.id);
+  if (connection?.session?.token && connection.state === 'await_point') {
+    await beginPointSelection(from, chatId, connection);
+    return;
+  }
+  if (!connection?.session?.token || connection.state !== 'ready') {
+    const session = { deviceId: crypto.randomUUID() };
+    await saveWbConnection(from, chatId, 'await_phone', session);
+    await sendMessage(chatId, '<b>Подключение кабинета WB</b>\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.');
+    return;
+  }
+  await sendMessage(chatId, `<b>Отзывы ПВЗ ${connection.session.pointId}</b>\n\nКакие оценки показать?`, { reply_markup: reviewFilterKeyboard() });
+}
+
+async function sendReviewPage(from, chatId, filterKey, page) {
+  const connection = await getWbConnection(from.id);
+  if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+  const stars = reviewStars(filterKey);
+  if (!stars.length) return;
+  let result;
+  try { result = await wbPvz.loadReviews(connection.session, stars, page, 5); }
+  catch (error) {
+    if (error.status === 401 || error.status === 403) {
+      await deleteWbConnection(from.id);
+      await sendMessage(chatId, 'Сессия WB истекла. Подключите кабинет заново.');
+      return showReviewFilters(from, chatId);
+    }
+    throw error;
+  }
+  const totalPages = Math.max(1, Math.ceil(result.total / 5));
+  const safePage = Math.max(0, Math.min(Number(page) || 0, totalPages - 1));
+  if (safePage !== Number(page) && result.total) return sendReviewPage(from, chatId, filterKey, safePage);
+  if (!result.data.length) {
+    const noReviews = filterKey === 'all'
+      ? 'Отзывов пока нет.'
+      : `Отзывов с оценкой ${filterKey}⭐ нет.`;
+    await sendMessage(chatId, noReviews, { reply_markup: reviewFilterKeyboard() });
+    return;
+  }
+  for (let index = 0; index < result.data.length; index += 1) {
+    const review = result.data[index];
+    const callbackData = `rv:who2:${filterKey}:${safePage}:${index}`;
+    const keyboard = choiceKeyboard([[{ text: '👤 Кто оставил', callback_data: callbackData }]]);
+    await sendMessage(chatId, reviewText(review, safePage * 5 + index + 1, result.total), { reply_markup: keyboard });
+  }
+  const navigation = [];
+  if (safePage > 0) navigation.push({ text: '⬅️ Назад', callback_data: `rv:page:${filterKey}:${safePage - 1}` });
+  if (safePage + 1 < totalPages) navigation.push({ text: 'Далее ➡️', callback_data: `rv:page:${filterKey}:${safePage + 1}` });
+  await sendMessage(chatId, `Страница <b>${safePage + 1}</b> из <b>${totalPages}</b>`, {
+    reply_markup: choiceKeyboard([navigation, [{ text: 'Изменить оценку', callback_data: 'rv:filters' }]].filter(row => row.length)),
+  });
+}
+
+async function showReviewAuthor(from, chatId, reviewOrUserId, userSid) {
+  const connection = await getWbConnection(from.id);
+  if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+  const review = reviewOrUserId && typeof reviewOrUserId === 'object' ? reviewOrUserId : null;
+  const identifiers = review ? reviewAuthorIds(review) : [...new Set([reviewOrUserId, userSid]
+    .map(Number).filter(value => Number.isSafeInteger(value) && value > 0))];
+  const reviewEvents = (Array.isArray(review?.goods) ? review.goods : [])
+    .filter(item => item?.status_updated)
+    .sort((left, right) => new Date(right.status_updated || 0) - new Date(left.status_updated || 0));
+  const [users, pickupResult] = await Promise.all([
+    identifiers.length ? wbPvz.loadUsers(connection.session, identifiers) : [],
+    reviewEvents.length
+      ? { events: reviewEvents }
+      : identifiers.length
+        ? loadPickupEvents(from.id, connection, identifiers).then(events => ({ events })).catch(error => ({ error }))
+        : { events: [] },
+  ]);
+  const wanted = new Set(identifiers.map(String));
+  let user = users.find(item => wanted.has(String(item.id)) || wanted.has(String(item.user_sid)));
+  if (!user && String(review?.user_name || '').trim()) user = { name: String(review.user_name).trim() };
+  // Телефон/имя WB в users-data для обезличенных отзывов не отдаёт — берём из продажи.
+  if (!pickupResult.error && pickupResult.events.length) {
+    const buyers = pickupResult.events.map(item => item?.buyer).filter(Boolean);
+    const matched = buyers.find(buyer => wanted.has(String(buyer.user_id)) || wanted.has(String(buyer.user_sid)))
+      || buyers[0];
+    if (matched) {
+      user = {
+        name: user?.name || matched.name || '',
+        phone: user?.phone ?? user?.mobile ?? matched.mobile,
+      };
+    }
+  }
+  const clientLine = identifiers.length ? `ID клиента: <code>${identifiers[0]}</code>\n` : '';
+  let pickupText;
+  if (pickupResult.error) {
+    pickupText = `Когда забрал/отказался: <i>не удалось получить (${escapeHtml(pickupResult.error.message)})</i>`;
+  } else if (!pickupResult.events.length && !identifiers.length) {
+    pickupText = '<i>WB не передал ID автора в этом отзыве — определить клиента невозможно.</i>';
+  } else if (!pickupResult.events.length) {
+    pickupText = '<i>Выдача/отказ не найдены в текущем окне продаж WB — возможно, уже выпали из списка. Для старых событий нужна накопленная локальная база.</i>';
+  } else {
+    const recent = pickupResult.events.slice(0, 5).map((item, index) => {
+      const returned = pickupAction(item.status) === 'returned';
+      const label = returned ? '↩️ отказ' : '✅ взял';
+      const shk = item.shk_code || item.barcode || item.sticker_code;
+      const parts = [`${index + 1}. ${label} · ${formatWbDate(item.status_updated)}`];
+      if (item.cell) parts.push(`яч. <code>${escapeHtml(item.cell)}</code>`);
+      if (shk) parts.push(`ШК <code>${escapeHtml(shk)}</code>`);
+      return parts.join(' · ');
+    });
+    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}`;
+  }
+  const phone = maskWbPhone(user?.phone ?? user?.mobile);
+  await sendMessage(chatId,
+    `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>\n\n${pickupText}`,
+  );
+}
+
+async function showReviewAuthorByPosition(from, chatId, filterKey, page, index) {
+  const connection = await getWbConnection(from.id);
+  if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+  const stars = reviewStars(filterKey);
+  if (!stars.length || !Number.isInteger(page) || page < 0 || !Number.isInteger(index) || index < 0 || index >= 5) return;
+  const result = await wbPvz.loadReviews(connection.session, stars, page, 5);
+  const review = result.data[index];
+  if (!review) return sendMessage(chatId, 'Отзыв больше не найден в этой позиции. Обновите список отзывов.');
+  return showReviewAuthor(from, chatId, review);
+}
+
+async function beginPointSelection(from, chatId, connection) {
+  const points = await wbPvz.loadPoints(connection.session);
+  if (!points.length) throw new Error('В кабинете WB не найдено доступных ПВЗ');
+  if (points.length === 1) {
+    const session = await wbPvz.selectPoint(connection.session, points[0].id);
+    await saveWbConnection(from, chatId, 'ready', session);
+    return showReviewFilters(from, chatId);
+  }
+  await saveWbConnection(from, chatId, 'await_point', connection.session);
+  await sendMessage(chatId, '<b>Выберите ПВЗ</b>', { reply_markup: pointKeyboard(points) });
+}
+
 async function showIndividualOrders(from, chatId) {
   const userId = await findUser(from.id);
   if (!userId) return sendMessage(chatId, 'Сначала подключите кабинет.', { reply_markup: miniAppKeyboard() });
@@ -291,6 +615,34 @@ async function handleCallback(callback) {
   if (!chatId) return;
   await touchSubscriber(from, chatId);
   const data = String(callback.data || '');
+  if (data === 'rv:start' || data === 'rv:filters') { await answerCallbackQuery(callback.id); await showReviewFilters(from, chatId); return; }
+  if (data === 'rv:disconnect') { await answerCallbackQuery(callback.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'rv:cancel') { await answerCallbackQuery(callback.id); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'rv:points') {
+    await answerCallbackQuery(callback.id);
+    const connection = await getWbConnection(from.id);
+    if (!connection?.session?.token) return showReviewFilters(from, chatId);
+    await beginPointSelection(from, chatId, connection);
+    return;
+  }
+  const pointMatch = data.match(/^rv:point:(\d+)$/);
+  if (pointMatch) {
+    await answerCallbackQuery(callback.id);
+    const connection = await getWbConnection(from.id);
+    if (!connection?.session?.token) return showReviewFilters(from, chatId);
+    const session = await wbPvz.selectPoint(connection.session, Number(pointMatch[1]));
+    await saveWbConnection(from, chatId, 'ready', session);
+    await showReviewFilters(from, chatId);
+    return;
+  }
+  const filterMatch = data.match(/^rv:filter:(all|[1-5])$/);
+  if (filterMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
+  const reviewPageMatch = data.match(/^rv:page:(all|[1-5]):(\d+)$/);
+  if (reviewPageMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
+  const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)$/);
+  if (authorPositionMatch) { await answerCallbackQuery(callback.id); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3])); return; }
+  const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
+  if (authorMatch) { await answerCallbackQuery(callback.id); await showReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
   if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
   if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
@@ -347,8 +699,9 @@ async function handleMessage(message) {
     else await sendLoginPrompt(from, chatId, intro);
     return;
   }
-  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: HOME_KEYBOARD }); return; }
   if (/^\/generate(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
+  if (/^\/reviews(?:@\w+)?$/i.test(text)) return showReviewFilters(from, chatId);
   if (/^\/account(?:@\w+)?$/i.test(text)) return showAccount(from, chatId);
   if (/^\/orders(?:@\w+)?$/i.test(text) || text === '📦 Мои индивидуальные заказы') return showIndividualOrders(from, chatId);
   if (text === '➕ Создать ШК') return startGeneration(from, chatId);
@@ -357,6 +710,42 @@ async function handleMessage(message) {
   if (text === '💳 Остаток') return showBalance(from, chatId);
   if (text === '👤 Аккаунт') return showAccount(from, chatId);
   if (text === '🆘 Помощь') return showHelp(chatId);
+  if (text === '⭐ Отзывы ПВЗ') return showReviewFilters(from, chatId);
+  const wbConnection = await getWbConnection(from.id);
+  if (wbConnection?.state === 'await_phone') {
+    await deleteMessage(chatId, message.message_id);
+    let phone = text.replace(/\D/g, '');
+    if (phone.length === 11 && phone.startsWith('8')) phone = `7${phone.slice(1)}`;
+    if (!/^7\d{10}$/.test(phone)) return sendMessage(chatId, 'Введите номер в формате <code>79991234567</code>.');
+    try {
+      const result = await wbPvz.requestCode(wbConnection.session || { deviceId: crypto.randomUUID() }, phone);
+      await saveWbConnection(from, chatId, 'await_code', result.session);
+      await sendMessage(chatId, `Код отправлен. Введите код из сообщения WB в течение ${result.ttl} сек. Сообщение с кодом будет удалено.`);
+    } catch (error) {
+      await saveWbConnection(from, chatId, 'await_phone', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
+      await sendMessage(chatId, `Не удалось отправить код WB: ${escapeHtml(error.message)}`);
+    }
+    return;
+  }
+  if (wbConnection?.state === 'await_code') {
+    await deleteMessage(chatId, message.message_id);
+    const code = text.replace(/\D/g, '');
+    if (!/^\d{4,6}$/.test(code)) return sendMessage(chatId, 'Введите код WB из 4–6 цифр.');
+    try {
+      const session = await wbPvz.confirmCode(wbConnection.session, code);
+      await saveWbConnection(from, chatId, 'await_point', session);
+      try {
+        await beginPointSelection(from, chatId, { ...wbConnection, state: 'await_point', session });
+      } catch (error) {
+        await saveWbConnection(from, chatId, 'await_point', session, { lastError: String(error.message).slice(0, 500) });
+        await sendMessage(chatId, `Вход WB выполнен, но ПВЗ пока не подключён: ${escapeHtml(error.message)}. Повторите /reviews позже — новый SMS-код не потребуется.`);
+      }
+    } catch (error) {
+      await saveWbConnection(from, chatId, 'await_code', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
+      await sendMessage(chatId, `Не удалось войти в WB: ${escapeHtml(error.message)}`);
+    }
+    return;
+  }
   const session = await getSession(from.id);
   if (!session) return sendMessage(chatId, 'Нажмите «Создать ШК».', { reply_markup: HOME_KEYBOARD });
   const draft = session.draft || {};
@@ -393,4 +782,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { HOME_KEYBOARD, escapeHtml, handleTelegramUpdate, notifyMiniAppAuthorized, publicUrl, validWebhookSecret };
+module.exports = { HOME_KEYBOARD, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
