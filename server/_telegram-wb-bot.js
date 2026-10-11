@@ -43,7 +43,7 @@ const HOME_KEYBOARD = {
     [{ text: '⭐ Отзывы ПВЗ' }, { text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
   ],
   resize_keyboard: true,
-  is_persistent: true,
+  is_persistent: false,
 };
 
 function publicUrl(path) {
