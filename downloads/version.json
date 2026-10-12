@@ -1,8 +1,8 @@
 {
-  "version": "1.3.13",
+  "version": "1.3.14",
   "minimum_version": "1.3.3",
-  "mandatory": true,
+  "mandatory": false,
   "win10_url": "https://shk-wb.ru/api/payments/download-program",
   "win7_url": "https://shk-wb.ru/api/payments/download-program",
-  "notes": "Добавлен выбор конкретного клиента перед поиском кода и подробный прогресс: процент, скорость, прошедшее и оставшееся время."
+  "notes": "Добавлен поиск клиента по телефону: введите последние цифры номера и получите все продажи клиента — время, ячейку и штрихкоды."
 }
