@@ -1,40 +1,57 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { TelegramLogin } from '../auth/TelegramLogin';
 import { useStores } from '../stores/root-store';
 import { useDocumentMeta } from '../lib/seo';
+import { type T, useLocalePath, useT } from '../i18n';
 import { Alert, Button, Card, Checkbox, Field, Input, useToast } from '../ui';
 
 type Mode = 'login' | 'register' | 'forgot';
 type Values = { email: string; password?: string; accept?: boolean };
 
-const copy: Record<Mode, { title: string; text: string; submit: string }> = {
-  login: { title: 'Вход в кабинет', text: 'Управляйте ключами, заказами и настройками из одного места.', submit: 'Войти' },
-  register: { title: 'Регистрация', text: 'Создайте аккаунт, чтобы хранить ключи и историю генераций.', submit: 'Создать аккаунт' },
-  forgot: { title: 'Восстановление доступа', text: 'Укажите почту — пришлём ссылку для смены пароля.', submit: 'Отправить ссылку' },
-};
+const copyFor = (t: T): Record<Mode, { title: string; text: string; submit: string }> => ({
+  login: {
+    title: t('Вход в кабинет', 'Кабинетке кіру'),
+    text: t('Управляйте ключами, заказами и настройками из одного места.', 'Кілттерді, тапсырыстарды және баптауларды бір жерден басқарыңыз.'),
+    submit: t('Войти', 'Кіру'),
+  },
+  register: {
+    title: t('Регистрация', 'Тіркелу'),
+    text: t('Создайте аккаунт, чтобы хранить ключи и историю генераций.', 'Кілттер мен генерациялар тарихын сақтау үшін аккаунт жасаңыз.'),
+    submit: t('Создать аккаунт', 'Аккаунт жасау'),
+  },
+  forgot: {
+    title: t('Восстановление доступа', 'Қолжетімділікті қалпына келтіру'),
+    text: t('Укажите почту — пришлём ссылку для смены пароля.', 'Поштаңызды көрсетіңіз — құпиясөзді өзгерту сілтемесін жібереміз.'),
+    submit: t('Отправить ссылку', 'Сілтеме жіберу'),
+  },
+});
 
-const email = z.string().email('Введите корректную почту');
-const password = z.string().min(8, 'Минимум 8 символов');
-/* Согласие с офертой и политикой — обязательное поле формы, а не мелкий текст
-   под кнопкой: у аккаунта появляются платежи и персональные данные. */
-const accept = z
-  .boolean()
-  .refine(value => value, 'Подтвердите согласие с офертой и политикой конфиденциальности');
-const schemas = {
-  login: z.object({ email, password }),
-  register: z.object({ email, password, accept }),
-  forgot: z.object({ email }),
-};
+function schemasFor(t: T) {
+  const email = z.string().email(t('Введите корректную почту', 'Дұрыс поштаны енгізіңіз'));
+  const password = z.string().min(8, t('Минимум 8 символов', 'Кемінде 8 таңба'));
+  /* Согласие с офертой и политикой — обязательное поле формы, а не мелкий текст
+     под кнопкой: у аккаунта появляются платежи и персональные данные. */
+  const accept = z
+    .boolean()
+    .refine(value => value, t('Подтвердите согласие с офертой и политикой конфиденциальности', 'Оферта мен құпиялылық саясатына келісіміңізді растаңыз'));
+  return {
+    login: z.object({ email, password }),
+    register: z.object({ email, password, accept }),
+    forgot: z.object({ email }),
+  };
+}
 
 export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
   const { auth } = useStores();
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const t = useT();
+  const lp = useLocalePath();
   const [formError, setFormError] = useState('');
   const [confirmationEmail, setConfirmationEmail] = useState('');
   const [resetEmail, setResetEmail] = useState('');
@@ -42,11 +59,12 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
   // По умолчанию отмечено: подавляющее большинство входит со своего рабочего
   // компьютера на пункте выдачи, и повторный вход каждый день — лишний барьер.
   const [remember, setRemember] = useState(true);
-  const c = copy[mode];
+  const c = copyFor(t)[mode];
+  const schema = useMemo(() => schemasFor(t)[mode], [t, mode]);
 
   useDocumentMeta(c.title, c.text);
   const from = (location.state as { from?: string } | null)?.from ?? '/cabinet';
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schemas[mode]) });
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schema) });
 
   const onSubmit = handleSubmit(async values => {
     setFormError('');
@@ -65,9 +83,14 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
       } else await auth.signIn(values.email, values.password!, remember);
       navigate(from, { replace: true });
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Не удалось выполнить запрос');
+      setFormError(error instanceof Error ? error.message : t('Не удалось выполнить запрос', 'Сұранысты орындау мүмкін болмады'));
     }
   });
+
+  const resendError = (error: unknown) =>
+    setFormError(error instanceof Error ? error.message : t('Не удалось отправить письмо повторно', 'Хатты қайта жіберу мүмкін болмады'));
+  const checkMail = t('Проверьте почту', 'Поштаңызды тексеріңіз');
+  const resendLabel = t('Отправить письмо повторно', 'Хатты қайта жіберу');
 
   if (mode === 'forgot' && resetEmail) {
     const resend = async () => {
@@ -75,9 +98,9 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
       setIsResending(true);
       try {
         await auth.requestPasswordReset(resetEmail);
-        toast('Письмо отправлено повторно', 'success');
+        toast(t('Письмо отправлено повторно', 'Хат қайта жіберілді'), 'success');
       } catch (error) {
-        setFormError(error instanceof Error ? error.message : 'Не удалось отправить письмо повторно');
+        resendError(error);
       } finally {
         setIsResending(false);
       }
@@ -85,16 +108,25 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
 
     return <Card><div className="stack">
       <div>
-        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>Проверьте почту</h1>
+        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{checkMail}</h1>
         <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
-          Если аккаунт с адресом <strong>{resetEmail}</strong> существует, мы отправили ссылку для создания нового пароля.
+          {t('Если аккаунт с адресом', 'Егер')} <strong>{resetEmail}</strong>{' '}
+          {t(
+            'существует, мы отправили ссылку для создания нового пароля.',
+            'мекенжайы бар аккаунт болса, жаңа құпиясөз жасау сілтемесін жібердік.',
+          )}
         </p>
       </div>
-      <Alert tone="success">Проверьте папку «Входящие» и «Спам». Доставка письма может занять несколько минут.</Alert>
+      <Alert tone="success">
+        {t(
+          'Проверьте папку «Входящие» и «Спам». Доставка письма может занять несколько минут.',
+          '«Кіріс» және «Спам» қалталарын тексеріңіз. Хаттың жетуі бірнеше минутқа созылуы мүмкін.',
+        )}
+      </Alert>
       {formError && <Alert tone="error">{formError}</Alert>}
-      <Button type="button" size="lg" block loading={isResending} onClick={resend}>Отправить письмо повторно</Button>
-      <Button type="button" variant="secondary" block onClick={() => setResetEmail('')}>Указать другую почту</Button>
-      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>Вернуться ко входу</Link>
+      <Button type="button" size="lg" block loading={isResending} onClick={resend}>{resendLabel}</Button>
+      <Button type="button" variant="secondary" block onClick={() => setResetEmail('')}>{t('Указать другую почту', 'Басқа поштаны көрсету')}</Button>
+      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>{t('Вернуться ко входу', 'Кіруге оралу')}</Link>
     </div></Card>;
   }
 
@@ -104,9 +136,9 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
       setIsResending(true);
       try {
         await auth.resendSignUpConfirmation(confirmationEmail);
-        toast('Письмо отправлено повторно', 'success');
+        toast(t('Письмо отправлено повторно', 'Хат қайта жіберілді'), 'success');
       } catch (error) {
-        setFormError(error instanceof Error ? error.message : 'Не удалось отправить письмо повторно');
+        resendError(error);
       } finally {
         setIsResending(false);
       }
@@ -114,15 +146,16 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
 
     return <Card><div className="stack">
       <div>
-        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>Проверьте почту</h1>
+        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{checkMail}</h1>
         <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
-          Мы отправили ссылку для подтверждения на <strong>{confirmationEmail}</strong>. Перейдите по ней, чтобы завершить регистрацию.
+          {t('Мы отправили ссылку для подтверждения на', 'Растау сілтемесін мына мекенжайға жібердік:')} <strong>{confirmationEmail}</strong>
+          {t('. Перейдите по ней, чтобы завершить регистрацию.', '. Тіркелуді аяқтау үшін сол сілтемеге өтіңіз.')}
         </p>
       </div>
       {formError && <Alert tone="error">{formError}</Alert>}
-      <Button type="button" size="lg" block loading={isResending} onClick={resend}>Отправить письмо повторно</Button>
-      <Button type="button" variant="secondary" block onClick={() => setConfirmationEmail('')}>Исправить адрес почты</Button>
-      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>Перейти ко входу</Link>
+      <Button type="button" size="lg" block loading={isResending} onClick={resend}>{resendLabel}</Button>
+      <Button type="button" variant="secondary" block onClick={() => setConfirmationEmail('')}>{t('Исправить адрес почты', 'Пошта мекенжайын түзету')}</Button>
+      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>{t('Перейти ко входу', 'Кіруге өту')}</Link>
     </div></Card>;
   }
 
@@ -130,8 +163,8 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
     <div><h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{c.title}</h1><p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>{c.text}</p></div>
     {formError && <Alert tone="error">{formError}</Alert>}
     <form className="stack" onSubmit={onSubmit}>
-      <Field label="Электронная почта" error={errors.email?.message}><Input type="email" autoComplete="email" {...register('email')} /></Field>
-      {mode !== 'forgot' && <Field label="Пароль" error={errors.password?.message} help={mode === 'register' ? 'Минимум 8 символов' : undefined}>
+      <Field label={t('Электронная почта', 'Электрондық пошта')} error={errors.email?.message}><Input type="email" autoComplete="email" {...register('email')} /></Field>
+      {mode !== 'forgot' && <Field label={t('Пароль', 'Құпиясөз')} error={errors.password?.message} help={mode === 'register' ? t('Минимум 8 символов', 'Кемінде 8 таңба') : undefined}>
         <Input type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} {...register('password')} />
       </Field>}
 
@@ -139,9 +172,12 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
           на общем компьютере пункта выдачи это единственная защита. */}
       {mode === 'login' && (
         <Checkbox id="remember-device" checked={remember} onChange={e => setRemember(e.target.checked)}>
-          Запомнить это устройство
+          {t('Запомнить это устройство', 'Осы құрылғыны есте сақтау')}
           <span style={{ display: 'block', fontSize: 'var(--fs-12)', color: 'var(--text-tertiary)' }}>
-            На чужом компьютере снимите галочку — вход забудется при закрытии браузера.
+            {t(
+              'На чужом компьютере снимите галочку — вход забудется при закрытии браузера.',
+              'Бөтен компьютерде белгіні алып тастаңыз — браузерді жапқанда кіру ұмытылады.',
+            )}
           </span>
         </Checkbox>
       )}
@@ -149,8 +185,9 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
       {mode === 'register' && (
         <div>
           <Checkbox id="accept-terms" {...register('accept')}>
-            Я принимаю <Link to="/offer" target="_blank">условия оферты</Link> и{' '}
-            <Link to="/privacy" target="_blank">политику конфиденциальности</Link>
+            {t('Я принимаю', 'Мен')} <Link to={lp('/offer')} target="_blank">{t('условия оферты', 'оферта шарттарын')}</Link> {t('и', 'және')}{' '}
+            <Link to={lp('/privacy')} target="_blank">{t('политику конфиденциальности', 'құпиялылық саясатын')}</Link>
+            {t('', ' қабылдаймын')}
           </Checkbox>
           {errors.accept && (
             <span role="alert" style={{ display: 'block', marginTop: 'var(--sp-2)', fontSize: 'var(--fs-12)', color: 'var(--danger)' }}>
@@ -163,8 +200,10 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
       <Button size="lg" block loading={isSubmitting}>{c.submit}</Button>
     </form>
     <div className="row" style={{ justifyContent: 'space-between', fontSize: 'var(--fs-13)' }}>
-      {mode === 'login' ? <><Link className="accent" to="/register">Создать аккаунт</Link><Link className="accent" to="/forgot-password">Забыли пароль?</Link></> : <Link className="accent" to="/login">← Вернуться ко входу</Link>}
+      {mode === 'login'
+        ? <><Link className="accent" to="/register">{t('Создать аккаунт', 'Аккаунт жасау')}</Link><Link className="accent" to="/forgot-password">{t('Забыли пароль?', 'Құпиясөзді ұмыттыңыз ба?')}</Link></>
+        : <Link className="accent" to="/login">{t('← Вернуться ко входу', '← Кіруге оралу')}</Link>}
     </div>
-    {mode !== 'forgot' && <><div className="muted" style={{ textAlign: 'center', fontSize: 'var(--fs-13)' }}>или войдите через Telegram</div><TelegramLogin onError={setFormError} /></>}
+    {mode !== 'forgot' && <><div className="muted" style={{ textAlign: 'center', fontSize: 'var(--fs-13)' }}>{t('или войдите через Telegram', 'немесе Telegram арқылы кіріңіз')}</div><TelegramLogin onError={setFormError} /></>}
   </div></Card>;
 }

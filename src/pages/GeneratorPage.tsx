@@ -31,6 +31,7 @@ import { useDocumentMeta } from '../lib/seo';
 import s from './GeneratorPage.module.css';
 import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
 import { useMoney } from '../lib/currency';
+import { type T, useT } from '../i18n';
 
 /** Остаток по коду один на все виды генерации: тип и режим ниже выбирают, что
  *  печатать, а не из какого лимита списывать. */
@@ -78,63 +79,87 @@ async function shareSticker(item: { code: string; imageUrl: string }) {
   await downloadSticker(item);
 }
 
-const TRUST = [
-  'От 0,27 ₽ за штуку',
-  'Оплата через ЮKassa',
-  'Готовый PDF для печати',
-  'Без регистрации',
-] as const;
+const trustItems = (t: T, perUnit: string) => [
+  t(`От ${perUnit} за штуку`, `Данасы ${perUnit} бастап`),
+  t('Оплата через ЮKassa', 'ЮKassa арқылы төлем'),
+  t('Готовый PDF для печати', 'Басып шығаруға дайын PDF'),
+  t('Без регистрации', 'Тіркелусіз'),
+];
 
 const QUANTITY_PRESETS = [10, 50, 100] as const;
 
 /** Снимки реальных наклеек — те же, что на боевом сайте. */
-const KIND_OPTIONS = [
-  { value: 'product', label: 'Стикеры для товаров', image: '/images/tab-products-v2.webp' },
-  { value: 'box', label: 'QR для возвратных коробок', image: '/images/tab-return-boxes-v2.webp' },
-] as const;
+const kindOptions = (t: T) => [
+  { value: 'product' as const, label: t('Стикеры для товаров', 'Тауарларға арналған стикерлер'), image: '/images/tab-products-v2.webp' },
+  { value: 'box' as const, label: t('QR для возвратных коробок', 'Қайтару қораптарына арналған QR'), image: '/images/tab-return-boxes-v2.webp' },
+];
 
 /**
  * Три шага перед формой. Помимо очевидного, снимает главный вопрос новичка —
  * «что за код доступа и где его взять»: из шага 1 видно, что код нужен сразу и
  * приходит вместе с пакетом.
  */
-const STEPS = [
+const steps = (t: T) => [
   {
-    title: 'Выберите, что печатать',
-    text: 'Товарные стикеры или QR-коды возвратных коробок. Массово — пачкой по количеству, либо по конкретному номеру ШК.',
+    title: t('Выберите, что печатать', 'Не басып шығаратыныңызды таңдаңыз'),
+    text: t(
+      'Товарные стикеры или QR-коды возвратных коробок. Массово — пачкой по количеству, либо по конкретному номеру ШК.',
+      'Тауар стикерлері немесе қайтару қораптарының QR-кодтары. Көптеп — санына қарай бумамен, не нақты ШК нөмірі бойынша.',
+    ),
   },
   {
-    title: 'Укажите данные',
-    text: 'Для массовой печати — количество, для одиночной — номер. Для коробок можно задать свой префикс. Всё проверяется на лету.',
+    title: t('Укажите данные', 'Деректерді көрсетіңіз'),
+    text: t(
+      'Для массовой печати — количество, для одиночной — номер. Для коробок можно задать свой префикс. Всё проверяется на лету.',
+      'Көптеп басу үшін — саны, жеке басу үшін — нөмірі. Қораптар үшін өз префиксіңізді беруге болады. Бәрі бірден тексеріледі.',
+    ),
   },
   {
-    title: 'Скачайте или напечатайте',
-    text: 'Готовый PDF формата A4 для обычного принтера или прямая отправка на термопринтер. Файл остаётся у вас.',
+    title: t('Скачайте или напечатайте', 'Жүктеп алыңыз немесе басып шығарыңыз'),
+    text: t(
+      'Готовый PDF формата A4 для обычного принтера или прямая отправка на термопринтер. Файл остаётся у вас.',
+      'Кәдімгі принтерге арналған дайын A4 PDF немесе термопринтерге тікелей жіберу. Файл өзіңізде қалады.',
+    ),
   },
-] as const;
+];
 
-const FAQ = [
+const faq = (t: T) => [
   {
-    q: 'Что такое возвратный ШК и зачем он нужен?',
-    a: 'ШК — сокращение от «штрих-код». Так помечают товар, возвращаемый на склад Wildberries: без корректной этикетки возврат может не пройти приёмку, поэтому стикер печатают заранее, на пункте выдачи.',
+    q: t('Что такое возвратный ШК и зачем он нужен?', 'Қайтару ШК деген не және ол не үшін қажет?'),
+    a: t(
+      'ШК — сокращение от «штрих-код». Так помечают товар, возвращаемый на склад Wildberries: без корректной этикетки возврат может не пройти приёмку, поэтому стикер печатают заранее, на пункте выдачи.',
+      'ШК — «штрих-код» сөзінің қысқартылуы. Wildberries қоймасына қайтарылатын тауар осылай белгіленеді: дұрыс заттаңбасыз қайтару қабылдаудан өтпеуі мүмкін, сондықтан стикерді беру пунктінде алдын ала басып шығарады.',
+    ),
   },
   {
-    q: 'Подойдёт ли обычный принтер?',
-    a: 'Да. Результат отдаётся готовым PDF формата A4 — его печатает любой офисный принтер. Термопринтер нужен только если вы хотите печатать по одной этикетке без раскроя листа.',
+    q: t('Подойдёт ли обычный принтер?', 'Кәдімгі принтер жарай ма?'),
+    a: t(
+      'Да. Результат отдаётся готовым PDF формата A4 — его печатает любой офисный принтер. Термопринтер нужен только если вы хотите печатать по одной этикетке без раскроя листа.',
+      'Иә. Нәтиже дайын A4 PDF түрінде беріледі — оны кез келген кеңсе принтері басып шығарады. Термопринтер парақты кеспей, заттаңбаларды бір-бірден басқыңыз келсе ғана қажет.',
+    ),
   },
   {
-    q: 'Нужна ли регистрация?',
-    a: 'Нет. Достаточно кода доступа — он выдаётся сразу после оплаты пакета, и его можно ввести в форме без учётной записи. Аккаунт нужен только чтобы хранить историю генераций и коды в кабинете.',
+    q: t('Нужна ли регистрация?', 'Тіркелу қажет пе?'),
+    a: t(
+      'Нет. Достаточно кода доступа — он выдаётся сразу после оплаты пакета, и его можно ввести в форме без учётной записи. Аккаунт нужен только чтобы хранить историю генераций и коды в кабинете.',
+      'Жоқ. Қолжетімділік коды жеткілікті — ол пакетті төлегеннен кейін бірден беріледі және оны есептік жазбасыз формаға енгізуге болады. Аккаунт генерациялар тарихы мен кодтарды кабинетте сақтау үшін ғана керек.',
+    ),
   },
   {
-    q: 'Сколько действует купленный пакет?',
-    a: 'Срок не ограничен. Пакет общий: генерации тратятся и на стикеры товаров, и на QR коробок, массово и по номеру. Остаток виден рядом с полем кода доступа и в кабинете.',
+    q: t('Сколько действует купленный пакет?', 'Сатып алынған пакет қанша уақыт жарамды?'),
+    a: t(
+      'Срок не ограничен. Пакет общий: генерации тратятся и на стикеры товаров, и на QR коробок, массово и по номеру. Остаток виден рядом с полем кода доступа и в кабинете.',
+      'Мерзімі шектелмеген. Пакет ортақ: генерациялар тауар стикерлеріне де, қорап QR-кодтарына да, көптеп те, нөмір бойынша да жұмсалады. Қалдық қолжетімділік коды өрісінің жанында және кабинетте көрінеді.',
+    ),
   },
   {
-    q: 'Что с возвратом денег?',
-    a: 'Если пакет не подошёл и генерации не расходовались, напишите в поддержку — вернём оплату. Условия описаны в оферте.',
+    q: t('Что с возвратом денег?', 'Ақшаны қайтару қалай болады?'),
+    a: t(
+      'Если пакет не подошёл и генерации не расходовались, напишите в поддержку — вернём оплату. Условия описаны в оферте.',
+      'Егер пакет сәйкес келмесе және генерациялар жұмсалмаса, қолдау қызметіне жазыңыз — төлемді қайтарамыз. Шарттары офертада сипатталған.',
+    ),
   },
-] as const;
+];
 
 /** Прокрутка к блоку пакетов — общая точка выхода из всех состояний «кончилось». */
 function goToPackages() {
@@ -149,6 +174,7 @@ function goToPackages() {
  * где печатается QR, а не штрихкод.
  */
 function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: string }) {
+  const t = useT();
   const src =
     kind === 'box'
       ? `/api/stickers/image?example=1&variant=box&prefix=${encodeURIComponent(prefix || 'TRBX')}`
@@ -169,14 +195,16 @@ function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: stri
           className={s.sampleImage}
           src={failed ? fallback : src}
           onError={() => setFailed(true)}
-          alt={kind === 'box' ? 'Образец QR-кода возвратной коробки' : 'Образец стикера товара'}
+          alt={kind === 'box' ? t('Образец QR-кода возвратной коробки', 'Қайтару қорабы QR-кодының үлгісі') : t('Образец стикера товара', 'Тауар стикерінің үлгісі')}
         />
       </div>
       <div>
-        <p className={s.sampleTitle}>Так будет выглядеть результат</p>
+        <p className={s.sampleTitle}>{t('Так будет выглядеть результат', 'Нәтиже осылай көрінеді')}</p>
         <p className={s.sampleText}>
-          Образец с демонстрационным номером. Укажите данные, введите код доступа и запустите
-          генерацию.
+          {t(
+            'Образец с демонстрационным номером. Укажите данные, введите код доступа и запустите генерацию.',
+            'Демонстрациялық нөмірі бар үлгі. Деректерді көрсетіп, қолжетімділік кодын енгізіп, генерацияны іске қосыңыз.',
+          )}
         </p>
       </div>
     </div>
@@ -191,6 +219,7 @@ function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: stri
  */
 export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages: () => void }) => {
   const { formatPerUnit } = useMoney();
+  const t = useT();
   const { generator: g, auth } = useStores();
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -329,7 +358,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     return `${base}&${params.toString()}`;
   };
 
-  const kindLabel = g.kind === 'box' ? 'QR-коды возвратных коробок' : 'стикеры товаров';
+  const kindLabel = g.kind === 'box'
+    ? t('QR-коды возвратных коробок', 'Қайтару қораптарының QR-кодтары')
+    : t('стикеры товаров', 'тауар стикерлері');
+  const modeLabel = g.mode === 'range' ? t('Массово', 'Көптеп') : t('По номеру', 'Нөмір бойынша');
+  const numberLabel = g.kind === 'box' ? t('Номер коробки', 'Қорап нөмірі') : t('Номер ШК', 'ШК нөмірі');
   const plannedCount = g.mode === 'range' ? Math.max(1, Number(g.quantity) || 1) : 1;
   const leftAfter = remaining === undefined ? undefined : Math.max(0, remaining - plannedCount);
   const notEnough = remaining !== undefined && remaining < plannedCount;
@@ -340,8 +373,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
         <div className="stack">
           {/* Фотографии вместо иконок: по картинке сразу видно, что печатается —
               наклейка на пакет с товаром или QR на возвратную коробку. */}
-          <div className={s.kindPicker} role="radiogroup" aria-label="Тип стикера">
-            {KIND_OPTIONS.map(option => (
+          <div className={s.kindPicker} role="radiogroup" aria-label={t('Тип стикера', 'Стикер түрі')}>
+            {kindOptions(t).map(option => (
               <button
                 key={option.value}
                 type="button"
@@ -357,23 +390,23 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           </div>
 
           <Segmented
-            label="Режим генерации"
+            label={t('Режим генерации', 'Генерация режимі')}
             value={g.mode}
             onChange={v => g.setMode(v)}
             options={[
-              { value: 'range', label: 'Массово' },
-              { value: 'custom', label: 'По номеру' },
+              { value: 'range', label: t('Массово', 'Көптеп') },
+              { value: 'custom', label: t('По номеру', 'Нөмір бойынша') },
             ]}
           />
 
           {g.kind === 'product' && g.mode === 'custom' && (
             <Segmented
-              label="Количество своих номеров"
+              label={t('Количество своих номеров', 'Өз нөмірлеріңіздің саны')}
               value={customInputMode}
               onChange={value => setCustomInputMode(value as 'single' | 'list')}
               options={[
-                { value: 'single', label: 'Один номер' },
-                { value: 'list', label: 'Список номеров' },
+                { value: 'single', label: t('Один номер', 'Бір нөмір') },
+                { value: 'list', label: t('Список номеров', 'Нөмірлер тізімі') },
               ]}
             />
           )}
@@ -381,11 +414,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           {g.mode === 'range' ? (
             <div>
               <Field
-                label={g.kind === 'box' ? 'Количество QR' : 'Количество стикеров'}
+                label={g.kind === 'box' ? t('Количество QR', 'QR саны') : t('Количество стикеров', 'Стикерлер саны')}
                 help={
                   quantityCapped
-                    ? `За раз выдаём не больше ${MAX_BATCH_QUANTITY} — оставили ${MAX_BATCH_QUANTITY}.`
-                    : `От 1 до ${MAX_BATCH_QUANTITY} за один раз.`
+                    ? t(`За раз выдаём не больше ${MAX_BATCH_QUANTITY} — оставили ${MAX_BATCH_QUANTITY}.`, `Бір реттен ${MAX_BATCH_QUANTITY}-ден артық бермейміз — ${MAX_BATCH_QUANTITY} қалдырдық.`)
+                    : t(`От 1 до ${MAX_BATCH_QUANTITY} за один раз.`, `Бір реттен 1-ден ${MAX_BATCH_QUANTITY}-ге дейін.`)
                 }
               >
                 {/* Не type="number": браузер отдаёт пустую строку на «1e5» и
@@ -415,7 +448,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                       g.quantity = n;
                     }}
                   >
-                    {n} шт
+                    {n} {t('шт', 'дана')}
                   </button>
                 ))}
               </div>
@@ -424,8 +457,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             <BulkCustomStickerEditor authenticated={auth.isAuthenticated} onNeedPackages={onNeedPackages} />
           ) : (
             <Field
-              label={g.kind === 'box' ? 'Номер коробки' : 'Номер ШК'}
-              help={`Введите ровно ${codeLength} цифр. Введено: ${g.code.length} из ${codeLength}.`}
+              label={numberLabel}
+              help={t(
+                `Введите ровно ${codeLength} цифр. Введено: ${g.code.length} из ${codeLength}.`,
+                `Дәл ${codeLength} цифр енгізіңіз. Енгізілді: ${g.code.length} / ${codeLength}.`,
+              )}
             >
               <Input
                 inputMode="numeric"
@@ -438,7 +474,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           )}
 
           {g.kind === 'box' && (
-            <Field label="Префикс">
+            <Field label={t('Префикс', 'Префикс')}>
               <Input
                 value={g.prefix}
                 maxLength={12}
@@ -449,7 +485,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
           {/* Код доступа обязателен: генерация без него не проходит на сервере,
               поэтому поле показывается сразу, а не прячется за ссылкой. */}
-          {!bulkCustomMode && <><Field label="Код доступа" help="Код из личного кабинета или со страницы оплаты">
+          {!bulkCustomMode && <><Field label={t('Код доступа', 'Қолжетімділік коды')} help={t('Код из личного кабинета или со страницы оплаты', 'Жеке кабинеттегі немесе төлем бетіндегі код')}>
             <Input
               maxLength={36}
               value={g.accessCode}
@@ -465,12 +501,12 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             {access.isLoading && <Skeleton width="180px" />}
             {remaining !== undefined && (
               <Badge tone={outOfQuota ? 'error' : lowQuota ? 'warning' : 'success'}>
-                Осталось генераций: {remaining}
+                {t('Осталось генераций:', 'Қалған генерациялар:')} {remaining}
               </Badge>
             )}
             {(lowQuota || !g.accessCode) && (
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                {g.accessCode ? 'Пополнить' : 'Купить пакет генераций'}
+                {g.accessCode ? t('Пополнить', 'Толықтыру') : t('Купить пакет генераций', 'Генерациялар пакетін сатып алу')}
               </button>
             )}
           </div>
@@ -478,9 +514,9 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           {/* Квота кончилась — предлагаем пакет ДО нажатия, а не после. */}
           {outOfQuota && (
             <Alert tone="warning">
-              Генерации по этому коду закончились.{' '}
+              {t('Генерации по этому коду закончились.', 'Бұл код бойынша генерациялар таусылды.')}{' '}
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                Выбрать пакет
+                {t('Выбрать пакет', 'Пакет таңдау')}
               </button>
             </Alert>
           )}
@@ -492,22 +528,24 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             disabled={!g.accessCode || invalidCustomCode || invalidQuantity}
             onClick={() => setConfirmOpen(true)}
           >
-            {mutation.isPending ? 'Генерируем…' : 'Сгенерировать'}
+            {mutation.isPending ? t('Генерируем…', 'Генерациялап жатырмыз…') : t('Сгенерировать', 'Генерациялау')}
           </Button></>}
 
           <p className={s.historyNote}>
             {auth.isAuthenticated ? (
               <>
-                История сгенерированных стикеров сохраняется в{' '}
-                <Link to="/cabinet/history">личном кабинете</Link>.
+                {t('История сгенерированных стикеров сохраняется в', 'Генерацияланған стикерлер тарихы')}{' '}
+                <Link to="/cabinet/history">{t('личном кабинете', 'жеке кабинетте сақталады')}</Link>.
               </>
             ) : (
               <>
-                После{' '}
                 <Link to="/login" state={{ from: location.pathname + location.search }}>
-                  авторизации
-                </Link>{' '}
-                история ранее сгенерированных стикеров появится в личном кабинете.
+                  {t('Войдите', 'Кіріңіз')}
+                </Link>
+                {t(
+                  ', и история ранее сгенерированных стикеров появится в личном кабинете.',
+                  ' — бұрын генерацияланған стикерлер тарихы жеке кабинетте пайда болады.',
+                )}
               </>
             )}
           </p>
@@ -515,9 +553,9 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           {/* Исчерпание лимита — не ошибка, а самый горячий момент воронки. */}
           {quotaBlocked ? (
             <Alert tone="warning">
-              {mutation.error.message}{' '}
+              {t(mutation.error.message, 'Бұл код бойынша генерациялар жеткіліксіз.')}{' '}
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                Выбрать пакет
+                {t('Выбрать пакет', 'Пакет таңдау')}
               </button>
             </Alert>
           ) : ownerBlocked ? (
@@ -525,15 +563,15 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                кода», но пойти туда было не по чему: собираем ту же фразу с
                кнопкой и возвратом на эту же страницу после входа. */
             <Alert tone="error">
-              Этот код привязан к другому аккаунту.{' '}
+              {t('Этот код привязан к другому аккаунту.', 'Бұл код басқа аккаунтқа байланған.')}{' '}
               <Link
                 className={s.alertLogin}
                 to="/login"
                 state={{ from: location.pathname + location.search }}
               >
-                Войдите
+                {t('Войдите', 'Код иесінің')}
               </Link>{' '}
-              под владельцем кода.
+              {t('под владельцем кода.', 'аккаунтымен кіріңіз.')}
             </Alert>
           ) : (
             mutation.isError && <Alert tone="error">{mutation.error.message}</Alert>
@@ -545,34 +583,34 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
         {mutation.data ? (
           <>
             <div className={s.resultHead}>
-              <h2>Готово</h2>
+              <h2>{t('Готово', 'Дайын')}</h2>
             </div>
 
             {previewItems.length > 0 && (
               <div className={s.previewSection}>
                 <div className={s.previewControls}>
-                  <strong>Сгенерированные стикеры</strong>
+                  <strong>{t('Сгенерированные стикеры', 'Генерацияланған стикерлер')}</strong>
                   {previewCount < previewItems.length && (
                     <>
                       <Button variant="ghost" onClick={() => setPreviewCount(Math.min(previewCount + 4, previewItems.length))}>
-                        Показать ещё 4
+                        {t('Показать ещё 4', 'Тағы 4 көрсету')}
                       </Button>
                       <Button variant="ghost" onClick={() => setPreviewCount(previewItems.length)}>
-                        Показать все
+                        {t('Показать все', 'Барлығын көрсету')}
                       </Button>
                     </>
                   )}
-                  <span className={s.count}>Показано {shown.length} из {previewItems.length}</span>
+                  <span className={s.count}>{t(`Показано ${shown.length} из ${previewItems.length}`, `${previewItems.length} ішінен ${shown.length} көрсетілді`)}</span>
                 </div>
                 <div className={s.tiles}>
                   {shown.map(item => (
                     <div key={item.code || item.imageUrl} className={`${s.tile} ${previewItems.length === 1 ? s.single : ''}`}>
-                      <img src={item.imageUrl} alt={`QR-код ${item.code}`} loading="lazy" />
+                      <img src={item.imageUrl} alt={`QR ${item.code}`} loading="lazy" />
                       <div className={s.tileActions}>
-                        <button type="button" className={s.tileAction} title="Скачать изображение" aria-label={`Скачать стикер ${item.code} как изображение`} onClick={() => void downloadSticker(item)}>
+                        <button type="button" className={s.tileAction} title={t('Скачать изображение', 'Суретті жүктеп алу')} aria-label={t(`Скачать стикер ${item.code} как изображение`, `${item.code} стикерін сурет ретінде жүктеп алу`)} onClick={() => void downloadSticker(item)}>
                           <Download size={19} />
                         </button>
-                        <button type="button" className={s.tileAction} title="Поделиться" aria-label={`Поделиться стикером ${item.code}`} onClick={() => void shareSticker(item)}>
+                        <button type="button" className={s.tileAction} title={t('Поделиться', 'Бөлісу')} aria-label={t(`Поделиться стикером ${item.code}`, `${item.code} стикерімен бөлісу`)} onClick={() => void shareSticker(item)}>
                           <Share2 size={19} />
                         </button>
                       </div>
@@ -587,13 +625,16 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 {g.mode === 'range' && (
                   <>
                     <div>
-                      <strong>Настройка листа</strong>
+                      <strong>{t('Настройка листа', 'Парақты баптау')}</strong>
                       <p className={s.printHelp}>
-                        Выберите, сколько QR-кодов или стикеров должно помещаться в одной строке листа A4.
+                        {t(
+                          'Выберите, сколько QR-кодов или стикеров должно помещаться в одной строке листа A4.',
+                          'A4 парағының бір жолына қанша QR-код немесе стикер сыю керектігін таңдаңыз.',
+                        )}
                       </p>
                     </div>
                     <Segmented
-                      label="Количество колонок на листе"
+                      label={t('Количество колонок на листе', 'Парақтағы бағандар саны')}
                       value={String(printColumns)}
                       onChange={value => setPrintColumns(Number(value))}
                       options={[
@@ -609,14 +650,14 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
                 {items.length > 1 && (
                   <Field
-                    label="Сколько печатать"
-                    help={`В пачке ${items.length}. Пусто — вся пачка.`}
+                    label={t('Сколько печатать', 'Қанша басып шығару')}
+                    help={t(`В пачке ${items.length}. Пусто — вся пачка.`, `Бумада ${items.length}. Бос болса — бүкіл бума.`)}
                   >
                     <Input
                       type="number"
                       min={1}
                       max={items.length}
-                      placeholder={`Все ${items.length}`}
+                      placeholder={t(`Все ${items.length}`, `Барлығы ${items.length}`)}
                       value={printCount}
                       onChange={e =>
                         setPrintCount(e.target.value === '' ? '' : Number(e.target.value))
@@ -629,13 +670,13 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                   <a href={printUrl(false)} download>
                     <Button>
                       <Download size={18} />
-                      Скачать PDF A4
+                      {t('Скачать PDF A4', 'A4 PDF жүктеп алу')}
                     </Button>
                   </a>
                   <a href={printUrl(true)} target="_blank" rel="noopener noreferrer">
                     <Button variant="secondary">
                       <PrinterIcon size={18} />
-                      Печать
+                      {t('Печать', 'Басып шығару')}
                     </Button>
                   </a>
                 </div>
@@ -652,12 +693,12 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
             <div className={s.nextStep}>
               {remaining !== undefined ? (
-                <span>Осталось генераций: {remaining}</span>
+                <span>{t('Осталось генераций:', 'Қалған генерациялар:')} {remaining}</span>
               ) : (
-                <span>Нужно больше стикеров?</span>
+                <span>{t('Нужно больше стикеров?', 'Көбірек стикер керек пе?')}</span>
               )}
               <Button variant="ghost" size="sm" onClick={onNeedPackages}>
-                Пакеты от {formatPerUnit(MIN_PER_UNIT)}
+                {t(`Пакеты от ${formatPerUnit(MIN_PER_UNIT)}`, `Пакеттер ${formatPerUnit(MIN_PER_UNIT)} бастап`)}
                 <ArrowRight size={16} />
               </Button>
             </div>
@@ -670,51 +711,56 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
       <Modal
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Проверьте, что создаём"
-        description="Генерации спишутся сразу после запуска, а выданные номера повторно не выдаются."
+        title={t('Проверьте, что создаём', 'Не жасайтынымызды тексеріңіз')}
+        description={t(
+          'Генерации спишутся сразу после запуска, а выданные номера повторно не выдаются.',
+          'Генерациялар іске қосылғаннан кейін бірден есептен шығарылады, ал берілген нөмірлер қайта берілмейді.',
+        )}
       >
         <div className="stack">
           <div className={s.confirmRow}>
-            <span className="muted">Что создаём</span>
+            <span className="muted">{t('Что создаём', 'Не жасаймыз')}</span>
             <strong>{kindLabel}</strong>
           </div>
           <div className={s.confirmRow}>
-            <span className="muted">Режим</span>
-            <strong>{g.mode === 'range' ? 'Массово' : 'По номеру'}</strong>
+            <span className="muted">{t('Режим', 'Режим')}</span>
+            <strong>{modeLabel}</strong>
           </div>
 
           {g.mode === 'range' ? (
             <div className={s.confirmRow}>
-              <span className="muted">Количество</span>
-              <strong>{plannedCount} шт</strong>
+              <span className="muted">{t('Количество', 'Саны')}</span>
+              <strong>{plannedCount} {t('шт', 'дана')}</strong>
             </div>
           ) : (
             <div className={s.confirmRow}>
-              <span className="muted">{g.kind === 'box' ? 'Номер коробки' : 'Номер ШК'}</span>
+              <span className="muted">{numberLabel}</span>
               <strong className="mono">{g.code || '—'}</strong>
             </div>
           )}
 
           {g.kind === 'box' && g.prefix && (
             <div className={s.confirmRow}>
-              <span className="muted">Префикс</span>
+              <span className="muted">{t('Префикс', 'Префикс')}</span>
               <strong className="mono">{g.prefix}</strong>
             </div>
           )}
 
           {remaining !== undefined && (
             <div className={s.confirmRow}>
-              <span className="muted">Останется по коду</span>
+              <span className="muted">{t('Останется по коду', 'Кодта қалады')}</span>
               <strong>
-                {leftAfter} из {remaining}
+                {t(`${leftAfter} из ${remaining}`, `${remaining} ішінен ${leftAfter}`)}
               </strong>
             </div>
           )}
 
           {notEnough && (
             <Alert tone="warning">
-              По коду доступа осталось {remaining}, а запрошено {plannedCount}. Уменьшите количество
-              или возьмите пакет.
+              {t(
+                `По коду доступа осталось ${remaining}, а запрошено ${plannedCount}. Уменьшите количество или возьмите пакет.`,
+                `Қолжетімділік кодында ${remaining} қалды, ал сұралғаны ${plannedCount}. Санын азайтыңыз немесе пакет алыңыз.`,
+              )}
             </Alert>
           )}
 
@@ -727,10 +773,10 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 mutation.mutate();
               }}
             >
-              Создать
+              {t('Создать', 'Жасау')}
             </Button>
             <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
-              Отмена
+              {t('Отмена', 'Болдырмау')}
             </Button>
           </div>
         </div>
@@ -742,35 +788,42 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 /** Публичная главная: лендинг вокруг той же рабочей части генератора. */
 export const GeneratorPage = observer(() => {
   const { formatPerUnit } = useMoney();
+  const t = useT();
   // Ключ идёт неразорванным и слева: «Генератор возвратных ШК» разбивал фразу
   // словом посередине, и по запросу «генератор ШК» страница не находилась вовсе.
   useDocumentMeta(
-    'Генератор ШК ВБ — возвратные стикеры и QR коробок',
-    'Генератор ШК Wildberries: возвратные стикеры товаров и QR-коды коробок онлайн. Готовый PDF для печати, пакеты генераций от 0,27 ₽ за штуку.',
+    t('Генератор ШК ВБ — возвратные стикеры и QR коробок', 'ШК ВБ генераторы — WB қайтару стикерлері мен қорап QR-кодтары'),
+    t(
+      'Генератор ШК Wildberries: возвратные стикеры товаров и QR-коды коробок онлайн. Готовый PDF для печати, пакеты генераций от 0,27 ₽ за штуку.',
+      'Wildberries ШК генераторы: тауарлардың қайтару стикерлері мен қораптардың QR-кодтары онлайн. Басып шығаруға дайын PDF, генерация пакеттері қолжетімді бағамен.',
+    ),
   );
 
   return (
     <>
       <Hero
-        eyebrow="Онлайн-инструмент"
+        eyebrow={t('Онлайн-инструмент', 'Онлайн-құрал')}
         title={
           <>
-            <em>Генератор ШК ВБ</em>: возвратные стикеры и QR-коды коробок
+            <em>{t('Генератор ШК ВБ', 'ШК ВБ генераторы')}</em>
+            {t(': возвратные стикеры и QR-коды коробок', ': қайтару стикерлері мен қорап QR-кодтары')}
           </>
         }
         copy={
           <>
-            Создавайте возвратные ШК (штрихкоды) Wildberries для товаров и QR-коды коробок по
-            номеру. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или
-            термопринтер. Генерации покупаются пакетами — <strong>от{' '}
-            {formatPerUnit(MIN_PER_UNIT)}</strong> за штуку.
+            {t(
+              'Создавайте возвратные ШК (штрихкоды) Wildberries для товаров и QR-коды коробок по номеру. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или термопринтер. Генерации покупаются пакетами —',
+              'Тауарларға арналған Wildberries қайтару ШК-ларын (штрихкодтарын) және нөмір бойынша қорап QR-кодтарын жасаңыз. Дайын PDF-ті жүктеп алыңыз немесе заттаңбаларды бірден кәдімгі не термопринтерге жіберіңіз. Генерациялар пакетпен сатылады —',
+            )}{' '}
+            <strong>{t(`от ${formatPerUnit(MIN_PER_UNIT)}`, `данасы ${formatPerUnit(MIN_PER_UNIT)}`)}</strong>{' '}
+            {t('за штуку.', 'бастап.')}
           </>
         }
-        trust={TRUST}
+        trust={trustItems(t, formatPerUnit(MIN_PER_UNIT))}
       />
 
-      <Section id="how" eyebrow="Три шага" title="Как это работает">
-        <Steps steps={STEPS} />
+      <Section id="how" eyebrow={t('Три шага', 'Үш қадам')} title={t('Как это работает', 'Бұл қалай жұмыс істейді')}>
+        <Steps steps={steps(t)} />
       </Section>
 
       <div className="page">
@@ -783,8 +836,8 @@ export const GeneratorPage = observer(() => {
       <GeneratedCounter />
       <PricingPacks />
 
-      <Section id="faq" eyebrow="Частые вопросы" title="Вопросы о генераторе">
-        <Accordion items={FAQ} />
+      <Section id="faq" eyebrow={t('Частые вопросы', 'Жиі қойылатын сұрақтар')} title={t('Вопросы о генераторе', 'Генератор туралы сұрақтар')}>
+        <Accordion items={faq(t)} />
       </Section>
 
       <CrossSell items={[CROSS_SELL.cellPrint, CROSS_SELL.program]} />

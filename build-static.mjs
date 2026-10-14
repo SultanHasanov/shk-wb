@@ -1,9 +1,9 @@
 import { execSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { dirname, extname, resolve } from 'node:path';
 import { chromium } from 'playwright';
-import { GOOGLE_SITE_VERIFICATION, ORIGIN, PUBLIC_PAGES, SITE_NAME } from './build-seo.mjs';
+import { GOOGLE_SITE_VERIFICATION, KZ_PREFIX, ORIGIN, PUBLIC_PAGES, SITE_NAME, localizeGraph } from './build-seo.mjs';
 
 const output = resolve('dist');
 
@@ -142,9 +142,14 @@ function escapeAttribute(value) {
  * их проставил useDocumentMeta. Всё остальное React не выставляет: canonical он
  * пишет от адреса сборочного сервера (127.0.0.1), поэтому его перезаписываем.
  */
-function injectSeo(html, route, faq, override) {
+function pageUrl(route, locale) {
+  if (locale === 'kk') return `${ORIGIN}${KZ_PREFIX}${route === '/' ? '' : route}`;
+  return route === '/' ? `${ORIGIN}/` : `${ORIGIN}${route}`;
+}
+
+function injectSeo(html, route, faq, override, locale = 'ru') {
   const page = PUBLIC_PAGES[route];
-  const url = route === '/' ? `${ORIGIN}/` : `${ORIGIN}${route}`;
+  const url = pageUrl(route, locale);
   const title = override?.title ?? html.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? SITE_NAME;
   const description =
     override?.description ?? html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '';
@@ -152,13 +157,28 @@ function injectSeo(html, route, faq, override) {
   const imageType = page.image.path.endsWith('.jpg') || page.image.path.endsWith('.jpeg')
     ? 'image/jpeg'
     : page.image.path.endsWith('.webp') ? 'image/webp' : 'image/png';
-  const graph = faq ? [...page.graph, faq] : page.graph;
+  const baseGraph = locale === 'kk' ? localizeGraph(page.graph) : page.graph;
+  const graph = faq ? [...baseGraph, faq] : baseGraph;
+  // Юридические тексты на казахской версии остаются русскими (официальная
+  // редакция одна) — в индекс их не отдаём, чтобы не плодить дубли.
+  const indexable = !(locale === 'kk' && page.legal);
 
   const head = [
     `<link rel="canonical" href="${url}"/>`,
-    '<meta name="robots" content="index, follow, max-image-preview:large"/>',
+    // Пары языковых версий: без hreflang поиск считает /kz-страницы дублями.
+    indexable
+      ? [
+          `<link rel="alternate" hreflang="ru" href="${pageUrl(route, 'ru')}"/>`,
+          `<link rel="alternate" hreflang="kk" href="${pageUrl(route, 'kk')}"/>`,
+          `<link rel="alternate" hreflang="x-default" href="${pageUrl(route, 'ru')}"/>`,
+        ].join('')
+      : '',
+    indexable
+      ? '<meta name="robots" content="index, follow, max-image-preview:large"/>'
+      : '<meta name="robots" content="noindex, follow"/>',
     `<meta property="og:type" content="${page.ogType}"/>`,
-    '<meta property="og:locale" content="ru_RU"/>',
+    `<meta property="og:locale" content="${locale === 'kk' ? 'kk_KZ' : 'ru_RU'}"/>`,
+    `<meta property="og:locale:alternate" content="${locale === 'kk' ? 'ru_RU' : 'kk_KZ'}"/>`,
     `<meta property="og:site_name" content="${escapeAttribute(SITE_NAME)}"/>`,
     `<meta property="og:title" content="${escapeAttribute(title)}"/>`,
     `<meta property="og:description" content="${escapeAttribute(description)}"/>`,
@@ -187,6 +207,7 @@ function injectSeo(html, route, faq, override) {
     '<noscript><div><img src="https://mc.yandex.ru/watch/111723088" style="position:absolute;left:-9999px" alt=""/></div></noscript>';
 
   return html
+    .replace(/<html([^>]*)\slang="[^"]*"/i, `<html$1 lang="${locale === 'kk' ? 'kk' : 'ru'}"`)
     // canonical и og:* уже могли попасть в DOM из useDocumentMeta — снимаем их,
     // чтобы не оставить в файле два разных canonical.
     .replace(/<link rel="canonical"[^>]*>/gi, '')
@@ -255,6 +276,9 @@ async function launchChromium() {
 }
 
 const shellHtml = readFileSync(resolve(output, 'index.html'), 'utf8');
+
+/** Каждая публичная страница снимается дважды: русская и казахская (/kz). */
+const LOCALIZED_ROUTES = Object.keys(PUBLIC_PAGES).flatMap(route => [[route, 'ru'], [route, 'kk']]);
 const browser = await launchChromium();
 
 // Снимки копятся в памяти и пишутся после обхода: файл, записанный на середине
@@ -281,8 +305,9 @@ if (browser) {
     return route.continue();
   });
 
-  for (const route of Object.keys(PUBLIC_PAGES)) {
-    await page.goto(`${origin}${route}`, { waitUntil: 'load' });
+  for (const [route, locale] of LOCALIZED_ROUTES) {
+    const address = locale === 'kk' ? `${KZ_PREFIX}${route === '/' ? '' : route}` : route;
+    await page.goto(`${origin}${address}`, { waitUntil: 'load' });
     // Ждём именно заголовок страницы, а не любой узел в #root: оболочка с
     // шапкой рендерится сразу, и по '#root > *' снимок мог бы уйти в файл до
     // того, как отрисуется содержимое маршрута.
@@ -290,20 +315,22 @@ if (browser) {
     // Хвост микрозадач react-query и эффектов useDocumentMeta.
     await page.waitForTimeout(300);
 
-    const html = injectSeo(await page.content(), route, await extractFaq(page));
-    snapshots.push([route, html]);
+    const html = injectSeo(await page.content(), route, await extractFaq(page), undefined, locale);
+    snapshots.push([address, html]);
   }
 
   await browser.close();
   server.close();
 } else {
-  for (const [route, page] of Object.entries(PUBLIC_PAGES)) {
-    snapshots.push([route, injectSeo(shellHtml, route, null, page.fallback)]);
+  for (const [route, locale] of LOCALIZED_ROUTES) {
+    const address = locale === 'kk' ? `${KZ_PREFIX}${route === '/' ? '' : route}` : route;
+    snapshots.push([address, injectSeo(shellHtml, route, null, PUBLIC_PAGES[route].fallback, locale)]);
   }
 }
 
 for (const [route, html] of snapshots) {
   const file = route === '/' ? 'index.html' : `${route.slice(1)}.html`;
+  mkdirSync(dirname(resolve(output, file)), { recursive: true });
   writeFileSync(resolve(output, file), html);
   console.log(`${browser ? 'prerender' : 'оболочка'} ${route} → dist/${file} (${html.length} байт)`);
 }

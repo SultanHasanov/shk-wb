@@ -18,6 +18,7 @@ import { rememberPendingOrder } from '../lib/pending-orders';
 import { useStores } from '../stores/root-store';
 import { useCabinet } from '../api/cabinet';
 import { useMoney } from '../lib/currency';
+import { useLocalePath, useT } from '../i18n';
 
 /** Блок покупки пакетов через действующий серверный платёжный API. */
 
@@ -27,8 +28,9 @@ import { useMoney } from '../lib/currency';
  *  печатать, а не за что платить. */
 function PackGrid({ value, onChange }: { value: number; onChange: (quantity: number) => void }) {
   const { formatTotal, formatPerUnit } = useMoney();
+  const t = useT();
   return (
-    <div className={s.grid} role="radiogroup" aria-label="Пакеты генераций">
+    <div className={s.grid} role="radiogroup" aria-label={t('Пакеты генераций', 'Генерация пакеттері')}>
       {HEADLINE_PACK_LIST.map(pack => {
         const active = pack.quantity === value;
         const popular = pack.quantity === POPULAR_PACK;
@@ -44,17 +46,17 @@ function PackGrid({ value, onChange }: { value: number; onChange: (quantity: num
               .join(' ')}
             onClick={() => onChange(pack.quantity)}
           >
-            {popular && <span className={s.ribbon}>Чаще всего берут</span>}
+            {popular && <span className={s.ribbon}>{t('Чаще всего берут', 'Ең жиі алады')}</span>}
             {active && <CircleCheck size={20} className={s.check} aria-hidden="true" />}
 
             <span className={s.qty}>
-              {pack.quantity} {pack.quantity === 1 ? 'генерация' : 'генераций'}
+              {pack.quantity} {pack.quantity === 1 ? t('генерация', 'генерация') : t('генераций', 'генерация')}
             </span>
             <span className={s.perUnit}>{formatPerUnit(pack.perUnit)}</span>
-            <span className={s.perUnitLabel}>за генерацию</span>
+            <span className={s.perUnitLabel}>{t('за генерацию', 'бір генерация')}</span>
 
             <span className={s.total}>
-              {formatTotal(pack.total)} <span className={s.totalLabel}>за пакет</span>
+              {formatTotal(pack.total)} <span className={s.totalLabel}>{t('за пакет', 'пакет үшін')}</span>
             </span>
           </button>
         );
@@ -66,6 +68,8 @@ function PackGrid({ value, onChange }: { value: number; onChange: (quantity: num
 /** Полная форма покупки: количество → сумма → оплата. */
 export const PackPurchase = observer(() => {
   const { formatTotal, formatPerUnit } = useMoney();
+  const t = useT();
+  const lp = useLocalePath();
   const [quantity, setQuantity] = useState<number>(POPULAR_PACK);
   const [accepted, setAccepted] = useState(false);
   const [useBalance, setUseBalance] = useState(false);
@@ -113,7 +117,7 @@ export const PackPurchase = observer(() => {
       <div className={s.checkout}>
         <div className={s.summary}>
           <span className={s.summaryText}>
-            {selected.quantity} {selected.quantity === 1 ? 'генерация' : 'генераций'} по{' '}
+            {selected.quantity} {selected.quantity === 1 ? t('генерация', 'генерация') : t('генераций', 'генерация')} {t('по', '×')}{' '}
             {formatPerUnit(selected.perUnit)}
           </span>
           <span className={s.summaryTotal}>{formatTotal(payableTotal)}</span>
@@ -124,14 +128,15 @@ export const PackPurchase = observer(() => {
           onChange={e => setAccepted(e.target.checked)}
           id="packages-offer"
         >
-          Принимаю{' '}
-          <a className="accent" href="/offer">
-            оферту
+          {t('Принимаю', 'Мен')}{' '}
+          <a className="accent" href={lp('/offer')}>
+            {t('оферту', 'офертаны')}
           </a>{' '}
-          и{' '}
-          <a className="accent" href="/privacy">
-            политику конфиденциальности
+          {t('и', 'және')}{' '}
+          <a className="accent" href={lp('/privacy')}>
+            {t('политику конфиденциальности', 'құпиялылық саясатын')}
           </a>
+          {t('', ' қабылдаймын')}
         </Checkbox>
 
         {auth.isAuthenticated && (
@@ -140,7 +145,7 @@ export const PackPurchase = observer(() => {
             disabled={cabinet.isPending || availableKopecks <= 0}
             onChange={e => setUseBalance(e.target.checked)}
           >
-            Использовать доступный реферальный баланс — доступно{' '}
+            {t('Использовать доступный реферальный баланс — доступно', 'Қолжетімді реферал балансын пайдалану — қолжетімді')}{' '}
             {cabinet.isPending ? '…' : formatRub(availableKopecks / 100)}
           </Checkbox>
         )}
@@ -150,11 +155,14 @@ export const PackPurchase = observer(() => {
             в этом браузере стикерами, — поэтому предлагаем войти до оплаты. */}
         {!auth.isAuthenticated && (
           <Alert tone="info">
-            Купить можно без регистрации — код доступа выдадим сразу.{' '}
+            {t('Купить можно без регистрации — код доступа выдадим сразу.', 'Тіркелусіз сатып алуға болады — қолжетімділік кодын бірден береміз.')}{' '}
             <Link className="accent" to="/login">
-              Войдите
+              {t('Войдите', 'Кіріңіз')}
             </Link>
-            , и пакет вместе с уже созданными в этом браузере стикерами появится в личном кабинете.
+            {t(
+              ', и пакет вместе с уже созданными в этом браузере стикерами появится в личном кабинете.',
+              ' — пакет осы браузерде жасалған стикерлермен бірге жеке кабинетте пайда болады.',
+            )}
           </Alert>
         )}
 
@@ -164,7 +172,7 @@ export const PackPurchase = observer(() => {
           loading={checkout.isPending}
           onClick={() => setConfirmOpen(true)}
         >
-          {payableTotal > 0 ? 'Перейти к оплате' : 'Оплатить балансом'}
+          {payableTotal > 0 ? t('Перейти к оплате', 'Төлемге өту') : t('Оплатить балансом', 'Баланспен төлеу')}
         </Button>
 
         {checkout.isError && <Alert tone="error">{checkout.error.message}</Alert>}
@@ -172,45 +180,52 @@ export const PackPurchase = observer(() => {
         <Modal
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
-          title="Проверьте заказ"
-          description="После подтверждения откроется страница оплаты ЮKassa."
+          title={t('Проверьте заказ', 'Тапсырысты тексеріңіз')}
+          description={t('После подтверждения откроется страница оплаты ЮKassa.', 'Растағаннан кейін ЮKassa төлем беті ашылады.')}
         >
           <div className="stack">
             <div className={s.confirmRow}>
-              <span className="muted">Что покупаете</span>
-              <strong>Пакет генераций</strong>
+              <span className="muted">{t('Что покупаете', 'Не сатып аласыз')}</span>
+              <strong>{t('Пакет генераций', 'Генерация пакеті')}</strong>
             </div>
             <div className={s.confirmRow}>
-              <span className="muted">Количество</span>
+              <span className="muted">{t('Количество', 'Саны')}</span>
               <strong>
-                {selected.quantity} {selected.quantity === 1 ? 'генерация' : 'генераций'}
+                {selected.quantity} {selected.quantity === 1 ? t('генерация', 'генерация') : t('генераций', 'генерация')}
               </strong>
             </div>
             <div className={s.confirmRow}>
-              <span className="muted">Цена за генерацию</span>
+              <span className="muted">{t('Цена за генерацию', 'Бір генерация бағасы')}</span>
               <strong>{formatPerUnit(selected.perUnit)}</strong>
             </div>
             <div className={s.confirmRow}>
-              <span className="muted">К оплате</span>
+              <span className="muted">{t('К оплате', 'Төлеуге')}</span>
               <span className={s.confirmTotal}>{formatTotal(payableTotal)}</span>
             </div>
 
             {auth.isAuthenticated && useBalance && (
               <Alert tone="info">
-                Из реферального баланса спишется {formatRub(appliedKopecks / 100)}. К оплате
-                останется {formatRub(payableTotal)}.
+                {t(
+                  `Из реферального баланса спишется ${formatRub(appliedKopecks / 100)}. К оплате останется ${formatRub(payableTotal)}.`,
+                  `Реферал балансынан ${formatRub(appliedKopecks / 100)} есептен шығарылады. Төлеуге ${formatRub(payableTotal)} қалады.`,
+                )}
               </Alert>
             )}
 
             {!auth.isAuthenticated && (
               <>
                 <Alert tone="info">
-                  Код доступа появится на этой странице сразу после оплаты и автоматически
-                  применится для генерации.
+                  {t(
+                    'Код доступа появится на этой странице сразу после оплаты и автоматически применится для генерации.',
+                    'Қолжетімділік коды төлемнен кейін бірден осы бетте пайда болады және генерация үшін автоматты түрде қолданылады.',
+                  )}
                 </Alert>
                 <Field
-                  label="Электронная почта (необязательно)"
-                  help="Если хотите получить код на почту и получать уведомления о генерациях — укажите её."
+                  label={t('Электронная почта (необязательно)', 'Электрондық пошта (міндетті емес)')}
+                  help={t(
+                    'Если хотите получить код на почту и получать уведомления о генерациях — укажите её.',
+                    'Кодты поштаға алғыңыз және генерациялар туралы хабарлама алғыңыз келсе — оны көрсетіңіз.',
+                  )}
                 >
                   <Input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} />
                 </Field>
@@ -225,10 +240,10 @@ export const PackPurchase = observer(() => {
                 disabled={!auth.isAuthenticated && email.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())}
                 onClick={() => checkout.mutate()}
               >
-                {payableTotal > 0 ? 'Перейти к оплате' : 'Оплатить балансом'}
+                {payableTotal > 0 ? t('Перейти к оплате', 'Төлемге өту') : t('Оплатить балансом', 'Баланспен төлеу')}
               </Button>
               <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
-                Отмена
+                {t('Отмена', 'Болдырмау')}
               </Button>
             </div>
 
@@ -241,13 +256,17 @@ export const PackPurchase = observer(() => {
 });
 
 export function PricingPacks() {
+  const t = useT();
   return (
     <Section
       id="packages"
       align="center"
-      eyebrow="Тарифы"
-      title="Пакеты генераций"
-      lead="Оплата разовая, срок действия не ограничен. Пакет — это просто число генераций: тратьте их на стикеры товаров или на QR возвратных коробок, пачкой или по одному номеру."
+      eyebrow={t('Тарифы', 'Тарифтер')}
+      title={t('Пакеты генераций', 'Генерация пакеттері')}
+      lead={t(
+        'Оплата разовая, срок действия не ограничен. Пакет — это просто число генераций: тратьте их на стикеры товаров или на QR возвратных коробок, пачкой или по одному номеру.',
+        'Төлем бір реттік, жарамдылық мерзімі шектелмеген. Пакет — бұл жай ғана генерациялар саны: оларды тауар стикерлеріне немесе қайтару қораптарының QR-кодтарына, бумамен немесе бір нөмірден жұмсаңыз.',
+      )}
     >
       <PackPurchase />
     </Section>

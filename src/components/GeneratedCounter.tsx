@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useT } from '../i18n';
 import s from './GeneratedCounter.module.css';
 
 type Stats = { returnStickers: number; customStickers: number };
@@ -55,6 +56,7 @@ function Item({ value, label }: { value: number; label: string }) {
  * доверия, показывающий «0» или сообщение об ошибке, работает против доверия.
  */
 export function GeneratedCounter() {
+  const t = useT();
   const { data } = useQuery({
     queryKey: ['sticker-stats'],
     queryFn: () => api<Stats>('/api/sticker-stats'),
@@ -66,11 +68,11 @@ export function GeneratedCounter() {
   if (!data || total === 0) return null;
 
   return (
-    <section className={s.band} aria-label="Статистика сервиса">
+    <section className={s.band} aria-label={t('Статистика сервиса', 'Сервис статистикасы')}>
       <div className={s.inner}>
-        <Item value={data.returnStickers} label="возвратных стикеров" />
-        <Item value={data.customStickers} label="стикеров по номеру" />
-        <p className={s.caption}>Уже сгенерировано пользователями сервиса</p>
+        <Item value={data.returnStickers} label={t('возвратных стикеров', 'қайтару стикері')} />
+        <Item value={data.customStickers} label={t('стикеров по номеру', 'нөмір бойынша стикер')} />
+        <p className={s.caption}>{t('Уже сгенерировано пользователями сервиса', 'Сервис пайдаланушылары генерациялап үлгерді')}</p>
       </div>
     </section>
   );

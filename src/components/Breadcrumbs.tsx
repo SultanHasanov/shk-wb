@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
+import { stripLocale, type Text, useLocale, useLocalePath, useT } from '../i18n';
 import s from './Breadcrumbs.module.css';
 
 /**
@@ -12,30 +13,33 @@ import s from './Breadcrumbs.module.css';
  * Названия совпадают с теми, что уходят в микроразметку: расхождение между
  * видимой крошкой и структурированной — ошибка в Вебмастере.
  */
-const TITLES: Record<string, string> = {
-  'cell-print': 'Печать ячеек',
-  program: 'Подбор кодов',
-  'vozvratnye-stikery-wb': 'Возвратные стикеры',
-  'qr-korobov-wb': 'QR коробов WB',
-  contacts: 'Контакты',
-  offer: 'Публичная оферта',
-  privacy: 'Политика конфиденциальности',
-  cookie: 'Использование cookie',
+const TITLES: Record<string, Text> = {
+  'cell-print': { ru: 'Печать ячеек', kk: 'Ұяшық басып шығару' },
+  program: { ru: 'Подбор кодов', kk: 'Кодтарды іріктеу' },
+  'vozvratnye-stikery-wb': { ru: 'Возвратные стикеры', kk: 'Қайтару стикерлері' },
+  'qr-korobov-wb': { ru: 'QR коробов WB', kk: 'WB қорап QR-кодтары' },
+  contacts: { ru: 'Контакты', kk: 'Байланыс' },
+  offer: { ru: 'Публичная оферта', kk: 'Жария оферта' },
+  privacy: { ru: 'Политика конфиденциальности', kk: 'Құпиялылық саясаты' },
+  cookie: { ru: 'Использование cookie', kk: 'Cookie пайдалану' },
 };
 
 export function Breadcrumbs() {
   const { pathname } = useLocation();
-  const segment = pathname.replace(/^\/|\/$/g, '');
-  const title = TITLES[segment];
+  const t = useT();
+  const locale = useLocale();
+  const lp = useLocalePath();
+  const segment = stripLocale(pathname).replace(/^\/|\/$/g, '');
+  const title = TITLES[segment]?.[locale];
 
   // На главной крошки не нужны, на служебных страницах — не заданы.
   if (!title) return null;
 
   return (
-    <nav className={s.crumbs} aria-label="Хлебные крошки">
+    <nav className={s.crumbs} aria-label={t('Хлебные крошки', 'Навигация жолы')}>
       <ol>
         <li>
-          <Link to="/">Главная</Link>
+          <Link to={lp('/')}>{t('Главная', 'Басты бет')}</Link>
           <ChevronRight size={14} aria-hidden="true" />
         </li>
         <li aria-current="page">{title}</li>

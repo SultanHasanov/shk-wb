@@ -19,6 +19,7 @@ import {
 } from '../../lib/pricing';
 import { useMoney } from '../../lib/currency';
 import { RubChargeNote } from '../../components/CurrencySwitch';
+import { useLocale, useLocalePath, useT } from '../../i18n';
 
 // Покупки самой программы здесь больше нет: установщик скачивается бесплатно.
 export type LicenseCheckout =
@@ -40,6 +41,9 @@ export function LicenseCheckoutModal({
   onClose: () => void;
 }) {
   const { formatTotal } = useMoney();
+  const t = useT();
+  const locale = useLocale();
+  const lp = useLocalePath();
   const [iterations, setIterations] = useState(POPULAR_LICENSE_PACK);
   const [durationDays, setDurationDays] = useState(30);
   const [deviceLimit, setDeviceLimit] = useState(
@@ -64,14 +68,14 @@ export function LicenseCheckoutModal({
   const payableTotal = (totalKopecks - appliedKopecks) / 100;
   const title =
     checkout.kind === 'stickers'
-      ? 'Пополнить код доступа'
+      ? t('Пополнить код доступа', 'Қолжетімділік кодын толықтыру')
       : checkout.kind === 'program_license'
         ? checkout.targetKey
-          ? 'Пополнить ключ «Подбора кодов»'
-          : 'Купить ключ «Подбора кодов»'
+          ? t('Пополнить ключ «Подбора кодов»', '«Кодтарды іріктеу» кілтін толықтыру')
+          : t('Купить ключ «Подбора кодов»', '«Кодтарды іріктеу» кілтін сатып алу')
         : checkout.targetKey
-          ? 'Продлить ключ «Печати ячеек»'
-          : 'Купить ключ «Печати ячеек»';
+          ? t('Продлить ключ «Печати ячеек»', '«Ұяшық басып шығару» кілтін ұзарту')
+          : t('Купить ключ «Печати ячеек»', '«Ұяшық басып шығару» кілтін сатып алу');
 
   const payment = useMutation({
     mutationFn: () => {
@@ -106,15 +110,15 @@ export function LicenseCheckoutModal({
       open
       onOpenChange={open => !open && onClose()}
       title={title}
-      description="После подтверждения откроется защищённая страница оплаты ЮKassa."
+      description={t('После подтверждения откроется защищённая страница оплаты ЮKassa.', 'Растағаннан кейін ЮKassa-ның қорғалған төлем беті ашылады.')}
     >
       <div className="stack">
         {checkout.kind === 'program_license' && (
-          <Field label="Количество итераций">
+          <Field label={t('Количество итераций', 'Итерациялар саны')}>
             <Select value={iterations} onChange={e => setIterations(Number(e.target.value))}>
               {LICENSE_PACK_LIST.map(pack => (
                 <option key={pack.quantity} value={pack.quantity}>
-                  {pack.quantity} {iterationWord(pack.quantity)} — {formatTotal(pack.total)}
+                  {pack.quantity} {iterationWord(pack.quantity, locale)} — {formatTotal(pack.total)}
                 </option>
               ))}
             </Select>
@@ -122,11 +126,11 @@ export function LicenseCheckoutModal({
         )}
 
         {checkout.kind === 'stickers' && (
-          <Field label="Количество генераций">
+          <Field label={t('Количество генераций', 'Генерациялар саны')}>
             <Select value={generations} onChange={e => setGenerations(Number(e.target.value))}>
               {HEADLINE_PACK_LIST.map(pack => (
                 <option key={pack.quantity} value={pack.quantity}>
-                  {pack.quantity} генераций — {formatTotal(pack.total)}
+                  {pack.quantity} {t('генераций', 'генерация')} — {formatTotal(pack.total)}
                 </option>
               ))}
             </Select>
@@ -135,7 +139,7 @@ export function LicenseCheckoutModal({
 
         {checkout.kind === 'cell_print_license' && (
           <>
-            <Field label="Для какого маркетплейса">
+            <Field label={t('Для какого маркетплейса', 'Қай маркетплейс үшін')}>
               <MarketplaceScopeToggle
                 value={marketplaceScope}
                 onChange={setMarketplaceScope}
@@ -143,19 +147,19 @@ export function LicenseCheckoutModal({
               />
             </Field>
             <div className="grid grid-2">
-              <Field label="Срок">
+              <Field label={t('Срок', 'Мерзімі')}>
                 <Select
                   value={durationDays}
                   onChange={e => setDurationDays(Number(e.target.value))}
                 >
                   {CELL_PRINT_DURATIONS.map(item => (
                     <option key={item.days} value={item.days}>
-                      {item.label}
+                      {locale === 'kk' ? item.labelKk : item.label}
                     </option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Количество компьютеров">
+              <Field label={t('Количество компьютеров', 'Компьютерлер саны')}>
                 <Select value={deviceLimit} onChange={e => setDeviceLimit(Number(e.target.value))}>
                   {CELL_PRINT_DEVICES.map(count => (
                     <option
@@ -169,7 +173,7 @@ export function LicenseCheckoutModal({
                 </Select>
               </Field>
             </div>
-            <Field label="Промокод (необязательно)">
+            <Field label={t('Промокод (необязательно)', 'Промокод (міндетті емес)')}>
               <Input
                 value={promoCode}
                 maxLength={32}
@@ -178,8 +182,10 @@ export function LicenseCheckoutModal({
             </Field>
             {checkout.targetKey && (
               <Alert tone="info">
-                Неиспользованные дни сохранятся. Новый срок добавится к текущему окончанию, а для
-                истёкшего ключа начнётся с момента оплаты.
+                {t(
+                  'Неиспользованные дни сохранятся. Новый срок добавится к текущему окончанию, а для истёкшего ключа начнётся с момента оплаты.',
+                  'Пайдаланылмаған күндер сақталады. Жаңа мерзім ағымдағы аяқталу күніне қосылады, ал мерзімі өткен кілт үшін төлем сәтінен басталады.',
+                )}
               </Alert>
             )}
           </>
@@ -187,45 +193,48 @@ export function LicenseCheckoutModal({
 
         {checkout.targetKey && (
           <p className="muted" style={{ margin: 0 }}>
-            {checkout.kind === 'stickers' ? 'Код останется прежним' : 'Ключ останется прежним'}:{' '}
+            {checkout.kind === 'stickers' ? t('Код останется прежним', 'Код бұрынғысынша қалады') : t('Ключ останется прежним', 'Кілт бұрынғысынша қалады')}:{' '}
             <strong className="mono">{checkout.targetKey}</strong>
           </p>
         )}
 
         <div className="row">
-          <span className="muted">К оплате</span>
+          <span className="muted">{t('К оплате', 'Төлеуге')}</span>
           <strong style={{ fontSize: 'var(--fs-24)' }}>{formatTotal(payableTotal)}</strong>
         </div>
 
         <Checkbox checked={accepted} onChange={e => setAccepted(e.target.checked)}>
-          Принимаю{' '}
-          <a className="accent" href="/offer" target="_blank" rel="noreferrer">
-            оферту
+          {t('Принимаю', 'Мен')}{' '}
+          <a className="accent" href={lp('/offer')} target="_blank" rel="noreferrer">
+            {t('оферту', 'офертаны')}
           </a>{' '}
-          и{' '}
-          <a className="accent" href="/privacy" target="_blank" rel="noreferrer">
-            политику конфиденциальности
+          {t('и', 'және')}{' '}
+          <a className="accent" href={lp('/privacy')} target="_blank" rel="noreferrer">
+            {t('политику конфиденциальности', 'құпиялылық саясатын')}
           </a>
+          {t('', ' қабылдаймын')}
         </Checkbox>
         {availableKopecks > 0 && (
           <Checkbox checked={useBalance} onChange={e => setUseBalance(e.target.checked)}>
-            Использовать реферальный баланс — доступно {formatRub(availableKopecks / 100)}
+            {t('Использовать реферальный баланс — доступно', 'Реферал балансын пайдалану — қолжетімді')} {formatRub(availableKopecks / 100)}
           </Checkbox>
         )}
         {useBalance && (
           <Alert tone="info">
-            Из реферального баланса спишется {formatRub(appliedKopecks / 100)}. К оплате останется{' '}
-            {formatRub(payableTotal)}.
+            {t(
+              `Из реферального баланса спишется ${formatRub(appliedKopecks / 100)}. К оплате останется ${formatRub(payableTotal)}.`,
+              `Реферал балансынан ${formatRub(appliedKopecks / 100)} есептен шығарылады. Төлеуге ${formatRub(payableTotal)} қалады.`,
+            )}
           </Alert>
         )}
         <RubChargeNote rub={payableTotal} />
         {payment.isError && <Alert tone="error">{payment.error.message}</Alert>}
         <div className="row">
           <Button disabled={!accepted} loading={payment.isPending} onClick={() => payment.mutate()}>
-            {payableTotal > 0 ? 'Перейти к оплате' : 'Оплатить балансом'}
+            {payableTotal > 0 ? t('Перейти к оплате', 'Төлемге өту') : t('Оплатить балансом', 'Баланспен төлеу')}
           </Button>
           <Button variant="secondary" onClick={onClose}>
-            Отмена
+            {t('Отмена', 'Болдырмау')}
           </Button>
         </div>
       </div>

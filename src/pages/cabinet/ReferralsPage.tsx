@@ -4,10 +4,12 @@ import { Alert, Badge, Button, Card, Field, Input, Stat, Table, useToast } from 
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { dateTime, money, useCabinet, useCabinetMutation } from '../../api/cabinet';
 import { useDocumentMeta } from '../../lib/seo';
+import { useT } from '../../i18n';
 import c from './cabinet.module.css';
 
 export function ReferralsPage() {
-  useDocumentMeta('Рефералы — кабинет');
+  const t = useT();
+  useDocumentMeta(t('Рефералы — кабинет', 'Рефералдар — кабинет'));
   const query = useCabinet();
   const toast = useToast();
   const [amount, setAmount] = useState('');
@@ -38,7 +40,7 @@ export function ReferralsPage() {
       {
         onSuccess: () => {
           setAmount('');
-          toast('Заявка отправлена', 'success');
+          toast(t('Заявка отправлена', 'Өтінім жіберілді'), 'success');
         },
       },
     );
@@ -46,22 +48,22 @@ export function ReferralsPage() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>Рефералы</h1>
-        <p>10% от денежной части всех успешных покупок приглашённых пользователей.</p>
+        <h1>{t('Рефералы', 'Рефералдар')}</h1>
+        <p>{t('10% от денежной части всех успешных покупок приглашённых пользователей.', 'Шақырылған пайдаланушылардың барлық сәтті сатып алуларының ақшалай бөлігінен 10%.')}</p>
       </header>
 
       <div className="grid grid-4">
         <Card>
-          <Stat value={r.invited} label="приглашено" icon={<Users size={20} />} />
+          <Stat value={r.invited} label={t('приглашено', 'шақырылды')} icon={<Users size={20} />} />
         </Card>
         <Card>
-          <Stat value={money(r.availableKopecks)} label="доступно к выводу" />
+          <Stat value={money(r.availableKopecks)} label={t('доступно к выводу', 'шығаруға қолжетімді')} />
         </Card>
         <Card>
-          <Stat value={money(r.earnedKopecks)} label="заработано всего" />
+          <Stat value={money(r.earnedKopecks)} label={t('заработано всего', 'барлығы табылды')} />
         </Card>
         <Card>
-          <Stat value={money(r.paidKopecks)} label="выплачено" />
+          <Stat value={money(r.paidKopecks)} label={t('выплачено', 'төленді')} />
         </Card>
       </div>
 
@@ -70,52 +72,52 @@ export function ReferralsPage() {
           при ненулевом «заработано» выглядели ошибкой. */}
       {r.reservedKopecks > 0 && (
         <Card className="section">
-          <Stat value={money(r.reservedKopecks)} label="в резерве" />
+          <Stat value={money(r.reservedKopecks)} label={t('в резерве', 'резервте')} />
           <p className={c.hint}>
-            Эти деньги удержаны под уже созданную заявку на выплату или под неоплаченный заказ, где
-            вы применили баланс. Они вернутся в «доступно», если заявку отклонят или заказ
-            отменится.
+            {t(
+              'Эти деньги удержаны под уже созданную заявку на выплату или под неоплаченный заказ, где вы применили баланс. Они вернутся в «доступно», если заявку отклонят или заказ отменится.',
+              'Бұл ақша жасалған төлем өтініміне немесе балансты қолданған төленбеген тапсырысқа ұсталған. Өтінім қабылданбаса немесе тапсырыстан бас тартылса, ол «қолжетімдіге» қайтарылады.',
+            )}
           </p>
         </Card>
       )}
 
       <Card className="section">
-        <Field label="Персональная ссылка">
+        <Field label={t('Персональная ссылка', 'Жеке сілтеме')}>
           <div className={c.refLink}>
             <Input value={r.link} readOnly />
             <Button
               variant="secondary"
               onClick={() => {
                 navigator.clipboard?.writeText(r.link);
-                toast('Ссылка скопирована', 'success');
+                toast(t('Ссылка скопирована', 'Сілтеме көшірілді'), 'success');
               }}
             >
               <Copy size={16} />
-              Копировать
+              {t('Копировать', 'Көшіру')}
             </Button>
           </div>
         </Field>
 
         <Alert tone="info">
-          Отправьте ссылку кому угодно: она открывает обычный сайт, где можно сразу создавать
-          стикеры и покупать пакеты. Приглашение запоминается в браузере человека на 30 дней и
-          закрепляется за вами в момент, когда он создаст аккаунт. После этого вы получаете 10% от
-          каждой его оплаты. Приглашение не сработает, если у человека уже есть аккаунт или он
-          зарегистрируется позже 30 дней.
+          {t(
+            'Отправьте ссылку кому угодно: она открывает обычный сайт, где можно сразу создавать стикеры и покупать пакеты. Приглашение запоминается в браузере человека на 30 дней и закрепляется за вами в момент, когда он создаст аккаунт. После этого вы получаете 10% от каждой его оплаты. Приглашение не сработает, если у человека уже есть аккаунт или он зарегистрируется позже 30 дней.',
+            'Сілтемені кез келген адамға жіберіңіз: ол бірден стикер жасауға және пакет сатып алуға болатын кәдімгі сайтты ашады. Шақыру адамның браузерінде 30 күн сақталады және ол аккаунт жасаған сәтте сізге бекітіледі. Содан кейін сіз оның әр төлемінен 10% аласыз. Адамның аккаунты бұрыннан болса немесе ол 30 күннен кейін тіркелсе, шақыру жұмыс істемейді.',
+          )}
         </Alert>
       </Card>
 
       <Card className="section">
-        <h2>Приглашённые пользователи</h2>
+        <h2>{t('Приглашённые пользователи', 'Шақырылған пайдаланушылар')}</h2>
         {referrals.length ? (
           <Table>
             <thead>
               <tr>
-                <th>Реферал</th>
-                <th>Дата приглашения</th>
-                <th>Покупки</th>
-                <th>Сумма покупок</th>
-                <th>Заработано</th>
+                <th>{t('Реферал', 'Реферал')}</th>
+                <th>{t('Дата приглашения', 'Шақыру күні')}</th>
+                <th>{t('Покупки', 'Сатып алулар')}</th>
+                <th>{t('Сумма покупок', 'Сатып алулар сомасы')}</th>
+                <th>{t('Заработано', 'Табылды')}</th>
               </tr>
             </thead>
             <tbody>
@@ -131,15 +133,15 @@ export function ReferralsPage() {
             </tbody>
           </Table>
         ) : (
-          <p className="muted">Приглашённых пользователей пока нет.</p>
+          <p className="muted">{t('Приглашённых пользователей пока нет.', 'Әзірге шақырылған пайдаланушылар жоқ.')}</p>
         )}
       </Card>
 
       <div className="grid grid-2 section">
         <Card>
-          <h2>Запросить выплату</h2>
+          <h2>{t('Запросить выплату', 'Төлемді сұрау')}</h2>
           <div className="stack">
-            <Field label="Сумма, ₽" help="Минимум 500 ₽">
+            <Field label={t('Сумма, ₽', 'Сомасы, ₽')} help={t('Минимум 500 ₽', 'Кемінде 500 ₽')}>
               <Input
                 type="number"
                 min="500"
@@ -147,10 +149,10 @@ export function ReferralsPage() {
                 onChange={e => setAmount(e.target.value)}
               />
             </Field>
-            <Field label="Телефон СБП">
+            <Field label={t('Телефон СБП', 'СБП телефоны')}>
               <Input value={phone} onChange={e => setPhone(e.target.value)} />
             </Field>
-            <Field label="Банк">
+            <Field label={t('Банк', 'Банк')}>
               <Input value={bank} onChange={e => setBank(e.target.value)} />
             </Field>
             <Button
@@ -158,21 +160,21 @@ export function ReferralsPage() {
               loading={withdraw.isPending}
               onClick={submit}
             >
-              Создать заявку
+              {t('Создать заявку', 'Өтінім жасау')}
             </Button>
             {withdraw.isError && <Alert tone="error">{withdraw.error.message}</Alert>}
           </div>
         </Card>
 
         <Card>
-          <h2>Заявки</h2>
+          <h2>{t('Заявки', 'Өтінімдер')}</h2>
           {r.withdrawals.length ? (
             <Table>
               <thead>
                 <tr>
-                  <th>Дата</th>
-                  <th>Сумма</th>
-                  <th>Статус</th>
+                  <th>{t('Дата', 'Күні')}</th>
+                  <th>{t('Сумма', 'Сомасы')}</th>
+                  <th>{t('Статус', 'Мәртебесі')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,7 +190,7 @@ export function ReferralsPage() {
               </tbody>
             </Table>
           ) : (
-            <p className="muted">Заявок пока нет.</p>
+            <p className="muted">{t('Заявок пока нет.', 'Әзірге өтінімдер жоқ.')}</p>
           )}
         </Card>
       </div>

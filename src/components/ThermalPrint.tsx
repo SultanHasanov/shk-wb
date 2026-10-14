@@ -12,6 +12,7 @@ import {
   type ThermalSizeValue,
 } from '../lib/thermal-print';
 import { niimbotSupported, printOnNiimbot } from '../lib/niimbot';
+import { useT } from '../i18n';
 import s from './ThermalPrint.module.css';
 
 /** Ключ тот же, что в старом js/app.js: у постоянных клиентов размер подхватится. */
@@ -48,6 +49,7 @@ export function ThermalPrint({
   kind: 'product' | 'box';
   defaultSize?: string;
 }) {
+  const t = useT();
   const [sizeValue, setSizeValue] = useState<ThermalSizeValue>(() => {
     const saved = readSaved().size;
     if (saved && isSize(saved)) return saved;
@@ -79,15 +81,26 @@ export function ThermalPrint({
   const warning = 'error' in parsed ? '' : widthWarning(parsed, model);
   const blocked = Boolean(sizeError || warning) || !imageUrls.length;
 
+  const sizeLabel = (item: { value: string; label: string }) =>
+    item.value === 'custom' ? t('Свой размер', 'Өз өлшеміңіз') : item.label.replace('мм', t('мм', 'мм'));
+  const modelLabel = (item: { value: string; label: string }) =>
+    item.value === 'other' ? t('Другой принтер', 'Басқа принтер') : item.label.replace('до', t('до', 'дейін'));
+  // Тексты проверки размера приходят из lib/thermal-print.ts по-русски.
+  const sizeHint = sizeError
+    ? t(sizeError, 'Енді және биіктікті рұқсат етілген шектерде көрсетіңіз.')
+    : warning
+      ? t(warning, 'Заттаңба ені осы модельдің шегінен асады. Кішірек өлшемді таңдаңыз.')
+      : '';
+
   async function onThermal() {
     if ('error' in parsed || blocked) return;
     setFailed(false);
     try {
       await printLabels(imageUrls, parsed, DESIGN_HEIGHT[kind]);
-      setStatus(`Открыто окно печати: ${parsed.width} × ${parsed.height} мм.`);
+      setStatus(t(`Открыто окно печати: ${parsed.width} × ${parsed.height} мм.`, `Басып шығару терезесі ашылды: ${parsed.width} × ${parsed.height} мм.`));
     } catch (error) {
       setFailed(true);
-      setStatus(error instanceof Error ? error.message : 'Не удалось открыть окно печати.');
+      setStatus(error instanceof Error ? error.message : t('Не удалось открыть окно печати.', 'Басып шығару терезесін ашу мүмкін болмады.'));
     }
   }
 
@@ -96,12 +109,12 @@ export function ThermalPrint({
     setNiimbotBusy(true);
     try {
       await printOnNiimbot(imageUrls, (current, total) =>
-        setStatus(`Печать ${current} из ${total}…`),
+        setStatus(t(`Печать ${current} из ${total}…`, `Басып шығару: ${total} ішінен ${current}…`)),
       );
-      setStatus('Все этикетки отправлены на NIIMBOT.');
+      setStatus(t('Все этикетки отправлены на NIIMBOT.', 'Барлық заттаңбалар NIIMBOT-қа жіберілді.'));
     } catch (error) {
       setFailed(true);
-      setStatus(error instanceof Error ? error.message : 'Ошибка печати на NIIMBOT.');
+      setStatus(error instanceof Error ? error.message : t('Ошибка печати на NIIMBOT.', 'NIIMBOT-та басып шығару қатесі.'));
     } finally {
       setNiimbotBusy(false);
     }
@@ -110,18 +123,20 @@ export function ThermalPrint({
   return (
     <div className={s.block}>
       <div>
-        <strong>Печать по одной этикетке</strong>
+        <strong>{t('Печать по одной этикетке', 'Заттаңбаларды бір-бірден басу')}</strong>
         <p className={s.help}>
-          Каждая этикетка печатается на отдельной странице размером с саму этикетку — для
-          термопринтера с рулоном.
+          {t(
+            'Каждая этикетка печатается на отдельной странице размером с саму этикетку — для термопринтера с рулоном.',
+            'Әр заттаңба өз өлшеміндей бөлек бетке басылады — орамды термопринтер үшін.',
+          )}
         </p>
       </div>
 
-      <Field label="Размер этикетки">
+      <Field label={t('Размер этикетки', 'Заттаңба өлшемі')}>
         <Select value={sizeValue} onChange={e => setSizeValue(e.target.value as ThermalSizeValue)}>
           {THERMAL_SIZES.map(item => (
             <option key={item.value} value={item.value}>
-              {item.label}
+              {sizeLabel(item)}
             </option>
           ))}
         </Select>
@@ -129,7 +144,7 @@ export function ThermalPrint({
 
       {sizeValue === 'custom' && (
         <div className={s.custom}>
-          <Field label="Ширина, мм">
+          <Field label={t('Ширина, мм', 'Ені, мм')}>
             <Input
               inputMode="decimal"
               value={customWidth}
@@ -139,7 +154,7 @@ export function ThermalPrint({
           <span className={s.separator} aria-hidden="true">
             ×
           </span>
-          <Field label="Высота, мм">
+          <Field label={t('Высота, мм', 'Биіктігі, мм')}>
             <Input
               inputMode="decimal"
               value={customHeight}
@@ -149,32 +164,34 @@ export function ThermalPrint({
         </div>
       )}
 
-      <Field label="Модель для проверки ширины">
+      <Field label={t('Модель для проверки ширины', 'Енді тексеруге арналған модель')}>
         <Select value={model} onChange={e => setModel(e.target.value as PrinterModelValue)}>
           {PRINTER_MODELS.map(item => (
             <option key={item.value} value={item.value}>
-              {item.label}
+              {modelLabel(item)}
             </option>
           ))}
         </Select>
       </Field>
 
-      {(sizeError || warning) && <Alert tone="warning">{sizeError || warning}</Alert>}
+      {sizeHint && <Alert tone="warning">{sizeHint}</Alert>}
 
       <p className={s.help}>
-        В окне печати выберите термопринтер, масштаб 100%, поля «Нет», отключите колонтитулы и
-        укажите такой же размер бумаги в драйвере.
+        {t(
+          'В окне печати выберите термопринтер, масштаб 100%, поля «Нет», отключите колонтитулы и укажите такой же размер бумаги в драйвере.',
+          'Басып шығару терезесінде термопринтерді, 100% масштабты, «Жоқ» жиектерін таңдаңыз, колонтитулдарды өшіріп, драйверде қағаздың дәл осындай өлшемін көрсетіңіз.',
+        )}
       </p>
 
       <div className={s.actions}>
         <Button onClick={onThermal} disabled={blocked}>
           <Printer size={18} />
-          Печать на термопринтере
+          {t('Печать на термопринтере', 'Термопринтерде басу')}
         </Button>
         {niimbotSupported() && (
           <Button variant="secondary" onClick={onNiimbot} loading={niimbotBusy} disabled={!imageUrls.length}>
             <Bluetooth size={18} />
-            Печать на NIIMBOT
+            {t('Печать на NIIMBOT', 'NIIMBOT-та басу')}
           </Button>
         )}
       </div>

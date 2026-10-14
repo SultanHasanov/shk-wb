@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { observer } from 'mobx-react-lite';
 import { useStores } from '../stores/root-store';
+import { useT } from '../i18n';
 
 /**
  * Заглушка доступа поверх мок-авторизации: раньше /cabinet открывался кому угодно
@@ -13,11 +14,12 @@ import { useStores } from '../stores/root-store';
 export const RequireAuth = observer(() => {
   const { auth } = useStores();
   const location = useLocation();
+  const t = useT();
 
   if (auth.status === 'initializing') {
     return (
       <div role="status" aria-live="polite" style={{ padding: '2rem', textAlign: 'center' }}>
-        Проверяем сессию…
+        {t('Проверяем сессию…', 'Сессияны тексеріп жатырмыз…')}
       </div>
     );
   }

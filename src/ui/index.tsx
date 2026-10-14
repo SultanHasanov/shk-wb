@@ -37,6 +37,7 @@ import {
   X,
 } from 'lucide-react';
 import s from './ui.module.css';
+import { useT } from '../i18n';
 
 /* ============ Spinner ============ */
 
@@ -446,23 +447,24 @@ export function Pagination({
   pages: number;
   onChange: (page: number) => void;
 }) {
+  const t = useT();
   if (pages <= 1) return null;
 
   return (
-    <nav className={s.pagination} aria-label="Постраничная навигация">
+    <nav className={s.pagination} aria-label={t('Постраничная навигация', 'Беттер бойынша навигация')}>
       <Button
         variant="ghost"
         size="sm"
         disabled={page <= 1}
         onClick={() => onChange(page - 1)}
-        aria-label="Предыдущая страница"
+        aria-label={t('Предыдущая страница', 'Алдыңғы бет')}
       >
         <ChevronLeft size={16} />
-        Назад
+        {t('Назад', 'Артқа')}
       </Button>
 
       <span className={s.paginationInfo} aria-live="polite">
-        Страница {page} из {pages}
+        {t(`Страница ${page} из ${pages}`, `${pages} ішінен ${page}-бет`)}
       </span>
 
       <Button
@@ -470,9 +472,9 @@ export function Pagination({
         size="sm"
         disabled={page >= pages}
         onClick={() => onChange(page + 1)}
-        aria-label="Следующая страница"
+        aria-label={t('Следующая страница', 'Келесі бет')}
       >
-        Вперёд
+        {t('Вперёд', 'Алға')}
         <ChevronRight size={16} />
       </Button>
     </nav>
@@ -512,12 +514,13 @@ export function PriceTable({
   head: readonly string[];
   rows: ReadonlyArray<{ label: string; cells: readonly PriceCell[] }>;
 }) {
+  const t = useT();
   return (
     <Table className={s.priceTable}>
       {caption && <caption className={s.priceCaption}>{caption}</caption>}
       <thead>
         <tr>
-          <th scope="col">Период</th>
+          <th scope="col">{t('Период', 'Кезең')}</th>
           {head.map(h => (
             <th key={h} scope="col">
               {h}
@@ -671,8 +674,8 @@ export function Skeleton({ width = '100%', height = 18 }: { width?: string; heig
 /* ============ EmptyState ============ */
 
 export function EmptyState({
-  title = 'Данных пока нет',
-  text = 'Здесь появятся данные после первого действия.',
+  title,
+  text,
   icon,
   action,
 }: {
@@ -681,11 +684,12 @@ export function EmptyState({
   icon?: ReactNode;
   action?: ReactNode;
 }) {
+  const t = useT();
   return (
     <div className={s.empty}>
       <div className={s.emptyIcon}>{icon ?? <Inbox size={26} />}</div>
-      <strong>{title}</strong>
-      <p>{text}</p>
+      <strong>{title ?? t('Данных пока нет', 'Әзірге деректер жоқ')}</strong>
+      <p>{text ?? t('Здесь появятся данные после первого действия.', 'Деректер алғашқы әрекеттен кейін осында пайда болады.')}</p>
       {action}
     </div>
   );
@@ -727,6 +731,7 @@ export function Modal({
   description?: string;
   children: ReactNode;
 }) {
+  const t = useT();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -737,9 +742,9 @@ export function Modal({
           </Dialog.Title>
           {/* Без Description Radix пишет предупреждение о доступности в консоль */}
           <Dialog.Description className={s.dialogDesc}>
-            {description ?? `Диалог «${title}».`}
+            {description ?? t(`Диалог «${title}».`, `«${title}» диалогы.`)}
           </Dialog.Description>
-          <Dialog.Close className={s.dialogClose} aria-label="Закрыть">
+          <Dialog.Close className={s.dialogClose} aria-label={t('Закрыть', 'Жабу')}>
             <X size={20} />
           </Dialog.Close>
           {children}

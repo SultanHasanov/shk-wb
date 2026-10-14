@@ -20,6 +20,7 @@ import { dateTime, useCabinet, useCabinetMutation, useHistory } from '../../api/
 import { apiBlob } from '../../api/client';
 import type { GenerationEntry } from '../../api/cabinet';
 import { useDocumentMeta } from '../../lib/seo';
+import { useT } from '../../i18n';
 import s from './HistoryPage.module.css';
 
 type Filter = 'all' | 'product' | 'box';
@@ -35,6 +36,7 @@ function entryCodes(entry: GenerationEntry): string[] {
  * здесь же видно, что уже выведено на бумагу, и можно допечатать остаток.
  */
 function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () => void }) {
+  const t = useT();
   const [columns, setColumns] = useState(4);
   const [onlyUnprinted, setOnlyUnprinted] = useState(true);
   const [count, setCount] = useState<number | ''>('');
@@ -88,7 +90,7 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
       remember();
     } catch (error) {
       printWindow?.close();
-      setFileError(error instanceof Error ? error.message : 'Не удалось подготовить PDF');
+      setFileError(error instanceof Error ? error.message : t('Не удалось подготовить PDF', 'PDF дайындау мүмкін болмады'));
     } finally {
       setFilePending(false);
     }
@@ -98,20 +100,20 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
     <Modal
       open
       onOpenChange={open => !open && onClose()}
-      title="Печать пачки"
-      description="Выберите раскладку листа и сколько стикеров вывести."
+      title={t('Печать пачки', 'Буманы басып шығару')}
+      description={t('Выберите раскладку листа и сколько стикеров вывести.', 'Парақ орналасуын және қанша стикер шығаруды таңдаңыз.')}
     >
       <div className="stack">
         <div className="row">
-          <span className="muted">В пачке {codes.length}</span>
-          <span className="muted">Напечатано {printed.size}</span>
-          <strong>К печати сейчас: {chosen.length}</strong>
+          <span className="muted">{t(`В пачке ${codes.length}`, `Бумада ${codes.length}`)}</span>
+          <span className="muted">{t(`Напечатано ${printed.size}`, `Басылды ${printed.size}`)}</span>
+          <strong>{t(`К печати сейчас: ${chosen.length}`, `Қазір басуға: ${chosen.length}`)}</strong>
         </div>
 
         {entry.mode === 'range' && (
           <>
             <Segmented
-              label="Количество колонок на листе"
+              label={t('Количество колонок на листе', 'Парақтағы бағандар саны')}
               value={String(columns)}
               onChange={value => setColumns(Number(value))}
               options={[
@@ -123,7 +125,7 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
               ]}
             />
             <p className="muted">
-              Выберите, сколько QR-кодов или стикеров должно помещаться в одной строке листа A4.
+              {t('Выберите, сколько QR-кодов или стикеров должно помещаться в одной строке листа A4.', 'A4 парағының бір жолына қанша QR-код немесе стикер сыю керектігін таңдаңыз.')}
             </p>
           </>
         )}
@@ -133,15 +135,15 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
           onChange={e => setOnlyUnprinted(e.target.checked)}
           id="history-only-unprinted"
         >
-          Только те, что ещё не печатались
+          {t('Только те, что ещё не печатались', 'Тек әлі басылмағандары')}
         </Checkbox>
 
-        <Field label="Сколько напечатать" help={`Доступно ${pool.length}. Пусто — все.`}>
+        <Field label={t('Сколько напечатать', 'Қанша басып шығару')} help={t(`Доступно ${pool.length}. Пусто — все.`, `Қолжетімді ${pool.length}. Бос болса — барлығы.`)}>
           <Input
             type="number"
             min={1}
             max={pool.length}
-            placeholder={`Все ${pool.length}`}
+            placeholder={t(`Все ${pool.length}`, `Барлығы ${pool.length}`)}
             value={count}
             onChange={e => setCount(e.target.value === '' ? '' : Number(e.target.value))}
           />
@@ -149,7 +151,7 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
 
         {!chosen.length && (
           <Alert tone="info">
-            Вся пачка уже напечатана. Снимите галочку, чтобы напечатать повторно.
+            {t('Вся пачка уже напечатана. Снимите галочку, чтобы напечатать повторно.', 'Бүкіл бума басылып қойған. Қайта басу үшін белгіні алып тастаңыз.')}
           </Alert>
         )}
 
@@ -158,15 +160,15 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
             {entry.batchId ? <a href={url(false)} download onClick={remember}>
               <Button>
                 <Download size={18} />
-                Скачать PDF
+                {t('Скачать PDF', 'PDF жүктеп алу')}
               </Button>
-            </a> : <Button disabled={filePending} onClick={() => openHistoryPdf(false)}><Download size={18} />Скачать PDF</Button>}
+            </a> : <Button disabled={filePending} onClick={() => openHistoryPdf(false)}><Download size={18} />{t('Скачать PDF', 'PDF жүктеп алу')}</Button>}
             {entry.batchId ? <a href={url(true)} target="_blank" rel="noopener noreferrer" onClick={remember}>
               <Button variant="secondary">
                 <Printer size={18} />
-                Печать
+                {t('Печать', 'Басып шығару')}
               </Button>
-            </a> : <Button variant="secondary" disabled={filePending} onClick={() => openHistoryPdf(true)}><Printer size={18} />Печать</Button>}
+            </a> : <Button variant="secondary" disabled={filePending} onClick={() => openHistoryPdf(true)}><Printer size={18} />{t('Печать', 'Басып шығару')}</Button>}
           </div>
         )}
 
@@ -178,6 +180,7 @@ function PrintDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () =
 }
 
 function PreviewDialog({ entry, onClose }: { entry: GenerationEntry; onClose: () => void }) {
+  const t = useT();
   const codes = entryCodes(entry);
   const [visible, setVisible] = useState(Math.min(4, codes.length));
   const imageUrl = (code: string) => {
@@ -192,7 +195,7 @@ function PreviewDialog({ entry, onClose }: { entry: GenerationEntry; onClose: ()
   };
 
   return (
-    <Modal open onOpenChange={open => !open && onClose()} title="Готовые QR-коды">
+    <Modal open onOpenChange={open => !open && onClose()} title={t('Готовые QR-коды', 'Дайын QR-кодтар')}>
       <div className="stack">
         <div className={s.previewGrid}>
           {codes.slice(0, visible).map(code => (
@@ -206,13 +209,13 @@ function PreviewDialog({ entry, onClose }: { entry: GenerationEntry; onClose: ()
           {visible < codes.length && (
             <>
               <Button variant="secondary" onClick={() => setVisible(Math.min(visible + 4, codes.length))}>
-                Показать ещё 4
+                {t('Показать ещё 4', 'Тағы 4 көрсету')}
               </Button>
-              <Button variant="ghost" onClick={() => setVisible(codes.length)}>Показать все</Button>
+              <Button variant="ghost" onClick={() => setVisible(codes.length)}>{t('Показать все', 'Барлығын көрсету')}</Button>
             </>
           )}
-          <Button variant="ghost" onClick={onClose}>Свернуть</Button>
-          <span className="muted">Показано {visible} из {codes.length}</span>
+          <Button variant="ghost" onClick={onClose}>{t('Свернуть', 'Жию')}</Button>
+          <span className="muted">{t(`Показано ${visible} из ${codes.length}`, `${codes.length} ішінен ${visible} көрсетілді`)}</span>
         </div>
       </div>
     </Modal>
@@ -235,11 +238,12 @@ function HistoryPreviewImage({ src, code, authenticated }: { src: string; code: 
       if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
   }, [authenticated, src]);
-  return <img src={authenticated ? objectUrl : src} alt={`QR-код ${code}`} loading="lazy" />;
+  return <img src={authenticated ? objectUrl : src} alt={`QR ${code}`} loading="lazy" />;
 }
 
 export function HistoryPage() {
-  useDocumentMeta('История генераций — кабинет');
+  const t = useT();
+  useDocumentMeta(t('История генераций — кабинет', 'Генерациялар тарихы — кабинет'));
   const [filter, setFilter] = useState<Filter>('all');
   const [printing, setPrinting] = useState<GenerationEntry | null>(null);
   const [previewing, setPreviewing] = useState<GenerationEntry | null>(null);
@@ -268,8 +272,8 @@ export function HistoryPage() {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>История генераций</h1>
-        <p>Серверная история доступна на всех ваших устройствах.</p>
+        <h1>{t('История генераций', 'Генерациялар тарихы')}</h1>
+        <p>{t('Серверная история доступна на всех ваших устройствах.', 'Сервердегі тарих барлық құрылғыларыңызда қолжетімді.')}</p>
       </header>
 
       {Boolean(
@@ -279,26 +283,26 @@ export function HistoryPage() {
       ) && (
         <Alert tone="info">
           <div className="row">
-            <span>Перенесено локальных записей: {imported?.historyImportedCount}.</span>
+            <span>{t('Перенесено локальных записей:', 'Ауыстырылған жергілікті жазбалар:')} {imported?.historyImportedCount}.</span>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => dismiss.mutate({ dismissImportNotice: true })}
             >
-              Скрыть
+              {t('Скрыть', 'Жасыру')}
             </Button>
           </div>
         </Alert>
       )}
 
       <Tabs
-        label="Тип стикера"
+        label={t('Тип стикера', 'Стикер түрі')}
         value={filter}
         onChange={setFilter}
         items={[
-          { value: 'all', label: 'Все' },
-          { value: 'product', label: 'Товары' },
-          { value: 'box', label: 'QR коробок' },
+          { value: 'all', label: t('Все', 'Барлығы') },
+          { value: 'product', label: t('Товары', 'Тауарлар') },
+          { value: 'box', label: t('QR коробок', 'Қорап QR-кодтары') },
         ]}
       />
 
@@ -307,12 +311,12 @@ export function HistoryPage() {
           <Table>
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Тип</th>
-                <th>Режим</th>
-                <th>Количество</th>
-                <th>Номера</th>
-                <th>Напечатано</th>
+                <th>{t('Дата', 'Күні')}</th>
+                <th>{t('Тип', 'Түрі')}</th>
+                <th>{t('Режим', 'Режим')}</th>
+                <th>{t('Количество', 'Саны')}</th>
+                <th>{t('Номера', 'Нөмірлер')}</th>
+                <th>{t('Напечатано', 'Басылды')}</th>
                 <th />
               </tr>
             </thead>
@@ -327,18 +331,18 @@ export function HistoryPage() {
                     <td>{dateTime(g.createdAt)}</td>
                     <td>
                       <Badge tone={g.category === 'box' ? 'accent' : 'default'}>
-                        {g.category === 'box' ? 'QR коробок' : 'Товары'}
+                        {g.category === 'box' ? t('QR коробок', 'Қорап QR-кодтары') : t('Товары', 'Тауарлар')}
                       </Badge>
                     </td>
-                    <td>{g.customJobId ? `Свой список · пачка ${(g.customJobPart ?? 0) + 1}` : g.mode === 'range' ? 'Массово' : 'По номеру'}</td>
-                    <td>{g.customJob ? <><strong>{g.quantity}</strong><div className="muted">Всего: {g.customJob.generated} из {g.customJob.total}, осталось {g.customJob.remaining}</div></> : g.quantity}</td>
+                    <td>{g.customJobId ? t(`Свой список · пачка ${(g.customJobPart ?? 0) + 1}`, `Өз тізім · ${(g.customJobPart ?? 0) + 1}-бума`) : g.mode === 'range' ? t('Массово', 'Көптеп') : t('По номеру', 'Нөмір бойынша')}</td>
+                    <td>{g.customJob ? <><strong>{g.quantity}</strong><div className="muted">{t(`Всего: ${g.customJob.generated} из ${g.customJob.total}, осталось ${g.customJob.remaining}`, `Барлығы: ${g.customJob.total} ішінен ${g.customJob.generated}, ${g.customJob.remaining} қалды`)}</div></> : g.quantity}</td>
                     <td className="mono">
                       {g.code || g.codes?.slice(0, 2).join(' — ') || g.batchId || '—'}
                     </td>
                     <td>
                       {codes.length ? (
                         <Badge tone={printedCount >= codes.length ? 'success' : 'default'}>
-                          {printedCount} из {codes.length}
+                          {t(`${printedCount} из ${codes.length}`, `${codes.length} ішінен ${printedCount}`)}
                         </Badge>
                       ) : (
                         '—'
@@ -348,11 +352,11 @@ export function HistoryPage() {
                       <div className="row">
                         <Button size="sm" variant="secondary" disabled={!codes.length} onClick={() => setPreviewing(g)}>
                           <QrCode size={16} />
-                          Посмотреть QR
+                          {t('Посмотреть QR', 'QR қарау')}
                         </Button>
                         <Button size="sm" variant="secondary" disabled={!codes.length} onClick={() => setPrinting(g)}>
                           <Printer size={16} />
-                          Печать
+                          {t('Печать', 'Басып шығару')}
                         </Button>
                       </div>
                     </td>
@@ -365,11 +369,11 @@ export function HistoryPage() {
           <Card>
             <EmptyState
               icon={<FileClock />}
-              title="Здесь пока пусто"
-              text="Новые генерации появятся здесь автоматически."
+              title={t('Здесь пока пусто', 'Мұнда әзірге бос')}
+              text={t('Новые генерации появятся здесь автоматически.', 'Жаңа генерациялар осында автоматты түрде пайда болады.')}
               action={
                 <Link to="/cabinet/generator">
-                  <Button>Открыть генератор</Button>
+                  <Button>{t('Открыть генератор', 'Генераторды ашу')}</Button>
                 </Link>
               }
             />

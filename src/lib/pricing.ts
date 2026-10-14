@@ -55,11 +55,11 @@ export const CELL_PRINT_PRICES: Readonly<Record<number, Readonly<Record<number, 
 /** Сроки в том же порядке, что в таблице цен. 180 дней в старом селекте не было,
  *  хотя тариф существует и на сервере, и в прайсе старой страницы. */
 export const CELL_PRINT_DURATIONS = [
-  { days: 7, label: '1 неделя' },
-  { days: 30, label: '1 месяц' },
-  { days: 90, label: '3 месяца' },
-  { days: 180, label: '6 месяцев' },
-  { days: 365, label: '1 год' },
+  { days: 7, label: '1 неделя', labelKk: '1 апта' },
+  { days: 30, label: '1 месяц', labelKk: '1 ай' },
+  { days: 90, label: '3 месяца', labelKk: '3 ай' },
+  { days: 180, label: '6 месяцев', labelKk: '6 ай' },
+  { days: 365, label: '1 год', labelKk: '1 жыл' },
 ] as const;
 
 export const CELL_PRINT_DEVICES = [1, 2, 3, 5, 10, 20] as const;
@@ -72,8 +72,10 @@ export const CELL_PRINT_SCOPE_OPTIONS: readonly { value: CellPrintMarketplaceSco
   { value: 'both', label: 'WB + Ozon −10%' },
 ];
 
-/** Склонение «компьютер / компьютера / компьютеров». */
-export function computerWord(count: number): string {
+/** Склонение «компьютер / компьютера / компьютеров». В казахском после
+ *  числа существительное не меняется: «3 компьютер». */
+export function computerWord(count: number, locale: 'ru' | 'kk' = 'ru'): string {
+  if (locale === 'kk') return 'компьютер';
   const mod100 = count % 100;
   if (mod100 >= 11 && mod100 <= 14) return 'компьютеров';
   const mod10 = count % 10;
@@ -132,8 +134,9 @@ export const LICENSE_PACK_LIST: readonly Pack[] = Object.keys(LICENSE_PRICES)
   .sort((a, b) => a - b)
   .map(getLicensePack);
 
-/** Склонение «итерация / итерации / итераций». */
-export function iterationWord(count: number): string {
+/** Склонение «итерация / итерации / итераций». По-казахски — «итерация» при любом числе. */
+export function iterationWord(count: number, locale: 'ru' | 'kk' = 'ru'): string {
+  if (locale === 'kk') return 'итерация';
   const mod100 = count % 100;
   if (mod100 >= 11 && mod100 <= 14) return 'итераций';
   const mod10 = count % 10;

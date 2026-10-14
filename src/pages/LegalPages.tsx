@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Hero } from '../components/Hero';
 import { useDocumentMeta } from '../lib/seo';
+import { Alert } from '../ui';
+import { useLocale, useLocalePath, useT } from '../i18n';
 import s from './LegalPages.module.css';
 
 /**
@@ -20,21 +22,32 @@ function LegalLayout({
   intro: string;
   children: ReactNode;
 }) {
+  const t = useT();
+  const lp = useLocalePath();
+  const locale = useLocale();
   return (
     <>
-      <Hero compact eyebrow="Документы" title={title} copy={intro} />
+      <Hero compact eyebrow={t('Документы', 'Құжаттар')} title={title} copy={intro} />
       <div className="page">
         <article className={s.doc}>
+          {/* Юридически действует одна редакция — русская. Переводить договор без
+              юриста опаснее, чем честно показать оригинал. */}
+          {locale === 'kk' && (
+            <Alert tone="info">
+              Құжаттың ресми мәтіні орыс тілінде жарияланған және тек сол редакция заңды күшке ие.
+              Сұрақтарыңыз болса, қазақ тілінде жаза беріңіз — түсіндіріп береміз.
+            </Alert>
+          )}
           <p className={s.updated}>Редакция от {updated}</p>
           {children}
 
           <hr className={s.rule} />
           <p className={s.footer}>
-            Вопросы по документу — через{' '}
-            <Link className="accent" to="/contacts">
-              форму обращения
+            {t('Вопросы по документу — через', 'Құжат бойынша сұрақтар —')}{' '}
+            <Link className="accent" to={lp('/contacts')}>
+              {t('форму обращения', 'өтініш формасы')}
             </Link>{' '}
-            или в Telegram{' '}
+            {t('или в Telegram', 'немесе Telegram арқылы')}{' '}
             <a
               className="accent"
               href="https://t.me/roma_denosov"

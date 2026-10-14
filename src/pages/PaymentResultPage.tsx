@@ -12,6 +12,7 @@ import { useDocumentMeta } from '../lib/seo';
 import { BOT_URL, SUPPORT_URL, SUPPORT_USERNAME } from '../lib/telegram';
 import { cabinetKey } from '../api/cabinet';
 import { forgetPendingOrder } from '../lib/pending-orders';
+import { type Text, useLocale, useLocalePath, useT } from '../i18n';
 import s from './PaymentResultPage.module.css';
 
 type Order = {
@@ -29,18 +30,19 @@ type Order = {
   downloadUrl?: string | null;
 };
 
-const PRODUCT_NAMES: Record<string, string> = {
-  stickers: 'Пакет генераций',
-  program: 'Программа «Подбор кодов»',
-  program_license: 'Итерации «Подбора кодов»',
-  cell_print_license: 'Ключ «Печати ячеек»',
-  cell_print_program: 'Пробный доступ «Печати ячеек»',
-  cell_print_bundle: 'Программа и ключ «Печати ячеек»',
+const PRODUCT_NAMES: Record<string, Text> = {
+  stickers: { ru: 'Пакет генераций', kk: 'Генерация пакеті' },
+  program: { ru: 'Программа «Подбор кодов»', kk: '«Кодтарды іріктеу» бағдарламасы' },
+  program_license: { ru: 'Итерации «Подбора кодов»', kk: '«Кодтарды іріктеу» итерациялары' },
+  cell_print_license: { ru: 'Ключ «Печати ячеек»', kk: '«Ұяшық басып шығару» кілті' },
+  cell_print_program: { ru: 'Пробный доступ «Печати ячеек»', kk: '«Ұяшық басып шығару» сынақ қолжетімділігі' },
+  cell_print_bundle: { ru: 'Программа и ключ «Печати ячеек»', kk: '«Ұяшық басып шығару» бағдарламасы мен кілті' },
 };
 
 /** Строка с кодом или ключом и кнопкой копирования. */
 function SecretRow({ label, value }: { label: string; value: string }) {
   const toast = useToast();
+  const t = useT();
 
   return (
     <div className={s.secret}>
@@ -52,20 +54,23 @@ function SecretRow({ label, value }: { label: string; value: string }) {
         variant="secondary"
         onClick={() => {
           navigator.clipboard?.writeText(value);
-          toast('Скопировано', 'success');
+          toast(t('Скопировано', 'Көшірілді'), 'success');
         }}
       >
         <Copy size={16} />
-        Копировать
+        {t('Копировать', 'Көшіру')}
       </Button>
     </div>
   );
 }
 
 export const PaymentResultPage = observer(() => {
+  const t = useT();
+  const locale = useLocale();
+  const lp = useLocalePath();
   useDocumentMeta(
-    'Результат оплаты',
-    'Статус заказа, код доступа, ключ активации и ссылка на установщик.',
+    t('Результат оплаты', 'Төлем нәтижесі'),
+    t('Статус заказа, код доступа, ключ активации и ссылка на установщик.', 'Тапсырыс мәртебесі, қолжетімділік коды, белсендіру кілті және орнатқыш сілтемесі.'),
   );
 
   const [params] = useSearchParams();
@@ -95,14 +100,14 @@ export const PaymentResultPage = observer(() => {
   const productName = data
     ? data.renewal
       ? data.productKind === 'stickers'
-        ? 'Пополнение кода доступа'
+        ? t('Пополнение кода доступа', 'Қолжетімділік кодын толықтыру')
         : data.productKind === 'program_license'
-          ? 'Пополнение ключа «Подбора кодов»'
-          : 'Продление ключа «Печати ячеек»'
+          ? t('Пополнение ключа «Подбора кодов»', '«Кодтарды іріктеу» кілтін толықтыру')
+          : t('Продление ключа «Печати ячеек»', '«Ұяшық басып шығару» кілтін ұзарту')
       : data.productKind === 'stickers'
-        ? `Пакет генераций${data.quantity ? ` · ${data.quantity} шт.` : ''}`
-        : (PRODUCT_NAMES[data.productKind] ?? 'Заказ')
-    : 'Заказ';
+        ? `${t('Пакет генераций', 'Генерация пакеті')}${data.quantity ? ` · ${data.quantity} ${t('шт.', 'дана')}` : ''}`
+        : (PRODUCT_NAMES[data.productKind]?.[locale] ?? t('Заказ', 'Тапсырыс'))
+    : t('Заказ', 'Тапсырыс');
 
   // Код оплаченного пакета кладём в браузер сразу. Без этого покупка без входа
   // никуда не попадала: генератор просил вводить код руками, а при регистрации
@@ -146,18 +151,21 @@ export const PaymentResultPage = observer(() => {
   return (
     <>
       {/* В кабинете заголовок рисует его собственная шапка */}
-      {!inCabinet && <Hero compact eyebrow="Оплата" title="Результат оплаты" />}
+      {!inCabinet && <Hero compact eyebrow={t('Оплата', 'Төлем')} title={t('Результат оплаты', 'Төлем нәтижесі')} />}
 
       <div className="page">
         <div className={s.wrap}>
           {!token && (
             <Card>
               <EmptyState
-                title="Заказ не найден"
-                text="В ссылке нет номера заказа. Откройте страницу по ссылке из письма или из окна оплаты."
+                title={t('Заказ не найден', 'Тапсырыс табылмады')}
+                text={t(
+                  'В ссылке нет номера заказа. Откройте страницу по ссылке из письма или из окна оплаты.',
+                  'Сілтемеде тапсырыс нөмірі жоқ. Бетті хаттағы немесе төлем терезесіндегі сілтеме арқылы ашыңыз.',
+                )}
                 action={
-                  <Link to="/">
-                    <Button>На главную</Button>
+                  <Link to={lp('/')}>
+                    <Button>{t('На главную', 'Басты бетке')}</Button>
                   </Link>
                 }
               />
@@ -169,7 +177,7 @@ export const PaymentResultPage = observer(() => {
               <div className="stack">
                 <div className="row">
                   <Spinner />
-                  <strong>Проверяем оплату…</strong>
+                  <strong>{t('Проверяем оплату…', 'Төлемді тексеріп жатырмыз…')}</strong>
                 </div>
                 <Skeleton width="60%" />
                 <Skeleton width="40%" />
@@ -182,12 +190,14 @@ export const PaymentResultPage = observer(() => {
               <div className="stack">
                 <Alert tone="error">{order.error.message}</Alert>
                 <p className="muted" style={{ margin: 0 }}>
-                  Если деньги списались, а заказ не найден — напишите нам, разберёмся вручную и
-                  выдадим доступ.
+                  {t(
+                    'Если деньги списались, а заказ не найден — напишите нам, разберёмся вручную и выдадим доступ.',
+                    'Ақша есептен шығарылып, тапсырыс табылмаса — бізге жазыңыз, қолмен анықтап, қолжетімділік береміз.',
+                  )}
                 </p>
                 <div className="row">
-                  <Link to="/contacts">
-                    <Button variant="secondary">Написать в поддержку</Button>
+                  <Link to={lp('/contacts')}>
+                    <Button variant="secondary">{t('Написать в поддержку', 'Қолдау қызметіне жазу')}</Button>
                   </Link>
                 </div>
               </div>
@@ -201,18 +211,20 @@ export const PaymentResultPage = observer(() => {
                   <>
                     <div className="row">
                       <Spinner />
-                      <strong>Ждём подтверждения от банка</strong>
+                      <strong>{t('Ждём подтверждения от банка', 'Банктің растауын күтіп жатырмыз')}</strong>
                     </div>
                     <p className="muted" style={{ margin: 0 }}>
-                      Обычно это занимает несколько секунд. Страницу можно не обновлять — статус
-                      обновится сам.
+                      {t(
+                        'Обычно это занимает несколько секунд. Страницу можно не обновлять — статус обновится сам.',
+                        'Әдетте бұл бірнеше секундқа созылады. Бетті жаңартудың қажеті жоқ — мәртебе өзі жаңарады.',
+                      )}
                     </p>
                   </>
                 )}
 
                 {data.status === 'succeeded' && (
                   <>
-                    <h2 className={s.title}>Оплата прошла</h2>
+                    <h2 className={s.title}>{t('Оплата прошла', 'Төлем өтті')}</h2>
                     <p className="muted" style={{ margin: 0 }}>
                       {productName} · {formatTotal(data.amount)}
                     </p>
@@ -231,30 +243,35 @@ export const PaymentResultPage = observer(() => {
                           }
                         }}
                       >
-                        <Button>Вернуться в бот</Button>
+                        <Button>{t('Вернуться в бот', 'Ботқа оралу')}</Button>
                       </a>
                     )}
 
                     {data.accessCode && (
-                      <SecretRow label="Код доступа к генерации" value={data.accessCode} />
+                      <SecretRow label={t('Код доступа к генерации', 'Генерацияға қолжетімділік коды')} value={data.accessCode} />
                     )}
 
                     {data.licenseKey && (
-                      <SecretRow label="Ключ активации" value={data.licenseKey} />
+                      <SecretRow label={t('Ключ активации', 'Белсендіру кілті')} value={data.licenseKey} />
                     )}
 
                     {auth.isAuthenticated ? (
                       <Alert tone="info">
-                        Сохраните код или ключ: он также доступен в кабинете в разделе «Ключи и
-                        доступы».
+                        {t(
+                          'Сохраните код или ключ: он также доступен в кабинете в разделе «Ключи и доступы».',
+                          'Кодты немесе кілтті сақтаңыз: ол кабинеттегі «Кілттер мен қолжетімділіктер» бөлімінде де бар.',
+                        )}
                       </Alert>
                     ) : (
                       <Alert tone="info">
-                        Сохраните код — сейчас он есть только в этом браузере.{' '}
+                        {t('Сохраните код — сейчас он есть только в этом браузере.', 'Кодты сақтаңыз — қазір ол тек осы браузерде бар.')}{' '}
                         <Link className="accent" to="/register">
-                          Заведите аккаунт
+                          {t('Заведите аккаунт', 'Аккаунт ашыңыз')}
                         </Link>
-                        , и покупка вместе с уже созданными стикерами перенесётся в личный кабинет.
+                        {t(
+                          ', и покупка вместе с уже созданными стикерами перенесётся в личный кабинет.',
+                          ' — сатып алынған пакет жасалған стикерлермен бірге жеке кабинетке ауысады.',
+                        )}
                       </Alert>
                     )}
 
@@ -263,20 +280,20 @@ export const PaymentResultPage = observer(() => {
                         <a href={data.downloadUrl}>
                           <Button>
                             <Download size={18} />
-                            Скачать программу
+                            {t('Скачать программу', 'Бағдарламаны жүктеп алу')}
                           </Button>
                         </a>
                       )}
                       <Link to="/cabinet/keys">
                         <Button variant="secondary">
                           <KeyRound size={18} />
-                          Ключи и доступы
+                          {t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
                         </Button>
                       </Link>
                       {/* Из кабинета логично идти сразу генерировать, а не на главную */}
-                      <Link to={inCabinet ? '/cabinet/generator' : '/'}>
+                      <Link to={inCabinet ? '/cabinet/generator' : lp('/')}>
                         <Button variant="ghost">
-                          {inCabinet ? 'К генератору' : 'На главную'}
+                          {inCabinet ? t('К генератору', 'Генераторға') : t('На главную', 'Басты бетке')}
                           <ArrowRight size={16} />
                         </Button>
                       </Link>
@@ -286,21 +303,25 @@ export const PaymentResultPage = observer(() => {
 
                 {data.status !== 'pending' && data.status !== 'succeeded' && (
                   <>
-                    <h2 className={s.title}>Оплата не прошла</h2>
+                    <h2 className={s.title}>{t('Оплата не прошла', 'Төлем өтпеді')}</h2>
                     <Alert tone="warning">
-                      Заказ отменён или платёж не был завершён. Деньги, если они списались,
-                      возвращаются банком автоматически.
+                      {t(
+                        'Заказ отменён или платёж не был завершён. Деньги, если они списались, возвращаются банком автоматически.',
+                        'Тапсырыс бас тартылды немесе төлем аяқталмады. Ақша есептен шығарылған болса, банк оны автоматты түрде қайтарады.',
+                      )}
                     </Alert>
                     <p className="muted" style={{ margin: 0 }}>
-                      Не получается оплатить? Напишите нам в Telegram и опишите, что пошло не так
-                      (карта, СБП, ошибка банка) — поможем завершить покупку.
+                      {t(
+                        'Не получается оплатить? Напишите нам в Telegram и опишите, что пошло не так (карта, СБП, ошибка банка) — поможем завершить покупку.',
+                        'Төлей алмай жатырсыз ба? Бізге Telegram-да жазып, не дұрыс болмағанын сипаттаңыз (карта, СБП, банк қатесі) — сатып алуды аяқтауға көмектесеміз.',
+                      )}
                     </p>
                     <div className="row">
-                      <Link to="/">
-                        <Button>Попробовать снова</Button>
+                      <Link to={lp('/')}>
+                        <Button>{t('Попробовать снова', 'Қайта көру')}</Button>
                       </Link>
                       <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
-                        <Button variant="secondary">Написать в Telegram @{SUPPORT_USERNAME}</Button>
+                        <Button variant="secondary">{t('Написать в Telegram', 'Telegram-да жазу')} @{SUPPORT_USERNAME}</Button>
                       </a>
                     </div>
                   </>

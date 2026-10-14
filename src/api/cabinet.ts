@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import { currentLocale, intlLocale } from '../i18n';
 
 export type NotificationKind = 'order' | 'key_expiry' | 'low_balance' | 'product_news' | 'system';
 export type UserPreferences = {
@@ -207,7 +208,7 @@ export const money = (kopecks: number) =>
   }).format(kopecks / 100);
 export const dateTime = (value: string | null) =>
   value
-    ? new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    ? new Intl.DateTimeFormat(intlLocale(currentLocale()), { dateStyle: 'medium', timeStyle: 'short' }).format(
         new Date(value),
       )
     : '—';

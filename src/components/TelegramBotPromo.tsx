@@ -1,13 +1,14 @@
 import { ArrowRight } from 'lucide-react';
 import { TelegramIcon } from './TelegramIcon';
 import { BOT_URL } from '../lib/telegram';
+import { type T, useT } from '../i18n';
 import s from './TelegramBotPromo.module.css';
 
-const POINTS = [
-  'Товарные стикеры и QR коробок',
-  'До 500 штук за один запрос',
-  'Готовый PDF прямо в чат',
-] as const;
+const points = (t: T) => [
+  t('Товарные стикеры и QR коробок', 'Тауар стикерлері мен қорап QR-кодтары'),
+  t('До 500 штук за один запрос', 'Бір сұраныста 500 данаға дейін'),
+  t('Готовый PDF прямо в чат', 'Дайын PDF тікелей чатқа'),
+];
 
 /**
  * Бот умеет ровно то же, что форма генератора, но про него на сайте не было ни
@@ -16,6 +17,7 @@ const POINTS = [
  * генерации, — там предложение «то же самое, но в телефоне» и уместно.
  */
 export function TelegramBotPromo({ variant = 'full' }: { variant?: 'full' | 'compact' }) {
+  const t = useT();
   return (
     <aside className={`${s.promo} ${variant === 'compact' ? s.compact : ''}`}>
       {variant === 'full' && (
@@ -32,21 +34,23 @@ export function TelegramBotPromo({ variant = 'full' }: { variant?: 'full' | 'com
       <div className={s.body}>
         <h3 className={s.title}>
           <TelegramIcon className={s.ico} />
-          Генерируйте ШК прямо в Telegram
+          {t('Генерируйте ШК прямо в Telegram', 'ШК-ны тікелей Telegram-да генерациялаңыз')}
         </h3>
         <p className={s.text}>
-          У генератора есть бот: он собирает возвратные стикеры и QR-коды коробок без сайта — с
-          телефона на выдаче, из того же пула номеров.
+          {t(
+            'У генератора есть бот: он собирает возвратные стикеры и QR-коды коробок без сайта — с телефона на выдаче, из того же пула номеров.',
+            'Генератордың боты бар: ол қайтару стикерлері мен қорап QR-кодтарын сайтсыз жасайды — беру кезінде телефоннан, сол нөмірлер пулынан.',
+          )}
         </p>
         <ul className={s.points}>
-          {POINTS.map(point => (
+          {points(t).map(point => (
             <li key={point}>{point}</li>
           ))}
         </ul>
       </div>
 
       <a className={s.cta} href={BOT_URL} target="_blank" rel="noopener noreferrer">
-        Открыть бота
+        {t('Открыть бота', 'Ботты ашу')}
         <ArrowRight size={16} aria-hidden="true" />
       </a>
     </aside>

@@ -7,10 +7,11 @@ import {
 import { dateTime } from '../../api/cabinet';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import {
-  CELL_DEVICE_LIMITS, CELL_DURATIONS, type PartnerItem, type PartnerResource, RESOURCE_LABELS,
-  clientMessage, costRub, formatKzt, formatRub, poolLeft, suggestedKzt,
+  CELL_DEVICE_LIMITS, CELL_DURATIONS, type PartnerItem, type PartnerResource,
+  clientMessage, costRub, formatKzt, formatRub, poolLeft, resourceLabels, suggestedKzt,
 } from '../../lib/partner';
 import { useDocumentMeta } from '../../lib/seo';
+import { type T, useLocale, useT } from '../../i18n';
 import {
   Alert, Badge, Button, Card, EmptyState, Field, Input, Modal, Progress, Segmented, Select, Stat, Table,
   Tabs, useToast,
@@ -24,9 +25,13 @@ const SCOPES = [
   { value: 'both', label: 'WB + Ozon' },
 ] as const;
 
-function copy(text: string, toast: ReturnType<typeof useToast>, done = 'Скопировано') {
+function copy(text: string, toast: ReturnType<typeof useToast>, done: string) {
   void navigator.clipboard?.writeText(text);
   toast(done, 'success');
+}
+
+function useLabels() {
+  return resourceLabels(useLocale());
 }
 
 /**
@@ -35,7 +40,9 @@ function copy(text: string, toast: ReturnType<typeof useToast>, done = 'Скоп
  * сколько в тенге он продаёт клиенту (со своей наценкой).
  */
 export function PartnerPage() {
-  useDocumentMeta('Партнёр — кабинет');
+  const t = useT();
+  const labels = useLabels();
+  useDocumentMeta(t('Партнёр — кабинет', 'Серіктес — кабинет'));
   const me = usePartnerMe();
   const [issued, setIssued] = useState<PartnerIssueResult | null>(null);
 
@@ -48,19 +55,26 @@ export function PartnerPage() {
       <header className="page-head">
         <h1>{partner.name}</h1>
         <p>
-          Выпускайте коды и ключи для своих клиентов. Рубли — ваш долг владельцу сервиса, тенге — цена для клиента.
-          Курс: 1 ₽ = {kztPerRub} ₸.
+          {t(
+            `Выпускайте коды и ключи для своих клиентов. Рубли — ваш долг владельцу сервиса, тенге — цена для клиента. Курс: 1 ₽ = ${kztPerRub} ₸.`,
+            `Клиенттеріңізге кодтар мен кілттер шығарыңыз. Рубль — сервис иесіне қарызыңыз, теңге — клиентке арналған баға. Бағам: 1 ₽ = ${kztPerRub} ₸.`,
+          )}
         </p>
       </header>
 
       {!partner.active && (
-        <Alert tone="warning">Партнёрский доступ приостановлен. Выданные коды работают, но выпускать новые нельзя.</Alert>
+        <Alert tone="warning">
+          {t(
+            'Партнёрский доступ приостановлен. Выданные коды работают, но выпускать новые нельзя.',
+            'Серіктестік қолжетімділік тоқтатылды. Берілген кодтар жұмыс істейді, бірақ жаңаларын шығаруға болмайды.',
+          )}
+        </Alert>
       )}
 
       <div className="grid grid-3">
-        <Card><Stat value={formatRub(balance.dueRub)} label="к оплате владельцу" icon={<Wallet size={20} />} /></Card>
-        <Card><Stat value={formatRub(balance.paidRub)} label="уже оплачено" /></Card>
-        <Card><Stat value={formatKzt(balance.revenueKzt)} label="выставлено клиентам" icon={<HandCoins size={20} />} /></Card>
+        <Card><Stat value={formatRub(balance.dueRub)} label={t('к оплате владельцу', 'иесіне төлеуге')} icon={<Wallet size={20} />} /></Card>
+        <Card><Stat value={formatRub(balance.paidRub)} label={t('уже оплачено', 'төленіп қойған')} /></Card>
+        <Card><Stat value={formatKzt(balance.revenueKzt)} label={t('выставлено клиентам', 'клиенттерге қойылды')} icon={<HandCoins size={20} />} /></Card>
       </div>
 
       <div className="grid grid-3">
@@ -68,10 +82,15 @@ export function PartnerPage() {
           const pool = partner.pool[resource];
           return (
             <Card key={resource}>
-              <h3>{RESOURCE_LABELS[resource].title}</h3>
-              <Progress value={pool.used} max={Math.max(1, pool.granted)} label={<span>использовано {pool.used} из {pool.granted}</span>} />
+              <h3>{labels[resource].title}</h3>
+              <Progress
+                value={pool.used}
+                max={Math.max(1, pool.granted)}
+                label={<span>{t(`использовано ${pool.used} из ${pool.granted}`, `${pool.granted} ішінен ${pool.used} пайдаланылды`)}</span>}
+              />
               <p className="muted">
-                Осталось <strong>{poolLeft(pool)}</strong> {RESOURCE_LABELS[resource].unit} · {formatRub(partner.prices[resource])} за единицу
+                {t('Осталось', 'Қалды')} <strong>{poolLeft(pool)}</strong> {labels[resource].unit} ·{' '}
+                {t(`${formatRub(partner.prices[resource])} за единицу`, `бірлігі ${formatRub(partner.prices[resource])}`)}
               </p>
             </Card>
           );
@@ -81,11 +100,11 @@ export function PartnerPage() {
       <IssueCard me={me.data} onIssued={setIssued} />
 
       <Tabs
-        label="Выпуски и расчёты"
+        label={t('Выпуски и расчёты', 'Шығарылымдар мен есеп айырысу')}
         items={[
-          { value: 'items', label: 'Выпущенные', content: <ItemsTab me={me.data} onIssued={setIssued} /> },
-          { value: 'ledger', label: 'История', content: <LedgerTab /> },
-          { value: 'payments', label: 'Оплаты владельцу', content: <PaymentsTab /> },
+          { value: 'items', label: t('Выпущенные', 'Шығарылғандар'), content: <ItemsTab me={me.data} onIssued={setIssued} /> },
+          { value: 'ledger', label: t('История', 'Тарих'), content: <LedgerTab /> },
+          { value: 'payments', label: t('Оплаты владельцу', 'Иесіне төлемдер'), content: <PaymentsTab /> },
         ]}
       />
 
@@ -99,21 +118,30 @@ function usePrice(me: PartnerMe, cost: number) {
   const [custom, setCustom] = useState('');
   const suggested = suggestedKzt(cost, me.kztPerRub, me.partner.markupPercent);
   const customValue = custom.trim() === '' ? null : Number(custom.replace(',', '.'));
-  const price = customValue != null && Number.isFinite(customValue) && customValue >= 0 ? customValue : suggested;
-  return { custom, setCustom, suggested, price, priceKzt: customValue != null && Number.isFinite(customValue) ? customValue : null };
+  const valid = customValue != null && Number.isFinite(customValue) && customValue >= 0;
+  return { custom, setCustom, suggested, price: valid ? customValue : suggested, priceKzt: valid ? customValue : null };
 }
 
-function MoneyBox({ me, cost, price }: { me: PartnerMe; cost: number; price: ReturnType<typeof usePrice> }) {
+function MoneyBox({ me, cost, price, t }: { me: PartnerMe; cost: number; price: ReturnType<typeof usePrice>; t: T }) {
   const base = cost * me.kztPerRub;
   const profit = price.price - base;
   return (
     <div className="stack">
       <div className="grid grid-3">
-        <Stat value={formatRub(cost)} label="ваш долг владельцу" />
-        <Stat value={formatKzt(price.price)} label="цена клиенту" />
-        <Stat value={formatKzt(profit)} label={`ваша прибыль (себестоимость ${formatKzt(base)})`} />
+        <Stat value={formatRub(cost)} label={t('ваш долг владельцу', 'иесіне қарызыңыз')} />
+        <Stat value={formatKzt(price.price)} label={t('цена клиенту', 'клиентке баға')} />
+        <Stat
+          value={formatKzt(profit)}
+          label={t(`ваша прибыль (себестоимость ${formatKzt(base)})`, `пайдаңыз (өзіндік құны ${formatKzt(base)})`)}
+        />
       </div>
-      <Field label="Своя цена клиенту, ₸" help={`Оставьте пустым — будет ${formatKzt(price.suggested)} по вашей наценке ${me.partner.markupPercent}%`}>
+      <Field
+        label={t('Своя цена клиенту, ₸', 'Клиентке өз бағаңыз, ₸')}
+        help={t(
+          `Оставьте пустым — будет ${formatKzt(price.suggested)} по вашей наценке ${me.partner.markupPercent}%`,
+          `Бос қалдырсаңыз — ${me.partner.markupPercent}% үстемеңіз бойынша ${formatKzt(price.suggested)} болады`,
+        )}
+      >
         <Input inputMode="decimal" value={price.custom} onChange={e => price.setCustom(e.target.value)} placeholder={String(price.suggested)} />
       </Field>
     </div>
@@ -122,6 +150,8 @@ function MoneyBox({ me, cost, price }: { me: PartnerMe; cost: number; price: Ret
 
 function IssueCard({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssueResult) => void }) {
   const toast = useToast();
+  const t = useT();
+  const labels = useLabels();
   const issue = usePartnerIssue();
   const [kind, setKind] = useState<PartnerResource>('sticker');
   const [amount, setAmount] = useState('100');
@@ -149,51 +179,58 @@ function IssueCard({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssue
   return (
     <Card accent>
       <div className={c.sectionHead}>
-        <h2>Выпустить для клиента</h2>
+        <h2>{t('Выпустить для клиента', 'Клиентке шығару')}</h2>
         <MarkupEditor me={me} />
       </div>
       <div className="stack">
         <Segmented
-          label="Что выпустить"
+          label={t('Что выпустить', 'Не шығару')}
           value={kind}
           onChange={setKind}
-          options={RESOURCES.map(r => ({ value: r, label: RESOURCE_LABELS[r].short }))}
+          options={RESOURCES.map(r => ({ value: r, label: labels[r].short }))}
         />
         <div className="grid grid-3">
           {kind === 'cell' ? (
             <>
-              <Field label="Срок, дней">
+              <Field label={t('Срок, дней', 'Мерзімі, күн')}>
                 <Select value={days} onChange={e => setDays(Number(e.target.value))}>
                   {CELL_DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
                 </Select>
               </Field>
-              <Field label="Компьютеров">
+              <Field label={t('Компьютеров', 'Компьютерлер')}>
                 <Select value={devices} onChange={e => setDevices(Number(e.target.value))}>
                   {CELL_DEVICE_LIMITS.map(d => <option key={d} value={d}>{d}</option>)}
                 </Select>
               </Field>
-              <Field label="Маркетплейс">
+              <Field label={t('Маркетплейс', 'Маркетплейс')}>
                 <Select value={scope} onChange={e => setScope(e.target.value)}>
                   {SCOPES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </Select>
               </Field>
             </>
           ) : (
-            <Field label={kind === 'sticker' ? 'Генераций в коде' : 'Итераций в ключе'}>
+            <Field label={kind === 'sticker' ? t('Генераций в коде', 'Кодтағы генерациялар') : t('Итераций в ключе', 'Кілттегі итерациялар')}>
               <Input type="number" min={1} max={100000} value={amount} onChange={e => setAmount(e.target.value)} />
             </Field>
           )}
-          <Field label="Для кого (видно только вам)">
-            <Input value={note} onChange={e => setNote(e.target.value)} maxLength={120} placeholder="Имя или телефон клиента" />
+          <Field label={t('Для кого (видно только вам)', 'Кімге (тек сізге көрінеді)')}>
+            <Input value={note} onChange={e => setNote(e.target.value)} maxLength={120} placeholder={t('Имя или телефон клиента', 'Клиенттің аты немесе телефоны')} />
           </Field>
         </div>
 
-        <MoneyBox me={me} cost={cost} price={price} />
+        <MoneyBox me={me} cost={cost} price={price} t={t} />
 
-        {units > left && <Alert tone="warning">В пуле осталось {left} {RESOURCE_LABELS[kind].unit}. Попросите владельца пополнить пул.</Alert>}
+        {units > left && (
+          <Alert tone="warning">
+            {t(
+              `В пуле осталось ${left} ${labels[kind].unit}. Попросите владельца пополнить пул.`,
+              `Пулда ${left} ${labels[kind].unit} қалды. Иесінен пулды толықтыруды сұраңыз.`,
+            )}
+          </Alert>
+        )}
         <div className="row">
           <Button size="lg" loading={issue.isPending} disabled={!me.partner.active || units < 1 || units > left} onClick={submit}>
-            Выпустить
+            {t('Выпустить', 'Шығару')}
           </Button>
         </div>
       </div>
@@ -203,6 +240,7 @@ function IssueCard({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssue
 
 function MarkupEditor({ me }: { me: PartnerMe }) {
   const toast = useToast();
+  const t = useT();
   const save = usePartnerMarkup();
   const [value, setValue] = useState(String(me.partner.markupPercent));
   useEffect(() => setValue(String(me.partner.markupPercent)), [me.partner.markupPercent]);
@@ -212,40 +250,43 @@ function MarkupEditor({ me }: { me: PartnerMe }) {
       onSubmit={event => {
         event.preventDefault();
         save.mutate({ markupPercent: Number(value.replace(',', '.')) }, {
-          onSuccess: () => toast('Наценка сохранена', 'success'),
+          onSuccess: () => toast(t('Наценка сохранена', 'Үстеме сақталды'), 'success'),
           onError: (error: Error) => toast(error.message, 'error'),
         });
       }}
     >
-      <Field label="Моя наценка, %">
+      <Field label={t('Моя наценка, %', 'Менің үстемем, %')}>
         <Input inputMode="decimal" value={value} onChange={e => setValue(e.target.value)} style={{ maxWidth: 110 }} />
       </Field>
-      <Button type="submit" variant="secondary" size="sm" loading={save.isPending}>Сохранить</Button>
+      <Button type="submit" variant="secondary" size="sm" loading={save.isPending}>{t('Сохранить', 'Сақтау')}</Button>
     </form>
   );
 }
 
 function IssuedModal({ result, onClose }: { result: PartnerIssueResult | null; onClose: () => void }) {
   const toast = useToast();
+  const t = useT();
+  const locale = useLocale();
+  const labels = useLabels();
   if (!result) return null;
   const { item, entry } = result;
   return (
-    <Modal open onOpenChange={open => !open && onClose()} title="Готово" description="Передайте код или ключ клиенту.">
+    <Modal open onOpenChange={open => !open && onClose()} title={t('Готово', 'Дайын')} description={t('Передайте код или ключ клиенту.', 'Кодты немесе кілтті клиентке беріңіз.')}>
       <div className="stack">
         <div className={c.code}>
-          <span className={c.codeLabel}>{RESOURCE_LABELS[item.kind].short}</span>
+          <span className={c.codeLabel}>{labels[item.kind].short}</span>
           <span className={c.codeValue}>{item.value}</span>
         </div>
         {entry && (
           <div className="grid grid-2">
-            <Stat value={formatRub(entry.costRub ?? 0)} label="долг владельцу" />
-            <Stat value={formatKzt(entry.priceKzt ?? 0)} label="получить с клиента" />
+            <Stat value={formatRub(entry.costRub ?? 0)} label={t('долг владельцу', 'иесіне қарыз')} />
+            <Stat value={formatKzt(entry.priceKzt ?? 0)} label={t('получить с клиента', 'клиенттен алу')} />
           </div>
         )}
         <div className="row">
-          <Button onClick={() => copy(item.value, toast, 'Код скопирован')}><Copy size={16} />Скопировать код</Button>
-          <Button variant="secondary" onClick={() => copy(clientMessage(item), toast, 'Сообщение скопировано')}>
-            Скопировать сообщение клиенту
+          <Button onClick={() => copy(item.value, toast, t('Код скопирован', 'Код көшірілді'))}><Copy size={16} />{t('Скопировать код', 'Кодты көшіру')}</Button>
+          <Button variant="secondary" onClick={() => copy(clientMessage(item, locale), toast, t('Сообщение скопировано', 'Хабарлама көшірілді'))}>
+            {t('Скопировать сообщение клиенту', 'Клиентке хабарламаны көшіру')}
           </Button>
         </div>
       </div>
@@ -255,6 +296,8 @@ function IssuedModal({ result, onClose }: { result: PartnerIssueResult | null; o
 
 function ItemsTab({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssueResult) => void }) {
   const toast = useToast();
+  const t = useT();
+  const labels = useLabels();
   const items = usePartnerItems();
   const toggle = usePartnerToggle();
   const [q, setQ] = useState('');
@@ -266,45 +309,58 @@ function ItemsTab({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssueR
 
   if (items.isPending) return <CabinetLoading />;
   if (items.isError) return <CabinetError error={items.error} retry={() => items.refetch()} />;
-  if (!items.data.length) return <Card><EmptyState title="Пока ничего не выпущено" text="Выпустите первый код в блоке выше." /></Card>;
+  if (!items.data.length) {
+    return <Card><EmptyState title={t('Пока ничего не выпущено', 'Әзірге ештеңе шығарылмаған')} text={t('Выпустите первый код в блоке выше.', 'Алғашқы кодты жоғарыдағы блокта шығарыңыз.')} /></Card>;
+  }
 
   return (
     <div className="stack">
-      <Field label="Поиск по коду или клиенту"><Input value={q} onChange={e => setQ(e.target.value)} /></Field>
+      <Field label={t('Поиск по коду или клиенту', 'Код немесе клиент бойынша іздеу')}><Input value={q} onChange={e => setQ(e.target.value)} /></Field>
       <Table>
-        <thead><tr><th>Код / ключ</th><th>Для кого</th><th>Объём</th><th>Создан</th><th>Статус</th><th /></tr></thead>
+        <thead>
+          <tr>
+            <th>{t('Код / ключ', 'Код / кілт')}</th><th>{t('Для кого', 'Кімге')}</th><th>{t('Объём', 'Көлемі')}</th>
+            <th>{t('Создан', 'Жасалды')}</th><th>{t('Статус', 'Мәртебесі')}</th><th />
+          </tr>
+        </thead>
         <tbody>
           {filtered.map(item => (
             <tr key={`${item.kind}-${item.id}`}>
               <td>
                 <div className="mono">{item.value}</div>
-                <div className="muted">{RESOURCE_LABELS[item.kind].short}</div>
+                <div className="muted">{labels[item.kind].short}</div>
               </td>
               <td>{item.note || '—'}</td>
               <td>
                 {item.kind === 'cell'
-                  ? `${item.durationDays} дн. × ${item.deviceLimit} ПК${item.expiresAt ? `, до ${dateTime(item.expiresAt)}` : ', не активирован'}`
-                  : `израсходовано ${item.used} из ${item.limit}`}
+                  ? t(
+                    `${item.durationDays} дн. × ${item.deviceLimit} ПК${item.expiresAt ? `, до ${dateTime(item.expiresAt)}` : ', не активирован'}`,
+                    `${item.durationDays} күн × ${item.deviceLimit} ДК${item.expiresAt ? `, ${dateTime(item.expiresAt)} дейін` : ', белсендірілмеген'}`,
+                  )
+                  : t(`израсходовано ${item.used} из ${item.limit}`, `${item.limit} ішінен ${item.used} жұмсалды`)}
               </td>
               <td>{dateTime(item.createdAt)}</td>
-              <td><Badge tone={item.active ? 'success' : 'error'}>{item.active ? 'Активен' : 'Выключен'}</Badge></td>
+              <td><Badge tone={item.active ? 'success' : 'error'}>{item.active ? t('Активен', 'Белсенді') : t('Выключен', 'Өшірілген')}</Badge></td>
               <td>
                 <div className={c.rowActions}>
-                  <Button variant="ghost" size="sm" aria-label="Скопировать" onClick={() => copy(item.value, toast)}><Copy size={16} /></Button>
+                  <Button variant="ghost" size="sm" aria-label={t('Скопировать', 'Көшіру')} onClick={() => copy(item.value, toast, t('Скопировано', 'Көшірілді'))}><Copy size={16} /></Button>
                   {item.kind !== 'cell' && me.partner.active && (
-                    <Button variant="ghost" size="sm" onClick={() => setTopupItem(item)}>Пополнить</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setTopupItem(item)}>{t('Пополнить', 'Толықтыру')}</Button>
                   )}
                   {me.partner.active && (
                     <Button
                       variant="ghost" size="sm"
                       onClick={() => {
-                        if (item.active && !window.confirm(`Выключить ${item.value}? Клиент не сможет им пользоваться. Пул не возвращается.`)) return;
+                        if (item.active && !window.confirm(t(
+                          `Выключить ${item.value}? Клиент не сможет им пользоваться. Пул не возвращается.`,
+                          `${item.value} өшірілсін бе? Клиент оны пайдалана алмайды. Пул қайтарылмайды.`,
+                        ))) return;
                         toggle.mutate({ kind: item.kind, id: item.id, active: !item.active }, {
                           onError: (error: Error) => toast(error.message, 'error'),
                         });
                       }}
                     >
-                      {item.active ? 'Выключить' : 'Включить'}
+                      {item.active ? t('Выключить', 'Өшіру') : t('Включить', 'Қосу')}
                     </Button>
                   )}
                 </div>
@@ -320,6 +376,8 @@ function ItemsTab({ me, onIssued }: { me: PartnerMe; onIssued: (r: PartnerIssueR
 
 function TopupModal({ me, item, onClose, onDone }: { me: PartnerMe; item: PartnerItem; onClose: () => void; onDone: (r: PartnerIssueResult) => void }) {
   const toast = useToast();
+  const t = useT();
+  const labels = useLabels();
   const topup = usePartnerTopup();
   const [amount, setAmount] = useState('100');
   const units = Math.max(0, Math.floor(Number(amount) || 0));
@@ -327,12 +385,20 @@ function TopupModal({ me, item, onClose, onDone }: { me: PartnerMe; item: Partne
   const price = usePrice(me, cost);
   const left = poolLeft(me.partner.pool[item.kind]);
   return (
-    <Modal open onOpenChange={open => !open && onClose()} title={`Пополнить ${item.value}`} description={item.note || RESOURCE_LABELS[item.kind].short}>
+    <Modal
+      open
+      onOpenChange={open => !open && onClose()}
+      title={t(`Пополнить ${item.value}`, `${item.value} толықтыру`)}
+      description={item.note || labels[item.kind].short}
+    >
       <div className="stack">
-        <Field label={item.kind === 'sticker' ? 'Добавить генераций' : 'Добавить итераций'} help={`В пуле: ${left}`}>
+        <Field
+          label={item.kind === 'sticker' ? t('Добавить генераций', 'Генерация қосу') : t('Добавить итераций', 'Итерация қосу')}
+          help={t(`В пуле: ${left}`, `Пулда: ${left}`)}
+        >
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} />
         </Field>
-        <MoneyBox me={me} cost={cost} price={price} />
+        <MoneyBox me={me} cost={cost} price={price} t={t} />
         <Button
           loading={topup.isPending}
           disabled={units < 1 || units > left}
@@ -341,29 +407,37 @@ function TopupModal({ me, item, onClose, onDone }: { me: PartnerMe; item: Partne
             onError: (error: Error) => toast(error.message, 'error'),
           })}
         >
-          Пополнить
+          {t('Пополнить', 'Толықтыру')}
         </Button>
       </div>
     </Modal>
   );
 }
 
-const LEDGER_KIND = { grant: 'Пул от владельца', issue: 'Выпуск', topup: 'Пополнение' } as const;
-
 function LedgerTab() {
+  const t = useT();
+  const labels = useLabels();
   const ledger = usePartnerLedger();
+  const kindLabel = { grant: t('Пул от владельца', 'Иесінен пул'), issue: t('Выпуск', 'Шығару'), topup: t('Пополнение', 'Толықтыру') };
   if (ledger.isPending) return <CabinetLoading />;
   if (ledger.isError) return <CabinetError error={ledger.error} retry={() => ledger.refetch()} />;
-  if (!ledger.data.length) return <Card><EmptyState title="Пока пусто" text="Здесь появятся пополнения пула и выпуски." /></Card>;
+  if (!ledger.data.length) {
+    return <Card><EmptyState title={t('Пока пусто', 'Әзірге бос')} text={t('Здесь появятся пополнения пула и выпуски.', 'Пулды толықтыру мен шығарылымдар осында пайда болады.')} /></Card>;
+  }
   return (
     <Table>
-      <thead><tr><th>Дата</th><th>Операция</th><th>Количество</th><th>Код / ключ</th><th>Долг, ₽</th><th>Клиенту, ₸</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{t('Дата', 'Күні')}</th><th>{t('Операция', 'Операция')}</th><th>{t('Количество', 'Саны')}</th>
+          <th>{t('Код / ключ', 'Код / кілт')}</th><th>{t('Долг, ₽', 'Қарыз, ₽')}</th><th>{t('Клиенту, ₸', 'Клиентке, ₸')}</th>
+        </tr>
+      </thead>
       <tbody>
         {ledger.data.map(entry => (
           <tr key={entry.id}>
             <td>{dateTime(entry.createdAt)}</td>
-            <td>{LEDGER_KIND[entry.kind]}</td>
-            <td>{entry.delta > 0 ? `+${entry.delta}` : entry.delta} {RESOURCE_LABELS[entry.resource].unit}</td>
+            <td>{kindLabel[entry.kind]}</td>
+            <td>{entry.delta > 0 ? `+${entry.delta}` : entry.delta} {labels[entry.resource].unit}</td>
             <td className="mono">{entry.refLabel || '—'}</td>
             <td>{entry.costRub == null ? '—' : formatRub(entry.costRub)}</td>
             <td>{entry.priceKzt == null ? '—' : formatKzt(entry.priceKzt)}</td>
@@ -375,13 +449,16 @@ function LedgerTab() {
 }
 
 function PaymentsTab() {
+  const t = useT();
   const payments = usePartnerPayments();
   if (payments.isPending) return <CabinetLoading />;
   if (payments.isError) return <CabinetError error={payments.error} retry={() => payments.refetch()} />;
-  if (!payments.data.length) return <Card><EmptyState title="Оплат пока нет" text="Оплаты, которые отметит владелец, появятся здесь." /></Card>;
+  if (!payments.data.length) {
+    return <Card><EmptyState title={t('Оплат пока нет', 'Әзірге төлемдер жоқ')} text={t('Оплаты, которые отметит владелец, появятся здесь.', 'Иесі белгілеген төлемдер осында пайда болады.')} /></Card>;
+  }
   return (
     <Table>
-      <thead><tr><th>Дата</th><th>Сумма</th><th>Комментарий</th></tr></thead>
+      <thead><tr><th>{t('Дата', 'Күні')}</th><th>{t('Сумма', 'Сомасы')}</th><th>{t('Комментарий', 'Түсініктеме')}</th></tr></thead>
       <tbody>
         {payments.data.map(p => (
           <tr key={p.id}><td>{dateTime(p.createdAt)}</td><td>{formatRub(p.amountRub)}</td><td>{p.note || '—'}</td></tr>

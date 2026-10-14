@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../ui';
+import { useLocalePath, useT } from '../i18n';
 import s from './CookieBanner.module.css';
 
 const KEY = 'cookie-consent';
@@ -15,6 +16,8 @@ const KEY = 'cookie-consent';
  */
 export function CookieBanner() {
   const [shown, setShown] = useState(false);
+  const t = useT();
+  const lp = useLocalePath();
 
   useEffect(() => {
     try {
@@ -36,16 +39,18 @@ export function CookieBanner() {
   }
 
   return (
-    <div className={s.banner} role="region" aria-label="Уведомление о cookie">
+    <div className={s.banner} role="region" aria-label={t('Уведомление о cookie', 'Cookie туралы хабарлама')}>
       <p className={s.text}>
-        Сайт использует cookie и обезличенную аналитику, чтобы запоминать ваши настройки и понимать,
-        какими инструментами пользуются чаще.{' '}
-        <Link className="accent" to="/cookie">
-          Подробнее
+        {t(
+          'Сайт использует cookie и обезличенную аналитику, чтобы запоминать ваши настройки и понимать, какими инструментами пользуются чаще.',
+          'Сайт баптауларыңызды есте сақтау және қай құралдар жиі қолданылатынын түсіну үшін cookie мен иесіздендірілген аналитиканы пайдаланады.',
+        )}{' '}
+        <Link className="accent" to={lp('/cookie')}>
+          {t('Подробнее', 'Толығырақ')}
         </Link>
       </p>
       <Button size="sm" onClick={accept}>
-        Хорошо
+        {t('Хорошо', 'Жақсы')}
       </Button>
     </div>
   );

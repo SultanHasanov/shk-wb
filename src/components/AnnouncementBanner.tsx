@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Megaphone, X } from 'lucide-react';
+import { useT } from '../i18n';
 import s from './AnnouncementBanner.module.css';
 
 type Announcement = {
@@ -31,6 +32,7 @@ function internalPath(url: string): string | null {
  * которые видела только десктопная программа.
  */
 export function AnnouncementBanner() {
+  const t = useT();
   const [dismissedId, setDismissedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [clipped, setClipped] = useState(false);
@@ -84,12 +86,12 @@ export function AnnouncementBanner() {
     setDismissedId(id);
   };
 
-  const label = item.button || 'Подробнее';
+  const label = item.button || t('Подробнее', 'Толығырақ');
   const path = item.url ? internalPath(item.url) : null;
   const external = item.url && !path && /^https?:\/\//i.test(item.url) ? item.url : null;
 
   return (
-    <aside className={s.banner} aria-label="Объявление" aria-live="polite">
+    <aside className={s.banner} aria-label={t('Объявление', 'Хабарландыру')} aria-live="polite">
       <div className={s.inner}>
         <div className={s.head}>
           <Megaphone size={18} className={s.icon} aria-hidden="true" />
@@ -99,7 +101,7 @@ export function AnnouncementBanner() {
             </p>
             {(clipped || expanded) && (
               <button type="button" className={s.more} onClick={() => setExpanded(v => !v)}>
-                {expanded ? 'Свернуть' : 'Читать полностью'}
+                {expanded ? t('Свернуть', 'Жию') : t('Читать полностью', 'Толық оқу')}
               </button>
             )}
           </div>
@@ -118,7 +120,7 @@ export function AnnouncementBanner() {
           </a>
         )}
 
-        <button type="button" className={s.close} onClick={dismiss} aria-label="Закрыть объявление">
+        <button type="button" className={s.close} onClick={dismiss} aria-label={t('Закрыть объявление', 'Хабарландыруды жабу')}>
           <X size={16} />
         </button>
       </div>

@@ -1,4 +1,6 @@
 import { Link, Outlet } from 'react-router-dom';
+import { LanguageSwitch } from '../components/LanguageSwitch';
+import { useLocalePath, useT } from '../i18n';
 import s from './AuthShell.module.css';
 
 /**
@@ -7,15 +9,18 @@ import s from './AuthShell.module.css';
  * «Обзор / Ключи / Настройки», хотя пользователь ещё не вошёл.
  */
 export function AuthShell() {
+  const t = useT();
+  const lp = useLocalePath();
   return (
     <div className={s.shell}>
       <div className={s.top}>
-        <Link to="/" className={s.brand} aria-label="ШК ВБ — главная">
+        <Link to={lp('/')} className={s.brand} aria-label={t('ШК ВБ — главная', 'ШК ВБ — басты бет')}>
           <span className={s.mark} aria-hidden="true">
             ШК
           </span>
           ШК ВБ
         </Link>
+        <LanguageSwitch />
       </div>
 
       <main className={s.main}>
@@ -25,7 +30,8 @@ export function AuthShell() {
       </main>
 
       <div className={s.bottom}>
-        <a href="/offer">Оферта</a> · <a href="/privacy">Политика конфиденциальности</a>
+        <a href={lp('/offer')}>{t('Оферта', 'Оферта')}</a> ·{' '}
+        <a href={lp('/privacy')}>{t('Политика конфиденциальности', 'Құпиялылық саясаты')}</a>
       </div>
     </div>
   );

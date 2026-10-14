@@ -8,6 +8,7 @@ import {
   parseCustomCodes,
   removeDuplicateCodes,
 } from '../lib/custom-sticker-list';
+import { useT } from '../i18n';
 import s from './BulkCustomStickerEditor.module.css';
 
 const STORAGE_KEY = 'custom-sticker-list-draft';
@@ -32,6 +33,7 @@ export function BulkCustomStickerEditor({
 }) {
   const location = useLocation(),
     client = useQueryClient();
+  const t = useT();
   const [codes, setCodes] = useState<string[]>(() =>
     parseCustomCodes(localStorage.getItem(STORAGE_KEY) || ''),
   );
@@ -109,8 +111,11 @@ export function BulkCustomStickerEditor({
   return (
     <div className="stack">
       <Field
-        label="Номера ШК"
-        help="Вставьте 11-значные номера через пробел или каждый с новой строки."
+        label={t('Номера ШК', 'ШК нөмірлері')}
+        help={t(
+          'Вставьте 11-значные номера через пробел или каждый с новой строки.',
+          '11 таңбалы нөмірлерді бос орын арқылы немесе әрқайсысын жаңа жолдан қойыңыз.',
+        )}
       >
         <Textarea
           rows={6}
@@ -123,10 +128,10 @@ export function BulkCustomStickerEditor({
         />
       </Field>
       <div className={s.summary}>
-        <Badge>Всего: {codes.length}</Badge>
-        <Badge tone="success">Корректных: {validCount}</Badge>
-        <Badge tone={duplicateCount ? 'warning' : 'default'}>Дублей: {duplicateCount}</Badge>
-        <Badge tone={invalidCount ? 'error' : 'default'}>Неверной длины: {invalidCount}</Badge>
+        <Badge>{t('Всего:', 'Барлығы:')} {codes.length}</Badge>
+        <Badge tone="success">{t('Корректных:', 'Дұрыс:')} {validCount}</Badge>
+        <Badge tone={duplicateCount ? 'warning' : 'default'}>{t('Дублей:', 'Қайталанған:')} {duplicateCount}</Badge>
+        <Badge tone={invalidCount ? 'error' : 'default'}>{t('Неверной длины:', 'Ұзындығы қате:')} {invalidCount}</Badge>
       </div>
       {(duplicateCount > 0 || invalidCount > 0) && (
         <div className={s.actions}>
@@ -136,7 +141,7 @@ export function BulkCustomStickerEditor({
               variant="secondary"
               onClick={() => update(removeDuplicateCodes(codes))}
             >
-              Удалить дубли
+              {t('Удалить дубли', 'Қайталанғандарды жою')}
             </Button>
           )}
           {invalidCount > 0 && (
@@ -145,7 +150,7 @@ export function BulkCustomStickerEditor({
               variant="secondary"
               onClick={() => update(codes.filter(code => /^\d{11}$/.test(code)))}
             >
-              Удалить некорректные
+              {t('Удалить некорректные', 'Қателерін жою')}
             </Button>
           )}
         </div>
@@ -169,11 +174,11 @@ export function BulkCustomStickerEditor({
               />
               <span>
                 {item.invalid ? (
-                  <Badge tone="error">Нужно 11 цифр</Badge>
+                  <Badge tone="error">{t('Нужно 11 цифр', '11 цифр керек')}</Badge>
                 ) : item.duplicate ? (
-                  <Badge tone="warning">Дубль</Badge>
+                  <Badge tone="warning">{t('Дубль', 'Қайталанған')}</Badge>
                 ) : (
-                  <Badge tone="success">Готов</Badge>
+                  <Badge tone="success">{t('Готов', 'Дайын')}</Badge>
                 )}
               </span>
               <Button
@@ -181,7 +186,7 @@ export function BulkCustomStickerEditor({
                 variant="ghost"
                 onClick={() => update(codes.filter((_, i) => i !== index))}
               >
-                Удалить
+                {t('Удалить', 'Жою')}
               </Button>
             </div>
           ))}
@@ -189,11 +194,11 @@ export function BulkCustomStickerEditor({
       )}
       {!authenticated && codes.length > 0 && (
         <Alert tone="info">
-          Чтобы сохранить очередь и начать генерацию,{' '}
+          {t('Чтобы сохранить очередь и начать генерацию,', 'Кезекті сақтап, генерацияны бастау үшін')}{' '}
           <Link to="/login" state={{ from: location.pathname + location.search }}>
-            войдите в кабинет
+            {t('войдите в кабинет', 'кабинетке кіріңіз')}
           </Link>
-          . Список восстановится после входа.
+          {t('. Список восстановится после входа.', '. Кіргеннен кейін тізім қалпына келеді.')}
         </Alert>
       )}
       {authenticated && (
@@ -209,7 +214,7 @@ export function BulkCustomStickerEditor({
             }
             onClick={() => save.mutate()}
           >
-            Сохранить черновик
+            {t('Сохранить черновик', 'Жобаны сақтау')}
           </Button>
           <Button
             size="lg"
@@ -222,16 +227,19 @@ export function BulkCustomStickerEditor({
             }
             onClick={() => start.mutate()}
           >
-            Сгенерировать весь список
+            {t('Сгенерировать весь список', 'Бүкіл тізімді генерациялау')}
           </Button>
         </div>
       )}
       {active && (
         <div className={s.job}>
           <div className={s.progressHead}>
-            <strong>Сохранённая очередь</strong>
+            <strong>{t('Сохранённая очередь', 'Сақталған кезек')}</strong>
             <span>
-              {active.generated} из {active.total} готово · осталось {active.remaining}
+              {t(
+                `${active.generated} из ${active.total} готово · осталось ${active.remaining}`,
+                `${active.total} ішінен ${active.generated} дайын · ${active.remaining} қалды`,
+              )}
             </span>
           </div>
           <div className={s.progress}>
@@ -242,12 +250,12 @@ export function BulkCustomStickerEditor({
           <div className={s.actions}>
             {active.status !== 'draft' && (
               <Button loading={busy} onClick={() => process.mutate(active.id)}>
-                Продолжить
+                {t('Продолжить', 'Жалғастыру')}
               </Button>
             )}
             {active.status === 'paused_no_credits' && (
               <Button variant="secondary" onClick={onNeedPackages}>
-                Пополнить пакет
+                {t('Пополнить пакет', 'Пакетті толықтыру')}
               </Button>
             )}
           </div>
@@ -258,14 +266,14 @@ export function BulkCustomStickerEditor({
         .map(job => (
           <div className={s.job} key={job.id}>
             <strong>
-              {job.status === 'completed' ? 'Готово' : 'Сгенерировано'}: {job.generated} из{' '}
-              {job.total}
+              {job.status === 'completed' ? t('Готово', 'Дайын') : t('Сгенерировано', 'Генерацияланды')}:{' '}
+              {t(`${job.generated} из ${job.total}`, `${job.total} ішінен ${job.generated}`)}
             </strong>
             <div className={s.actions}>
               {job.batches.map((batch, i) => (
                 <Link key={batch.historyId} to="/cabinet/history">
                   <Button size="sm" variant="secondary">
-                    Пачка {i + 1} · {batch.count} шт.
+                    {t(`Пачка ${i + 1} · ${batch.count} шт.`, `${i + 1}-бума · ${batch.count} дана`)}
                   </Button>
                 </Link>
               ))}
@@ -274,7 +282,7 @@ export function BulkCustomStickerEditor({
         ))}
       {error && (
         <Alert tone="error">
-          {error instanceof Error ? error.message : 'Не удалось обработать очередь'}
+          {error instanceof Error ? error.message : t('Не удалось обработать очередь', 'Кезекті өңдеу мүмкін болмады')}
         </Alert>
       )}
     </div>

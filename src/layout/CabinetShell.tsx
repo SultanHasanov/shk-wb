@@ -29,40 +29,42 @@ import { cabinetKey, useCabinet } from '../api/cabinet';
 import { legacyStickerCodes } from '../lib/legacy-assets';
 import { forgetPendingOrder, readPendingOrders } from '../lib/pending-orders';
 import { preferCurrency } from '../lib/currency';
+import { LanguageSwitch } from '../components/LanguageSwitch';
+import { type T, useLocalePath, useT } from '../i18n';
 
-const cabinetNav = [
-  { to: '/cabinet', label: 'Обзор', Icon: Home, end: true },
+const cabinetNavItems = (t: T) => [
+  { to: '/cabinet', label: t('Обзор', 'Шолу'), Icon: Home, end: true },
   // Раньше за генерацией приходилось уходить на публичную главную и возвращаться руками
-  { to: '/cabinet/generator', label: 'Генератор', Icon: QrCode, end: false },
-  { to: '/cabinet/keys', label: 'Ключи и доступы', Icon: KeyRound, end: false },
-  { to: '/cabinet/packages', label: 'Пакеты и код', Icon: Package, end: false },
-  { to: '/cabinet/history', label: 'История генераций', Icon: FileClock, end: false },
-  { to: '/cabinet/orders', label: 'Заказы', Icon: Receipt, end: false },
+  { to: '/cabinet/generator', label: t('Генератор', 'Генератор'), Icon: QrCode, end: false },
+  { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
+  { to: '/cabinet/packages', label: t('Пакеты и код', 'Пакеттер мен код'), Icon: Package, end: false },
+  { to: '/cabinet/history', label: t('История генераций', 'Генерациялар тарихы'), Icon: FileClock, end: false },
+  { to: '/cabinet/orders', label: t('Заказы', 'Тапсырыстар'), Icon: Receipt, end: false },
   // Раньше маршрут /cabinet/referrals существовал, но отсутствовал в навигации —
   // попасть на него через интерфейс было нельзя.
-  { to: '/cabinet/referrals', label: 'Рефералы', Icon: Users, end: false },
-  { to: '/cabinet/profile', label: 'Профиль', Icon: User, end: false },
-  { to: '/cabinet/settings', label: 'Настройки', Icon: Settings, end: false },
-  { to: '/cabinet/notifications', label: 'Уведомления', Icon: Bell, end: false },
-] as const;
+  { to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users, end: false },
+  { to: '/cabinet/profile', label: t('Профиль', 'Профиль'), Icon: User, end: false },
+  { to: '/cabinet/settings', label: t('Настройки', 'Баптаулар'), Icon: Settings, end: false },
+  { to: '/cabinet/notifications', label: t('Уведомления', 'Хабарламалар'), Icon: Bell, end: false },
+];
 
-const titles: Record<string, string> = {
-  '/cabinet': 'Обзор',
-  '/cabinet/generator': 'Генератор',
-  '/cabinet/payment-result': 'Результат оплаты',
-  '/cabinet/keys': 'Ключи и доступы',
-  '/cabinet/packages': 'Пакеты и код доступа',
-  '/cabinet/history': 'История генераций',
-  '/cabinet/orders': 'Заказы',
-  '/cabinet/referrals': 'Рефералы',
-  '/cabinet/profile': 'Профиль',
-  '/cabinet/settings': 'Настройки',
-  '/cabinet/notifications': 'Уведомления',
-  '/cabinet/partner': 'Партнёр',
-};
+const titlesFor = (t: T): Record<string, string> => ({
+  '/cabinet': t('Обзор', 'Шолу'),
+  '/cabinet/generator': t('Генератор', 'Генератор'),
+  '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
+  '/cabinet/keys': t('Ключи и доступы', 'Кілттер мен қолжетімділік'),
+  '/cabinet/packages': t('Пакеты и код доступа', 'Пакеттер мен қолжетімділік коды'),
+  '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),
+  '/cabinet/orders': t('Заказы', 'Тапсырыстар'),
+  '/cabinet/referrals': t('Рефералы', 'Рефералдар'),
+  '/cabinet/profile': t('Профиль', 'Профиль'),
+  '/cabinet/settings': t('Настройки', 'Баптаулар'),
+  '/cabinet/notifications': t('Уведомления', 'Хабарламалар'),
+  '/cabinet/partner': t('Партнёр', 'Серіктес'),
+});
 
 /** Раздел партнёра виден только аккаунтам, которые владелец назначил партнёрами. */
-const partnerNav = { to: '/cabinet/partner', label: 'Партнёр', Icon: Handshake, end: false } as const;
+const partnerNavItem = (t: T) => ({ to: '/cabinet/partner', label: t('Партнёр', 'Серіктес'), Icon: Handshake, end: false });
 
 /** Оболочка кабинета: сайдбар уместен здесь, но не на публичных страницах. */
 export const CabinetShell = observer(() => {
@@ -79,7 +81,11 @@ export const CabinetShell = observer(() => {
   }, [isPartner]);
   const accountRef = useRef<HTMLDivElement>(null);
 
-  const email = auth.displayName || 'Пользователь';
+  const t = useT();
+  const lp = useLocalePath();
+  const cabinetNav = cabinetNavItems(t);
+  const titles = titlesFor(t);
+  const email = auth.displayName || t('Пользователь', 'Пайдаланушы');
 
   // Закрывать аккаунт-меню по клику вне и по Escape
   useEffect(() => {
@@ -229,10 +235,10 @@ export const CabinetShell = observer(() => {
       {/* Ссылка была только в PublicShell — клавиатурный пользователь кабинета
           каждый раз проходил весь сайдбар, чтобы добраться до содержимого. */}
       <a className="skip-link" href="#content">
-        Перейти к содержимому
+        {t('Перейти к содержимому', 'Мазмұнға өту')}
       </a>
 
-      <button className={s.scrim} onClick={ui.closeMobile} aria-label="Закрыть меню" />
+      <button className={s.scrim} onClick={ui.closeMobile} aria-label={t('Закрыть меню', 'Мәзірді жабу')} />
 
       <aside className={s.sidebar}>
         <NavLink to="/cabinet" className={s.brand}>
@@ -242,9 +248,9 @@ export const CabinetShell = observer(() => {
           <span className={s.label}>ШК ВБ</span>
         </NavLink>
 
-        <nav className={s.group} aria-label="Навигация кабинета">
-          <div className={s.groupTitle}>Кабинет</div>
-          {(cabinet.data?.partner ? [partnerNav, ...cabinetNav] : cabinetNav).map(({ to, label, Icon, end }) => (
+        <nav className={s.group} aria-label={t('Навигация кабинета', 'Кабинет навигациясы')}>
+          <div className={s.groupTitle}>{t('Кабинет', 'Кабинет')}</div>
+          {(cabinet.data?.partner ? [partnerNavItem(t), ...cabinetNav] : cabinetNav).map(({ to, label, Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -257,7 +263,7 @@ export const CabinetShell = observer(() => {
                 {to === '/cabinet/notifications' && Boolean(cabinet.data?.unreadNotifications) && (
                   <span
                     className={s.notificationBadge}
-                    aria-label={`Непрочитанных уведомлений: ${cabinet.data?.unreadNotifications}`}
+                    aria-label={t(`Непрочитанных уведомлений: ${cabinet.data?.unreadNotifications}`, `Оқылмаған хабарламалар: ${cabinet.data?.unreadNotifications}`)}
                   >
                     {(cabinet.data?.unreadNotifications ?? 0) > 99
                       ? '99+'
@@ -271,11 +277,11 @@ export const CabinetShell = observer(() => {
         </nav>
 
         <div className={s.bottom}>
-          <NavLink to="/" className={s.nav} onClick={ui.closeMobile}>
+          <NavLink to={lp('/')} className={s.nav} onClick={ui.closeMobile}>
             <Grid2X2 size={20} />
-            <span className={s.label}>На сайт</span>
+            <span className={s.label}>{t('На сайт', 'Сайтқа')}</span>
           </NavLink>
-          <button className={s.collapse} onClick={ui.toggleCollapsed} aria-label="Свернуть меню">
+          <button className={s.collapse} onClick={ui.toggleCollapsed} aria-label={t('Свернуть меню', 'Мәзірді жию')}>
             {ui.sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
@@ -287,13 +293,14 @@ export const CabinetShell = observer(() => {
             variant="ghost"
             className="mobile-only"
             onClick={ui.toggleMobile}
-            aria-label="Открыть меню"
+            aria-label={t('Открыть меню', 'Мәзірді ашу')}
           >
             <Menu size={21} />
           </Button>
-          <span className={s.title}>{titles[location.pathname] ?? 'Кабинет'}</span>
+          <span className={s.title}>{titles[location.pathname] ?? t('Кабинет', 'Кабинет')}</span>
 
           <div className={s.topActions}>
+            <LanguageSwitch />
             <div className={s.account} ref={accountRef}>
               <button
                 type="button"
@@ -322,7 +329,7 @@ export const CabinetShell = observer(() => {
                     }}
                   >
                     <Settings size={16} />
-                    Настройки
+                    {t('Настройки', 'Баптаулар')}
                   </button>
                   <button
                     type="button"
@@ -332,14 +339,14 @@ export const CabinetShell = observer(() => {
                       setMenuOpen(false);
                       try {
                         await auth.signOut();
-                        navigate('/');
+                        navigate(lp('/'));
                       } catch {
-                        navigate('/');
+                        navigate(lp('/'));
                       }
                     }}
                   >
                     <LogOut size={16} />
-                    Выйти
+                    {t('Выйти', 'Шығу')}
                   </button>
                 </div>
               )}

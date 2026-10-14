@@ -19,6 +19,7 @@ import { BotCheckoutPage } from '../pages/BotCheckoutPage';
 import { TelegramAccountPage } from '../pages/TelegramAccountPage';
 import { ScrollToHash } from './ScrollToHash';
 import { useMetrikaPageviews } from '../lib/metrika';
+import { useLocaleEffects } from '../i18n';
 
 // Админка грузится отдельным чанком: её видит один человек, а весит она как
 // половина публичного сайта. Кабинет — по той же причине: посетителю из поиска
@@ -26,37 +27,45 @@ import { useMetrikaPageviews } from '../lib/metrika';
 const AdminRoutes = lazy(() => import('./AdminRoutes'));
 const CabinetRoutes = lazy(() => import('./CabinetRoutes'));
 
+/** Публичные маршруты: монтируются дважды — на русском (/) и казахском (/kz). */
+const publicRoutes = (
+  <>
+    <Route index element={<GeneratorPage />} />
+    <Route path="cell-print" element={<CellPrintPage />} />
+    <Route path="program" element={<ProgramPage />} />
+    <Route path="vozvratnye-stikery-wb" element={<ReturnStickersPage />} />
+    <Route path="qr-korobov-wb" element={<BoxCodesPage />} />
+    <Route path="contacts" element={<ContactsPage />} />
+    <Route path="r/:code" element={<ReferralCapturePage />} />
+
+    {/* Юридические и сервисные: раньше — отдельные .html со старым CSS */}
+    <Route path="offer" element={<OfferPage />} />
+    <Route path="privacy" element={<PrivacyPage />} />
+    <Route path="cookie" element={<CookiePage />} />
+    <Route path="payment-result" element={<PaymentResultPage />} />
+
+    {/* Витрина дизайн-системы нужна разработке, а не посетителям сайта */}
+    {import.meta.env.DEV && <Route path="ui" element={<UiInventoryPage />} />}
+
+    {/* Раньше здесь был молчаливый редирект на «/» */}
+    <Route path="*" element={<NotFoundPage />} />
+  </>
+);
+
 export function App() {
   // Один вызов на всё приложение: переходы в кабинете и панели тоже должны
   // доходить до Метрики, иначе визит обрывается на публичной странице.
   useMetrikaPageviews();
+  useLocaleEffects();
 
   return (
     <>
       <ScrollToHash />
       <Routes>
-        {/* Публичная часть — маркетинговая шапка и футер, без сайдбара */}
-        <Route element={<PublicShell />}>
-          <Route index element={<GeneratorPage />} />
-          <Route path="cell-print" element={<CellPrintPage />} />
-          <Route path="program" element={<ProgramPage />} />
-          <Route path="vozvratnye-stikery-wb" element={<ReturnStickersPage />} />
-          <Route path="qr-korobov-wb" element={<BoxCodesPage />} />
-          <Route path="contacts" element={<ContactsPage />} />
-          <Route path="r/:code" element={<ReferralCapturePage />} />
-
-          {/* Юридические и сервисные: раньше — отдельные .html со старым CSS */}
-          <Route path="offer" element={<OfferPage />} />
-          <Route path="privacy" element={<PrivacyPage />} />
-          <Route path="cookie" element={<CookiePage />} />
-          <Route path="payment-result" element={<PaymentResultPage />} />
-
-          {/* Витрина дизайн-системы нужна разработке, а не посетителям сайта */}
-          {import.meta.env.DEV && <Route path="ui" element={<UiInventoryPage />} />}
-
-          {/* Раньше здесь был молчаливый редирект на «/» */}
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
+        {/* Публичная часть — маркетинговая шапка и футер, без сайдбара.
+            Та же ветка под /kz — казахская версия с отдельными адресами для поиска. */}
+        <Route element={<PublicShell />}>{publicRoutes}</Route>
+        <Route path="kz" element={<PublicShell />}>{publicRoutes}</Route>
 
         {/* Панель управления. Адрес не /admin-enigma: там до сих пор лежит
             статическая админка, и Vercel отдаёт файл раньше, чем маршрут SPA. */}

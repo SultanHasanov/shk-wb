@@ -128,6 +128,11 @@
   display: none;
 }
 
+.switches {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+
 .switchLabel {
   color: var(--text-muted);
   font-size: var(--fs-14);

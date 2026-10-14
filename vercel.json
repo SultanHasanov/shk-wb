@@ -71,6 +71,7 @@
     ,{ "source": "/cabinet", "destination": "/" }
     ,{ "source": "/panel/:path*", "destination": "/" }
     ,{ "source": "/panel", "destination": "/" }
+    ,{ "source": "/kz/:path*", "destination": "/kz" }
   ],
   "crons": [{ "path": "/api/cron/notifications", "schedule": "0 6 * * *" }],
   "redirects": [

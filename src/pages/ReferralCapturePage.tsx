@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { useT } from '../i18n';
 
 export function ReferralCapturePage() {
   const { code = '' } = useParams();
   const navigate = useNavigate();
+  const t = useT();
 
   useEffect(() => {
     // Раньше отсюда уводили на /register: человек по приглашению упирался в форму,
@@ -18,7 +20,7 @@ export function ReferralCapturePage() {
 
   return (
     <div role="status" style={{ padding: '3rem', textAlign: 'center' }}>
-      Открываем сайт…
+      {t('Открываем сайт…', 'Сайтты ашып жатырмыз…')}
     </div>
   );
 }

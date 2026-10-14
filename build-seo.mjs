@@ -22,6 +22,24 @@ export const ORIGIN = 'https://shk-wb.ru';
 
 export const SITE_NAME = 'ШК ВБ';
 
+/** Префикс казахской версии: /kz, /kz/program… (см. src/i18n/index.ts). */
+export const KZ_PREFIX = '/kz';
+
+/**
+ * Микроразметка для казахской страницы: те же блоки, но с /kz-адресами и
+ * языком kk-KZ. Названия внутри @graph остаются русскими — это имена
+ * продуктов, а не текст страницы; сам текст пререндер снимает уже казахским.
+ */
+export function localizeGraph(graph) {
+  const json = JSON.stringify(graph)
+    .replaceAll(`"${ORIGIN}/`, `"${ORIGIN}${KZ_PREFIX}/`)
+    .replaceAll(`${ORIGIN}${KZ_PREFIX}/"`, `${ORIGIN}${KZ_PREFIX}"`)
+    .replaceAll(`${ORIGIN}${KZ_PREFIX}/#`, `${ORIGIN}${KZ_PREFIX}#`)
+    .replaceAll('"ru-RU"', '"kk-KZ"')
+    .replaceAll('"Главная"', '"Басты бет"');
+  return JSON.parse(json);
+}
+
 /**
  * Подтверждение прав в Google Search Console — значение content из мета-тега,
  * который выдаёт способ проверки «Тег HTML».
@@ -234,6 +252,7 @@ export const PUBLIC_PAGES = {
     },
     ogType: 'website',
     image: OG_GENERATOR,
+    legal: true,
     graph: [breadcrumbs('/offer', 'Публичная оферта')],
   },
 
@@ -245,6 +264,7 @@ export const PUBLIC_PAGES = {
     },
     ogType: 'website',
     image: OG_GENERATOR,
+    legal: true,
     graph: [breadcrumbs('/privacy', 'Политика конфиденциальности')],
   },
 
@@ -256,6 +276,7 @@ export const PUBLIC_PAGES = {
     },
     ogType: 'website',
     image: OG_GENERATOR,
+    legal: true,
     graph: [breadcrumbs('/cookie', 'Использование cookie')],
   },
 };
