@@ -7,7 +7,7 @@ import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
   type CellPrintMarketplaceScope,
-  formatTotal,
+  formatTotal as formatRub,
   getCellPrintScopedPrice,
   getLicensePack,
   getPack,
@@ -17,6 +17,8 @@ import {
   POPULAR_LICENSE_PACK,
   POPULAR_PACK,
 } from '../../lib/pricing';
+import { useMoney } from '../../lib/currency';
+import { RubChargeNote } from '../../components/CurrencySwitch';
 
 // Покупки самой программы здесь больше нет: установщик скачивается бесплатно.
 export type LicenseCheckout =
@@ -37,6 +39,7 @@ export function LicenseCheckoutModal({
   availableKopecks: number;
   onClose: () => void;
 }) {
+  const { formatTotal } = useMoney();
   const [iterations, setIterations] = useState(POPULAR_LICENSE_PACK);
   const [durationDays, setDurationDays] = useState(30);
   const [deviceLimit, setDeviceLimit] = useState(
@@ -206,15 +209,16 @@ export function LicenseCheckoutModal({
         </Checkbox>
         {availableKopecks > 0 && (
           <Checkbox checked={useBalance} onChange={e => setUseBalance(e.target.checked)}>
-            Использовать реферальный баланс — доступно {formatTotal(availableKopecks / 100)}
+            Использовать реферальный баланс — доступно {formatRub(availableKopecks / 100)}
           </Checkbox>
         )}
         {useBalance && (
           <Alert tone="info">
-            Из реферального баланса спишется {formatTotal(appliedKopecks / 100)}. К оплате останется{' '}
-            {formatTotal(payableTotal)}.
+            Из реферального баланса спишется {formatRub(appliedKopecks / 100)}. К оплате останется{' '}
+            {formatRub(payableTotal)}.
           </Alert>
         )}
+        <RubChargeNote rub={payableTotal} />
         {payment.isError && <Alert tone="error">{payment.error.message}</Alert>}
         <div className="row">
           <Button disabled={!accepted} loading={payment.isPending} onClick={() => payment.mutate()}>

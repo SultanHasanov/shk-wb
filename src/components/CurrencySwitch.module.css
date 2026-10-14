@@ -1,0 +1,27 @@
+.switch {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  flex: none;
+}
+
+.option {
+  min-width: 32px;
+  padding: 4px 8px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-14);
+  cursor: pointer;
+}
+
+.option + .option {
+  border-left: 1px solid var(--border-strong);
+}
+
+.active {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}

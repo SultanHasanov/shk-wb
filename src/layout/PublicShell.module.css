@@ -124,6 +124,15 @@
   }
 }
 
+.mobileOnly {
+  display: none;
+}
+
+.switchLabel {
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+}
+
 .burger {
   display: none;
   border: 1px solid var(--border-strong);
@@ -228,6 +237,17 @@
 
   .burger {
     display: inline-flex;
+  }
+
+  .wideOnly {
+    display: none;
+  }
+
+  .mobileOnly {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3);
   }
 
   .tg span {

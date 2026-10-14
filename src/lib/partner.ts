@@ -88,7 +88,7 @@ export function suggestedKzt(cost: number, kztPerRub: number, markupPercent: num
 }
 
 const rubFormat = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 });
-const kztFormat = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', maximumFractionDigits: 0 });
+const kztFormat = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'KZT', currencyDisplay: 'narrowSymbol', maximumFractionDigits: 0 });
 
 export const formatRub = (value: number) => rubFormat.format(value);
 export const formatKzt = (value: number) => kztFormat.format(value);

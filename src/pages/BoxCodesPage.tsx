@@ -6,9 +6,10 @@ import { Steps } from '../components/Steps';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { Accordion, Button, Card } from '../ui';
-import { formatPerUnit, MIN_PER_UNIT } from '../lib/pricing';
+import { MIN_PER_UNIT } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
 import s from './landing.module.css';
+import { useMoney } from '../lib/currency';
 
 /**
  * Посадочная под QR-коды возвратных коробок.
@@ -80,6 +81,7 @@ const FAQ = [
 ] as const;
 
 export function BoxCodesPage() {
+  const { formatPerUnit } = useMoney();
   useDocumentMeta(
     'ШК коробов WB — генератор QR-кодов возвратных коробок',
     'Генератор QR-кодов для возвратных коробок Wildberries: свой префикс, уникальные номера, готовый PDF и печать на термопринтере. Пакеты от 0,27 ₽ за штуку.',

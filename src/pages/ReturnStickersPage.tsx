@@ -6,9 +6,10 @@ import { Steps } from '../components/Steps';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { Accordion, Button, Card } from '../ui';
-import { formatPerUnit, MIN_PER_UNIT } from '../lib/pricing';
+import { MIN_PER_UNIT } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
 import s from './landing.module.css';
+import { useMoney } from '../lib/currency';
 
 const STEPS = [
   {
@@ -67,6 +68,7 @@ const FAQ = [
 ] as const;
 
 export function ReturnStickersPage() {
+  const { formatPerUnit } = useMoney();
   useDocumentMeta(
     'Возвратные стикеры ВБ — создать и скачать онлайн',
     'Создайте уникальные возвратные ШК Wildberries онлайн, проверьте готовые этикетки и скачайте одним PDF. Пакеты генераций от 0,27 ₽ за штуку.',

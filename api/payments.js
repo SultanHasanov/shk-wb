@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { supabaseFetch } = require('../server/_supabase');
+const { getKztRate } = require('../server/_partners');
 const {
   CELL_PRINT_PRICES,
   completeOrder,
@@ -65,8 +66,13 @@ module.exports = async function handler(req, res) {
   const action = String(req.query.action || '');
   try {
     if (action === 'config' && req.method === 'GET') {
-      const settings = await supabaseFetch('payment_settings?select=enabled&id=eq.true&limit=1');
+      const [settings, kztPerRub] = await Promise.all([
+        supabaseFetch('payment_settings?select=enabled&id=eq.true&limit=1'),
+        getKztRate(),
+      ]);
       return res.json({
+        // Курс только для показа цен в ₸ на сайте; списание всегда в рублях.
+        kztPerRub,
         enabled: Boolean(settings[0]?.enabled && hasYookassa()),
         testMode: process.env.YOOKASSA_TEST_MODE !== 'false',
         packages: Object.entries(PACKAGE_PRICES).map(([quantity, total]) => ({

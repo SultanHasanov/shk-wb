@@ -5,18 +5,19 @@ import { Link, useLocation } from 'react-router-dom';
 import { CircleCheck } from 'lucide-react';
 import { Alert, Button, Checkbox, Field, Input, Modal } from '../ui';
 import {
-  formatPerUnit,
-  formatTotal,
+  formatTotal as formatRub,
   getPack,
   HEADLINE_PACK_LIST,
   POPULAR_PACK,
 } from '../lib/pricing';
 import { Section } from './Section';
+import { RubChargeNote } from './CurrencySwitch';
 import s from './PricingPacks.module.css';
 import { api } from '../api/client';
 import { rememberPendingOrder } from '../lib/pending-orders';
 import { useStores } from '../stores/root-store';
 import { useCabinet } from '../api/cabinet';
+import { useMoney } from '../lib/currency';
 
 /** Блок покупки пакетов через действующий серверный платёжный API. */
 
@@ -25,6 +26,7 @@ import { useCabinet } from '../api/cabinet';
  *  покупка спрашивает только количество; тип и режим в генераторе выбирают, что
  *  печатать, а не за что платить. */
 function PackGrid({ value, onChange }: { value: number; onChange: (quantity: number) => void }) {
+  const { formatTotal, formatPerUnit } = useMoney();
   return (
     <div className={s.grid} role="radiogroup" aria-label="Пакеты генераций">
       {HEADLINE_PACK_LIST.map(pack => {
@@ -63,6 +65,7 @@ function PackGrid({ value, onChange }: { value: number; onChange: (quantity: num
 
 /** Полная форма покупки: количество → сумма → оплата. */
 export const PackPurchase = observer(() => {
+  const { formatTotal, formatPerUnit } = useMoney();
   const [quantity, setQuantity] = useState<number>(POPULAR_PACK);
   const [accepted, setAccepted] = useState(false);
   const [useBalance, setUseBalance] = useState(false);
@@ -138,7 +141,7 @@ export const PackPurchase = observer(() => {
             onChange={e => setUseBalance(e.target.checked)}
           >
             Использовать доступный реферальный баланс — доступно{' '}
-            {cabinet.isPending ? '…' : formatTotal(availableKopecks / 100)}
+            {cabinet.isPending ? '…' : formatRub(availableKopecks / 100)}
           </Checkbox>
         )}
 
@@ -194,8 +197,8 @@ export const PackPurchase = observer(() => {
 
             {auth.isAuthenticated && useBalance && (
               <Alert tone="info">
-                Из реферального баланса спишется {formatTotal(appliedKopecks / 100)}. К оплате
-                останется {formatTotal(payableTotal)}.
+                Из реферального баланса спишется {formatRub(appliedKopecks / 100)}. К оплате
+                останется {formatRub(payableTotal)}.
               </Alert>
             )}
 
@@ -213,6 +216,8 @@ export const PackPurchase = observer(() => {
                 </Field>
               </>
             )}
+
+            <RubChargeNote rub={payableTotal} />
 
             <div className="row">
               <Button

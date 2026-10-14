@@ -26,10 +26,11 @@ import {
   Segmented,
   Skeleton,
 } from '../ui';
-import { formatPerUnit, MIN_PER_UNIT } from '../lib/pricing';
+import { MIN_PER_UNIT } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
 import s from './GeneratorPage.module.css';
 import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
+import { useMoney } from '../lib/currency';
 
 /** Остаток по коду один на все виды генерации: тип и режим ниже выбирают, что
  *  печатать, а не из какого лимита списывать. */
@@ -189,6 +190,7 @@ function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: stri
  * на главной это скролл к блоку тарифов, в кабинете — переход на свою страницу.
  */
 export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages: () => void }) => {
+  const { formatPerUnit } = useMoney();
   const { generator: g, auth } = useStores();
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -739,6 +741,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
 /** Публичная главная: лендинг вокруг той же рабочей части генератора. */
 export const GeneratorPage = observer(() => {
+  const { formatPerUnit } = useMoney();
   // Ключ идёт неразорванным и слева: «Генератор возвратных ШК» разбивал фразу
   // словом посередине, и по запросу «генератор ШК» страница не находилась вовсе.
   useDocumentMeta(

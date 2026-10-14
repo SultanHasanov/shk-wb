@@ -42,12 +42,13 @@ import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
   computerWord,
-  formatTotal,
   getCellPrintScopedPrice,
   getCellPrintSavingPercent,
 } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
 import s from './CellPrintPage.module.css';
+import { useMoney } from '../lib/currency';
+import { RubChargeNote } from '../components/CurrencySwitch';
 
 type Payment = { confirmationUrl: string };
 
@@ -208,6 +209,7 @@ function goToKey() {
 }
 
 export const CellPrintPage = observer(() => {
+  const { formatTotal } = useMoney();
   useDocumentMeta(
     'Печать ячеек — автопечать этикетки при сканировании в WB_PVZ',
     'Программа для Windows печатает номер ячейки на термопринтере сразу после скана товара в WB_PVZ. Скачивание бесплатно, оплата только за ключ.',
@@ -390,6 +392,8 @@ export const CellPrintPage = observer(() => {
               >
                 Купить ключ за {formatTotal(total)}
               </Button>
+
+              <RubChargeNote rub={total} />
 
               <p className={s.note}>
                 Платёж проходит на стороне ЮKassa — данные карты не попадают на сайт. Ключ

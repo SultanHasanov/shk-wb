@@ -18,8 +18,6 @@ import { SpecList } from '../components/SpecList';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { Accordion, Alert, Badge, Button, Card, Checkbox, Stat } from '../ui';
 import {
-  formatPerUnit,
-  formatTotal,
   getLicensePack,
   iterationWord,
   LICENSE_PACK_LIST,
@@ -28,6 +26,8 @@ import {
 import { PROGRAM_DOWNLOAD_URL } from '../lib/downloads';
 import { useDocumentMeta } from '../lib/seo';
 import s from './ProgramPage.module.css';
+import { useMoney } from '../lib/currency';
+import { RubChargeNote } from '../components/CurrencySwitch';
 
 type Payment = { confirmationUrl: string };
 
@@ -136,6 +136,7 @@ function goToIterations() {
 }
 
 export function ProgramPage() {
+  const { formatTotal, formatPerUnit } = useMoney();
   useDocumentMeta(
     'Подбор кодов — программа для ПВЗ Wildberries на Windows',
     'Программа находит код клиента по номеру ячейки, показывает товары заказа и отзывы ПВЗ. Скачивание бесплатное, списание только за успешный подбор.',
@@ -341,6 +342,8 @@ export function ProgramPage() {
             Купить {selected.quantity} {iterationWord(selected.quantity)} за{' '}
             {formatTotal(selected.total)}
           </Button>
+
+          <RubChargeNote rub={selected.total} />
 
           {buyPack.isError && <Alert tone="error">{buyPack.error.message}</Alert>}
 

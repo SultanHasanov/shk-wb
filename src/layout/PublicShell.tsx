@@ -6,6 +6,7 @@ import { Button } from '../ui';
 import { AnnouncementBanner } from '../components/AnnouncementBanner';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { CookieBanner } from '../components/CookieBanner';
+import { CurrencySwitch } from '../components/CurrencySwitch';
 import { TelegramIcon } from '../components/TelegramIcon';
 import { useStores } from '../stores/root-store';
 import { useVisitCounter } from '../lib/visits';
@@ -84,9 +85,15 @@ export const PublicShell = observer(() => {
                 {item.label}
               </NavLink>
             ))}
+            {/* На телефоне в шапке нет места — валюта переезжает в выпадающее меню. */}
+            <div className={s.mobileOnly}>
+              <span className={s.switchLabel}>Валюта цен</span>
+              <CurrencySwitch />
+            </div>
           </nav>
 
           <div className={s.actions}>
+            <CurrencySwitch className={s.wideOnly} />
             {/* Шапка уже плотная: четыре пункта навигации, канал, вход и бургер.
                 Поэтому пилюля бота показывается только на широком экране — на
                 мобильном он доступен из блока у генератора и из футера. */}

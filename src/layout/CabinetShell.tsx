@@ -28,6 +28,7 @@ import { ApiError, api } from '../api/client';
 import { cabinetKey, useCabinet } from '../api/cabinet';
 import { legacyStickerCodes } from '../lib/legacy-assets';
 import { forgetPendingOrder, readPendingOrders } from '../lib/pending-orders';
+import { preferCurrency } from '../lib/currency';
 
 const cabinetNav = [
   { to: '/cabinet', label: 'Обзор', Icon: Home, end: true },
@@ -71,6 +72,11 @@ export const CabinetShell = observer(() => {
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const cabinet = useCabinet();
+  // Партнёр работает с клиентами в тенге — показываем цены в ₸, пока он сам не выберет иначе.
+  const isPartner = Boolean(cabinet.data?.partner);
+  useEffect(() => {
+    if (isPartner) preferCurrency('KZT');
+  }, [isPartner]);
   const accountRef = useRef<HTMLDivElement>(null);
 
   const email = auth.displayName || 'Пользователь';
