@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Partner, PartnerBalance, PartnerItem, PartnerLedgerEntry, PartnerPayment } from '../lib/partner';
 
 /**
  * Клиент админки.
@@ -556,5 +557,57 @@ export function useAdminTelegramBroadcast() {
         method: 'POST', body: JSON.stringify(body),
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: adminKeys.telegramAudience }),
+  });
+}
+
+/* ============ Партнёры ============ */
+
+const PARTNERS = `${RESOURCE}partners`;
+
+export type AdminPartnerRow = Partner & { account: string | null; balance: PartnerBalance };
+export type AdminPartnerDetail = {
+  partner: Partner & { account: string | null };
+  items: PartnerItem[];
+  ledger: PartnerLedgerEntry[];
+  payments: PartnerPayment[];
+  balance: PartnerBalance;
+};
+
+export const adminPartnerKeys = {
+  all: ['admin', 'partners'] as const,
+  list: ['admin', 'partners', 'list'] as const,
+  detail: (id: string) => ['admin', 'partners', 'detail', id] as const,
+  settings: ['admin', 'partners', 'settings'] as const,
+};
+
+export function useAdminPartners() {
+  return useQuery({
+    queryKey: adminPartnerKeys.list,
+    queryFn: () => adminApi<{ items: AdminPartnerRow[] }>(`${PARTNERS}&action=list`).then(r => r.items),
+  });
+}
+
+export function useAdminPartner(id: string) {
+  return useQuery({
+    queryKey: adminPartnerKeys.detail(id),
+    queryFn: () => adminApi<AdminPartnerDetail>(`${PARTNERS}&action=detail&id=${encodeURIComponent(id)}`),
+    enabled: Boolean(id),
+  });
+}
+
+export function useAdminPartnerSettings() {
+  return useQuery({
+    queryKey: adminPartnerKeys.settings,
+    queryFn: () => adminApi<{ kztPerRub: number }>(`${PARTNERS}&action=settings`),
+  });
+}
+
+/** Любое действие с партнёром освежает и список, и карточку, и курс. */
+export function useAdminPartnerAction<TBody, TResult = unknown>(action: string, method: 'POST' | 'PATCH' = 'POST') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TBody) =>
+      adminApi<TResult>(`${PARTNERS}&action=${action}`, { method, body: JSON.stringify(body) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: adminPartnerKeys.all }),
   });
 }

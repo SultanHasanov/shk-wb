@@ -149,6 +149,8 @@ export type CabinetBootstrap = {
   notifications: Notification[];
   unreadNotifications: number;
   referral: ReferralSummary;
+  /** Есть, если аккаунт назначен партнёром (см. раздел «Партнёр»). */
+  partner?: { name: string; active: boolean } | null;
   overview: CabinetOverview;
 };
 export type CursorPage<T> = { items: T[]; nextCursor: string | null };

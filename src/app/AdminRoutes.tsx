@@ -3,7 +3,7 @@ import { AdminShell } from '../layout/AdminShell';
 import { RequireAdmin } from '../layout/RequireAdmin';
 import {
   AdminAccessCodesPage, AdminAnnouncementsPage, AdminCabinetPage, AdminCellPrintPage,
-  AdminOverviewPage, AdminPaymentsPage, AdminPoolPage, AdminProgramPage, AdminUserPage,
+  AdminOverviewPage, AdminPartnerPage, AdminPartnersPage, AdminPaymentsPage, AdminPoolPage, AdminProgramPage, AdminUserPage,
   AdminUserPreviewPage,
   AdminUsersPage,
 } from '../pages/admin';
@@ -21,6 +21,8 @@ export default function AdminRoutes() {
           <Route path="access-codes" element={<AdminAccessCodesPage />} />
           <Route path="sticker-pool" element={<AdminPoolPage kind="stickerPool" title="Диапазон номеров стикеров" />} />
           <Route path="box-pool" element={<AdminPoolPage kind="boxPool" title="Диапазон номеров коробок" />} />
+          <Route path="partners" element={<AdminPartnersPage />} />
+          <Route path="partners/:partnerId" element={<AdminPartnerPage />} />
           <Route path="payments" element={<AdminPaymentsPage />} />
           <Route path="program" element={<AdminProgramPage />} />
           <Route path="cell-print" element={<AdminCellPrintPage />} />

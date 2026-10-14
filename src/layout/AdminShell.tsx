@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   Bell, Boxes, CreditCard, Grid2X2, KeyRound, LayoutDashboard, LogOut, Megaphone,
-  Menu, Package, Printer, Ticket, Users, Wallet, X,
+  Handshake, Menu, Package, Printer, Ticket, Users, Wallet, X,
 } from 'lucide-react';
 import { useAdminLogout } from '../api/admin';
 import { Button } from '../ui';
@@ -12,6 +12,7 @@ const nav = [
   { to: '/panel', label: 'Обзор', Icon: LayoutDashboard, end: true },
   { to: '/panel/users', label: 'Пользователи', Icon: Users, end: false },
   { to: '/panel/access-codes', label: 'Коды доступа', Icon: KeyRound, end: false },
+  { to: '/panel/partners', label: 'Партнёры', Icon: Handshake, end: false },
   { to: '/panel/sticker-pool', label: 'Пул стикеров', Icon: Package, end: false },
   { to: '/panel/box-pool', label: 'Пул коробок', Icon: Boxes, end: false },
   { to: '/panel/payments', label: 'Оплата', Icon: CreditCard, end: false },
@@ -25,6 +26,7 @@ const titles: Record<string, string> = {
   '/panel': 'Обзор',
   '/panel/users': 'Пользователи',
   '/panel/access-codes': 'Коды доступа к генератору',
+  '/panel/partners': 'Партнёры',
   '/panel/sticker-pool': 'Диапазон номеров стикеров',
   '/panel/box-pool': 'Диапазон номеров коробок',
   '/panel/payments': 'Оплата',
@@ -38,7 +40,7 @@ export function AdminShell() {
   const { pathname } = useLocation();
   const logout = useAdminLogout();
   const [menuOpen, setMenuOpen] = useState(false);
-  const title = titles[pathname] ?? (pathname.startsWith('/panel/users/') ? 'Пользователь' : 'Панель');
+  const title = titles[pathname] ?? (pathname.startsWith('/panel/users/') ? 'Пользователь' : pathname.startsWith('/panel/partners/') ? 'Партнёр' : 'Панель');
   const close = () => setMenuOpen(false);
 
   // Раздел меняется — ящик закрываем: иначе после перехода он висел поверх

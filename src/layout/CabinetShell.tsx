@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FileClock,
   Grid2X2,
+  Handshake,
   Home,
   KeyRound,
   LogOut,
@@ -56,7 +57,11 @@ const titles: Record<string, string> = {
   '/cabinet/profile': 'Профиль',
   '/cabinet/settings': 'Настройки',
   '/cabinet/notifications': 'Уведомления',
+  '/cabinet/partner': 'Партнёр',
 };
+
+/** Раздел партнёра виден только аккаунтам, которые владелец назначил партнёрами. */
+const partnerNav = { to: '/cabinet/partner', label: 'Партнёр', Icon: Handshake, end: false } as const;
 
 /** Оболочка кабинета: сайдбар уместен здесь, но не на публичных страницах. */
 export const CabinetShell = observer(() => {
@@ -233,7 +238,7 @@ export const CabinetShell = observer(() => {
 
         <nav className={s.group} aria-label="Навигация кабинета">
           <div className={s.groupTitle}>Кабинет</div>
-          {cabinetNav.map(({ to, label, Icon, end }) => (
+          {(cabinet.data?.partner ? [partnerNav, ...cabinetNav] : cabinetNav).map(({ to, label, Icon, end }) => (
             <NavLink
               key={to}
               to={to}

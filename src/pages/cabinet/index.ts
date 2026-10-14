@@ -8,3 +8,4 @@ export { ReferralsPage } from './ReferralsPage';
 export { ProfilePage } from './ProfilePage';
 export { SettingsPage } from './SettingsPage';
 export { NotificationsPage } from './NotificationsPage';
+export { PartnerPage } from './PartnerPage';

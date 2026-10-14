@@ -9,6 +9,7 @@ const {
 } = require('../server/_user-auth');
 const { createNotification } = require('../server/_notifications');
 const { enforceRateLimit } = require('../server/_rate-limit');
+const partners = require('../server/_partners');
 
 // Реферальная ссылка публичная и должна переживать каждый Vercel-деплой.
 // VERCEL_URL здесь использовать нельзя: он содержит технический адрес сборки.
@@ -298,7 +299,7 @@ async function getOrders(userId, count = 25, cursor = '') {
 async function bootstrap(req, res, user) {
   await ensureAccount(user);
   await maybeBindReferral(req, user);
-  const [profile, assets, orders, notifications, unread, referral] = await Promise.all([
+  const [profile, assets, orders, notifications, unread, referral, partner] = await Promise.all([
     getProfile(user),
     getAssets(user.id),
     getOrders(user.id, 5),
@@ -307,6 +308,8 @@ async function bootstrap(req, res, user) {
     ),
     supabaseFetch(`in_app_notifications?user_id=eq.${q(user.id)}&read_at=is.null&select=id`),
     getReferral(user.id),
+    // До применения миграции 20261015 таблицы нет — кабинет не должен падать.
+    partners.getPartnerByUser(user.id).catch(() => null),
   ]);
   const stickerAssets = assets.filter(x => x.type === 'sticker');
   const remaining = stickerAssets.reduce(
@@ -330,6 +333,7 @@ async function bootstrap(req, res, user) {
     notifications: notifications.map(mapNotification),
     unreadNotifications: unread.length,
     referral,
+    partner: partner ? { name: partner.name, active: partner.active } : null,
     overview: {
       activeKeys: assets.filter(x => x.active).length,
       stickersLeft: remaining,
@@ -748,6 +752,41 @@ async function cronNotifications(req, res) {
   }
 }
 
+/**
+ * Панель партнёра. Живёт в кабинете, а не отдельной функцией в api/: партнёр —
+ * обычный пользователь сайта, а лимит функций Vercel уже выбран.
+ * Подоперация — ?op=me|items|ledger|payments|issue|topup|toggle|markup.
+ */
+async function handlePartner(req, res, user) {
+  const partner = await partners.getPartnerByUser(user.id).catch(() => null);
+  if (!partner) return res.status(403).json({ error: 'Партнёрский доступ не подключён', code: 'PARTNER_FORBIDDEN' });
+  const op = String(req.query?.op || 'me');
+  try {
+    if (req.method === 'GET' && op === 'me') {
+      const [kztPerRub, balance] = await Promise.all([partners.getKztRate(), partners.getBalance(partner.id)]);
+      return res.json({ partner: partners.mapPartner(partner), kztPerRub, balance });
+    }
+    if (req.method === 'GET' && op === 'payments') return res.json({ items: await partners.listPayments(partner.id) });
+    if (req.method === 'GET' && op === 'items') return res.json({ items: await partners.listPartnerItems(partner.id) });
+    if (req.method === 'GET' && op === 'ledger') return res.json({ items: await partners.listPartnerLedger(partner.id) });
+    if (req.method !== 'POST') return res.status(404).json({ error: 'Метод партнёра не найден', code: 'NOT_FOUND' });
+    // Отключённый партнёр видит свои выпуски, но выпускать и менять ничего не может.
+    if (!partner.active) return res.status(403).json({ error: partners.RPC_ERRORS.PARTNER_INACTIVE, code: 'PARTNER_INACTIVE' });
+    if (!(await enforceRateLimit(req, res, { scope: 'partner-write', limit: 60, windowSeconds: 60 }))) return;
+    const result =
+      op === 'issue' ? await partners.issue(partner.id, req.body)
+      : op === 'topup' ? await partners.topup(partner.id, req.body)
+      : op === 'toggle' ? await partners.toggle(partner.id, req.body)
+      : op === 'markup' ? await partners.setMarkup(partner.id, req.body)
+      : { error: 'Метод партнёра не найден', status: 404 };
+    if (result.error) return res.status(result.status || 400).json({ error: result.error, code: 'VALIDATION_ERROR' });
+    return res.status(op === 'issue' ? 201 : 200).json(result);
+  } catch (error) {
+    if (partners.sendPartnerError(res, error)) return;
+    throw error;
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (action(req) === 'cron') return cronNotifications(req, res);
   const user = await requireUser(req, res);
@@ -821,6 +860,7 @@ module.exports = async function handler(req, res) {
       return res.status(201).json({ id });
     }
     if (a === 'account') return deleteAccount(req, res, user);
+    if (a === 'partner') return handlePartner(req, res, user);
     return res.status(404).json({ error: 'Метод кабинета не найден', code: 'NOT_FOUND' });
   } catch (error) {
     const details = JSON.stringify(error.details || '');

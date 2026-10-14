@@ -9,6 +9,7 @@ import {
   NotificationsPage,
   OrdersPage,
   OverviewPage,
+  PartnerPage,
   PackagesPage,
   ProfilePage,
   ReferralsPage,
@@ -37,6 +38,7 @@ export default function CabinetRoutes() {
           <Route path="profile" element={<ProfilePage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="partner" element={<PartnerPage />} />
         </Route>
       </Route>
     </Routes>

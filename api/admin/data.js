@@ -6,6 +6,7 @@ const { sendApiError, supabaseFetch, supabaseFetchWithMeta } = require('../../se
 const { hasYookassa, yookassa, completeOrder, PACKAGE_PRICES } = require('../../server/_payments');
 const handleCabinetAdmin = require('../../server/_admin-cabinet');
 const handleAdminUsers = require('../../server/_admin-users');
+const handleAdminPartners = require('../../server/_admin-partners');
 const { enforceRateLimit } = require('../../server/_rate-limit');
 // Выдача кодов и ключей живёт в общем модуле: тем же самым занимается раздел
 // «Пользователи», и вторая копия проверок разошлась бы с этой.
@@ -21,6 +22,7 @@ module.exports = async function handler(req, res) {
   if (req.query.auth === 'session') return handleSession(req, res);
   if (!requireAdmin(req, res)) return;
   if (req.query.resource === 'users') return handleAdminUsers(req, res);
+  if (req.query.resource === 'partners') return handleAdminPartners(req, res);
   if (req.query.resource === 'stickerPool') return handleStickerPool(req, res);
   if (req.query.resource === 'boxPool') return handleBoxPool(req, res);
   if (req.query.resource === 'paymentAdmin') return handlePaymentAdmin(req, res);

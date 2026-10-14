@@ -4,6 +4,8 @@ export { AdminCabinetPage } from './AdminCabinetPage';
 export { AdminCellPrintPage } from './AdminCellPrintPage';
 export { AdminLoginPage } from './AdminLoginPage';
 export { AdminOverviewPage } from './AdminOverviewPage';
+export { AdminPartnerPage } from './AdminPartnerPage';
+export { AdminPartnersPage } from './AdminPartnersPage';
 export { AdminPaymentsPage } from './AdminPaymentsPage';
 export { AdminPoolPage } from './AdminPoolPage';
 export { AdminProgramPage } from './AdminProgramPage';
