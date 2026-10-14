@@ -7,8 +7,12 @@ const { generateStickers, selectAccessCode } = require('./_sticker-generation');
 const { PACKAGE_PRICES } = require('./_payments');
 const { accountHasValuableData, isTechnicalTelegramUser } = require('./_telegram-account');
 const wbPvz = require('./_wb-pvz');
+const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
+// Коды из 6 цифр подбираются перебором, поэтому попыток ввода — не больше 10 в час.
+const CODE_ATTEMPTS_PER_HOUR = 10;
+const codeAttemptsFallback = new Map();
 const GOODS_SNAPSHOT_TTL_MS = 2 * 60 * 1000;
 const localWbConnections = new Map();
 const localGoodsSnapshots = new Map();
@@ -200,8 +204,81 @@ function packageKeyboard() {
   for (let index = 0; index < quantities.length; index += 2) {
     rows.push(quantities.slice(index, index + 2).map(quantity => ({ text: `${quantity} шт. — ${PACKAGE_PRICES[quantity]} ₽`, callback_data: `buy:pack:${quantity}` })));
   }
+  rows.push([{ text: '🔑 У меня есть код', callback_data: 'code:enter' }]);
   rows.push([{ text: 'Отмена', callback_data: 'gen:cancel' }]);
   return choiceKeyboard(rows);
+}
+
+function balanceKeyboard() {
+  return choiceKeyboard([
+    [{ text: '🔑 Ввести код', callback_data: 'code:enter' }],
+    [{ text: '💳 Купить генерации', callback_data: 'code:buy' }],
+  ]);
+}
+
+/** Текст ошибки claim_user_asset для человека; null — ошибка не из этих, пусть летит дальше. */
+function claimErrorText(error) {
+  const details = JSON.stringify(error?.details || error?.message || '');
+  if (details.includes('Asset belongs to another user')) return 'Этот код уже привязан к другому аккаунту. Если это ваш код, напишите в поддержку.';
+  if (details.includes('Asset not found')) return 'Код не найден. Проверьте цифры и отправьте код ещё раз.';
+  if (details.includes('User is not confirmed')) return 'Кабинет не подтверждён. Откройте сайт через Mini App и войдите заново.';
+  return null;
+}
+
+async function consumeCodeAttempt(telegramId) {
+  const keyHash = crypto.createHash('sha256').update(`bot-code:${telegramId}`).digest('hex');
+  try {
+    const allowed = await supabaseFetch('rpc/consume_api_rate_limit', {
+      method: 'POST',
+      body: JSON.stringify({ p_scope: 'bot-access-code', p_key_hash: keyHash, p_limit: CODE_ATTEMPTS_PER_HOUR, p_window_seconds: 3600 }),
+    });
+    return allowed === true;
+  } catch {
+    const now = Date.now(), current = codeAttemptsFallback.get(keyHash);
+    if (!current || current.resetAt <= now) { codeAttemptsFallback.set(keyHash, { hits: 1, resetAt: now + 3600 * 1000 }); return true; }
+    current.hits += 1;
+    return current.hits <= CODE_ATTEMPTS_PER_HOUR;
+  }
+}
+
+/**
+ * Ввод кода доступа — например, кода от партнёра. Черновик генерации сохраняется,
+ * чтобы после привязки кода сразу вернуться к подтверждению, а не начинать заново.
+ */
+async function askAccessCode(from, chatId, draft = {}) {
+  const userId = draft.userId || await findUser(from.id);
+  if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App — код привяжется к вашему кабинету.'); return; }
+  await saveSession(from, chatId, 'await_access_code', { ...draft, userId });
+  await sendMessage(chatId, '<b>Введите код доступа</b>\n\nОтправьте код сообщением — например, <code>123456</code>. Генерации из кода добавятся к вашему остатку.', { reply_markup: choiceKeyboard([[{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
+}
+
+async function redeemAccessCode(from, chatId, session, text) {
+  const draft = session.draft || {};
+  const code = normalizeAccessCode(text.replace(/\s+/g, ''));
+  if (!isAccessCode(code)) return sendMessage(chatId, 'Код — это 6 цифр, например <code>123456</code>. Отправьте его ещё раз или нажмите /cancel.');
+  if (!await consumeCodeAttempt(from.id)) return sendMessage(chatId, 'Слишком много попыток. Попробуйте через час.', { reply_markup: HOME_KEYBOARD });
+  try {
+    await supabaseFetch('rpc/claim_user_asset', { method: 'POST', body: JSON.stringify({ p_user_id: draft.userId, p_kind: 'sticker', p_value: code }) });
+  } catch (error) {
+    const reason = claimErrorText(error);
+    if (!reason) throw error;
+    return sendMessage(chatId, reason);
+  }
+  const rows = await supabaseFetch(`sticker_access_codes?code=eq.${encodeURIComponent(code)}&select=active,generation_limit,generation_used&limit=1`);
+  const row = rows[0];
+  if (row && !row.active) {
+    await clearSession(from.id);
+    return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> привязан к кабинету, но сейчас отключён. Обратитесь к тому, кто выдал код.`, { reply_markup: HOME_KEYBOARD });
+  }
+  const left = row ? Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)) : 0;
+  await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: HOME_KEYBOARD });
+  // Пришли из генерации, где не хватило остатка, — продолжаем с тем же черновиком.
+  if (draft.mode) {
+    const { pendingPurchase, purchaseQuantity, ...rest } = draft;
+    return requestConfirmation(from, chatId, rest);
+  }
+  await clearSession(from.id);
+  return showBalance(from, chatId);
 }
 
 function requiredUnits(draft) { return draft.mode === 'range' ? Number(draft.quantity) : 1; }
@@ -222,7 +299,7 @@ async function requestConfirmation(from, chatId, draft) {
   if (!accessCode) {
     draft.pendingPurchase = true;
     await saveSession(from, chatId, 'confirm', draft);
-    await sendMessage(chatId, `${units > 1 ? 'Для этой пачки недостаточно генераций.' : 'Оплаченных генераций нет.'}\n\nВыберите пакет — после подтверждения откроется только страница оплаты:`, { reply_markup: packageKeyboard() });
+    await sendMessage(chatId, `${units > 1 ? 'Для этой пачки недостаточно генераций.' : 'Оплаченных генераций нет.'}\n\nВыберите пакет — после подтверждения откроется только страница оплаты. Если вам выдали код доступа, нажмите «У меня есть код»:`, { reply_markup: packageKeyboard() });
     return;
   }
   draft.accessCode = accessCode;
@@ -309,7 +386,7 @@ async function showBalance(from, chatId) {
   const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code,generation_limit,generation_used&order=created_at.asc`);
   const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
   const details = rows.map(row => `• код <code>${escapeHtml(row.code)}</code>: ${Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0))}`).join('\n');
-  await sendMessage(chatId, `<b>Ваш остаток</b>\n\n💳 В пакетах: <b>${paidRemaining}</b>${details ? `\n\n${details}` : ''}`, { reply_markup: HOME_KEYBOARD });
+  await sendMessage(chatId, `<b>Ваш остаток</b>\n\n💳 В пакетах: <b>${paidRemaining}</b>${details ? `\n\n${details}` : ''}\n\nЕсть код доступа? Нажмите «Ввести код» — генерации добавятся к остатку.`, { reply_markup: balanceKeyboard() });
 }
 
 async function showAccount(from, chatId) {
@@ -333,7 +410,7 @@ async function showAccount(from, chatId) {
 }
 
 async function showHelp(chatId) {
-  await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
+  await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли вам выдали код доступа, откройте «Остаток» → «Ввести код» — генерации добавятся без покупки.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
 }
 
 function reviewFilterKeyboard() {
@@ -646,6 +723,21 @@ async function handleCallback(callback) {
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
   if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
   if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'code:enter') {
+    await answerCallbackQuery(callback.id);
+    const current = await getSession(from.id);
+    // Из окна покупки сохраняем черновик генерации, из «Остатка» начинаем с чистого.
+    await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.pendingPurchase ? current.draft : {});
+    return;
+  }
+  if (data === 'code:buy') {
+    await answerCallbackQuery(callback.id);
+    const userId = await findUser(from.id);
+    if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App.'); return; }
+    await saveSession(from, chatId, 'confirm', { userId, pendingPurchase: true });
+    await sendMessage(chatId, 'Выберите пакет генераций:', { reply_markup: packageKeyboard() });
+    return;
+  }
   if (data === 'account:continue') { await answerCallbackQuery(callback.id); await sendMessage(chatId, 'Продолжайте работу с текущим кабинетом.', { reply_markup: HOME_KEYBOARD }); return; }
   const pageMatch = data.match(/^gen:page:([^:]+:\d+):(\d+)$/);
   if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[1], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[1], result, Number(pageMatch[2])); return; }
@@ -749,6 +841,7 @@ async function handleMessage(message) {
   const session = await getSession(from.id);
   if (!session) return sendMessage(chatId, 'Нажмите «Создать ШК».', { reply_markup: HOME_KEYBOARD });
   const draft = session.draft || {};
+  if (session.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
   if (session.state === 'await_quantity') {
     const quantity = Number(text); if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) return sendMessage(chatId, 'Количество должно быть целым числом от 1 до 500.');
     draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
@@ -782,4 +875,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { HOME_KEYBOARD, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
+module.exports = { HOME_KEYBOARD, balanceKeyboard, claimErrorText, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, packageKeyboard, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };

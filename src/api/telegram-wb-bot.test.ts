@@ -7,6 +7,9 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   publicUrl: (path: string) => string;
   validWebhookSecret: (req: {headers: Record<string, string>}) => boolean;
   HOME_KEYBOARD: {keyboard: Array<Array<Record<string, any>>>};
+  packageKeyboard: () => {inline_keyboard: Array<Array<Record<string, any>>>};
+  balanceKeyboard: () => {inline_keyboard: Array<Array<Record<string, any>>>};
+  claimErrorText: (error: unknown) => string | null;
   formatPhone: (value: unknown) => string;
   maskWbPhone: (value: unknown) => string;
   reviewStars: (value: string) => number[];
@@ -26,6 +29,17 @@ describe('Telegram sticker generator bot', () => {
     delete process.env.PUBLIC_APP_URL;
     delete process.env.VERCEL_URL;
     delete process.env.TELEGRAM_WEBHOOK_SECRET;
+  });
+
+  it('предлагает ввести код при покупке и в остатке', () => {
+    expect(bot.packageKeyboard().inline_keyboard.flat().some(button => button.callback_data === 'code:enter')).toBe(true);
+    expect(bot.balanceKeyboard().inline_keyboard.flat().map(button => button.callback_data)).toEqual(['code:enter', 'code:buy']);
+  });
+
+  it('переводит ошибки привязки кода на понятный язык', () => {
+    expect(bot.claimErrorText({ details: { message: 'Asset not found' } })).toMatch(/не найден/);
+    expect(bot.claimErrorText({ details: { message: 'Asset belongs to another user' } })).toMatch(/другому аккаунту/);
+    expect(bot.claimErrorText(new Error('Supabase request failed (500)'))).toBeNull();
   });
 
   it('проверяет секрет Telegram webhook', () => {
