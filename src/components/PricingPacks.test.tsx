@@ -42,11 +42,11 @@ function renderBlock() {
   );
 }
 
-async function pay(user: ReturnType<typeof userEvent.setup>) {
+async function pay(user: ReturnType<typeof userEvent.setup>, email: string | null = 'buyer@example.com') {
   await user.click(screen.getByRole('checkbox', { name: /Принимаю/ }));
   const open = screen.getAllByRole('button', { name: 'Перейти к оплате' });
   await user.click(open[open.length - 1]);
-  await user.type(screen.getByRole('textbox', { name: 'Электронная почта' }), 'buyer@example.com');
+  if (email) await user.type(screen.getByRole('textbox', { name: /Электронная почта/ }), email);
   const confirm = screen.getAllByRole('button', { name: 'Перейти к оплате' });
   await user.click(confirm[confirm.length - 1]);
   await waitFor(() => expect(paymentBody).not.toBeNull());
@@ -67,6 +67,14 @@ describe('покупка пакетов генераций', () => {
     // запроса, значит вернулось и разделение лимитов.
     expect(paymentBody).not.toHaveProperty('stickerTarget');
     expect(paymentBody).not.toHaveProperty('rangeQuantity');
+  });
+
+  it('оплачивает без почты: код появится на странице и применится сам', async () => {
+    const user = userEvent.setup();
+    renderBlock();
+    await pay(user, null);
+    expect(paymentBody).toMatchObject({ productKind: 'stickers', quantity: 200 });
+    expect(paymentBody).not.toHaveProperty('email');
   });
 
   it('меняет пакет', async () => {

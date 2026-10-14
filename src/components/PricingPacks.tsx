@@ -91,7 +91,7 @@ export const PackPurchase = observer(() => {
           accepted,
           referralCreditKopecks: useBalance ? Number.MAX_SAFE_INTEGER : 0,
           returnTo: inCabinet ? 'cabinet' : 'public',
-          email: auth.isAuthenticated ? undefined : email.trim(),
+          email: auth.isAuthenticated ? undefined : email.trim() || undefined,
         }),
       }),
     // Заказ запоминаем до ухода на ЮKassa: у покупки без входа других следов не
@@ -201,17 +201,25 @@ export const PackPurchase = observer(() => {
 
             {!auth.isAuthenticated && (
               <>
-                <Field label="Электронная почта" help="После оплаты отправим сюда код доступа.">
-                  <Input type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} />
-                </Field>
                 <Alert tone="info">
-                  Код доступа также покажем сразу после оплаты в этом браузере.
+                  Код доступа появится на этой странице сразу после оплаты и автоматически
+                  применится для генерации.
                 </Alert>
+                <Field
+                  label="Электронная почта (необязательно)"
+                  help="Если хотите получить код на почту и получать уведомления о генерациях — укажите её."
+                >
+                  <Input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} />
+                </Field>
               </>
             )}
 
             <div className="row">
-              <Button loading={checkout.isPending} disabled={!auth.isAuthenticated && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())} onClick={() => checkout.mutate()}>
+              <Button
+                loading={checkout.isPending}
+                disabled={!auth.isAuthenticated && email.trim() !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())}
+                onClick={() => checkout.mutate()}
+              >
                 {payableTotal > 0 ? 'Перейти к оплате' : 'Оплатить балансом'}
               </Button>
               <Button variant="secondary" onClick={() => setConfirmOpen(false)}>

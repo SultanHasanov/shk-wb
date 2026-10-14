@@ -16,6 +16,6 @@ describe('payment checkout reliability', () => {
     const source = read('server/_payments.js');
     expect(source).toContain("const secret=order.access_code||order.program_license_key||order.cell_print_license_key");
     expect(source).toContain('Код доступа: <code>${order.access_code}</code>');
-    expect(read('src/components/PricingPacks.tsx')).toContain('После оплаты отправим сюда код доступа.');
+    expect(read('src/components/PricingPacks.tsx')).toContain('Если хотите получить код на почту и получать уведомления о генерациях — укажите её.');
   });
 });
