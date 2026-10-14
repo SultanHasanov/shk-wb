@@ -7,6 +7,7 @@ import {
   Button,
   EmptyState,
   Field,
+  Hint,
   Input,
   Pagination,
   Progress,
@@ -15,6 +16,16 @@ import {
 } from '.';
 
 describe('UI kit', () => {
+  it('показывает подсказку по клику и прячет по Esc', async () => {
+    const user = userEvent.setup();
+    render(<Hint label="Наценка">Сколько процентов добавить</Hint>);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Подсказка: Наценка' }));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Сколько процентов добавить');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
   it('показывает кнопку', () => {
     render(<Button>Сохранить</Button>);
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeEnabled();

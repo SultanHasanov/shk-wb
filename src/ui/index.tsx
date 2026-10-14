@@ -30,6 +30,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleCheck,
+  CircleHelp,
   Inbox,
   Info,
   Loader2,
@@ -84,11 +85,14 @@ export function Field({
   label,
   error,
   help,
+  hint,
   children,
 }: {
   label: string;
   error?: string;
   help?: string;
+  /** Пояснение за иконкой «?» рядом с подписью — для того, что не влезает в help. */
+  hint?: ReactNode;
   children: ReactNode;
 }) {
   const id = useId();
@@ -112,9 +116,18 @@ export function Field({
 
   return (
     <div className={s.field}>
-      <label className={s.label} htmlFor={controlId as string}>
-        {label}
-      </label>
+      {hint ? (
+        <span className={s.labelRow}>
+          <label className={s.label} htmlFor={controlId as string}>
+            {label}
+          </label>
+          <Hint label={label}>{hint}</Hint>
+        </span>
+      ) : (
+        <label className={s.label} htmlFor={controlId as string}>
+          {label}
+        </label>
+      )}
       {control}
       {error && (
         <span className={s.error} id={errorId} role="alert">
@@ -637,17 +650,107 @@ export function Stat({
   value,
   label,
   icon,
+  hint,
+  tone,
 }: {
   value: ReactNode;
   label: string;
   icon?: ReactNode;
+  hint?: ReactNode;
+  tone?: 'success' | 'danger';
 }) {
+  const valueCls = [s.statValue, tone === 'success' && s.statSuccess, tone === 'danger' && s.statDanger]
+    .filter(Boolean)
+    .join(' ');
   return (
     <div className={s.stat}>
       {icon && <div className={s.statIcon}>{icon}</div>}
-      <div className={s.statValue}>{value}</div>
-      <div className={s.statLabel}>{label}</div>
+      <div className={valueCls}>{value}</div>
+      <div className={s.statLabel}>
+        {label}
+        {hint && <Hint label={label}>{hint}</Hint>}
+      </div>
     </div>
+  );
+}
+
+/* ============ Hint ============
+   Иконка «?» с пояснением. Открывается наведением, фокусом и тапом (на телефоне
+   наведения нет), закрывается по Esc, клику мимо и прокрутке. Поповер рисуется
+   в портал с position: fixed — иначе его обрезают таблицы с overflow: auto. */
+
+export function Hint({ children, label }: { children: ReactNode; label?: string }) {
+  const t = useT();
+  const id = useId();
+  const ref = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const show = useCallback(() => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (rect) {
+      const width = Math.min(300, window.innerWidth - 32);
+      const left = Math.min(Math.max(16, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 16);
+      setPos({ top: rect.bottom + 8, left });
+    }
+    setOpen(true);
+  }, []);
+  const hide = useCallback(() => {
+    setOpen(false);
+    setPinned(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && hide();
+    const onDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) hide();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+    };
+  }, [open, hide]);
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className={s.hintButton}
+        aria-label={label ? t(`Подсказка: ${label}`, `Кеңес: ${label}`) : t('Подсказка', 'Кеңес')}
+        aria-expanded={open}
+        aria-describedby={open ? id : undefined}
+        onMouseEnter={show}
+        onMouseLeave={() => !pinned && hide()}
+        onFocus={show}
+        onBlur={() => !pinned && hide()}
+        onClick={() => {
+          if (pinned) hide();
+          else {
+            show();
+            setPinned(true);
+          }
+        }}
+      >
+        <CircleHelp size={15} aria-hidden="true" />
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <span role="tooltip" id={id} className={s.hintPopover} style={{ top: pos.top, left: pos.left }}>
+            {children}
+          </span>,
+          document.body,
+        )}
+    </>
   );
 }
 
