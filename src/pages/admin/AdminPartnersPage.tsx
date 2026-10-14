@@ -96,7 +96,7 @@ function CreatePartnerCard({ onCreated }: { onCreated: (id: string) => void }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<AdminUserRow | null>(null);
   const [name, setName] = useState('');
-  const users = useAdminUsers({ q: q.trim(), page: 1, pageSize: 5, sort: 'created_at', filter: 'all' });
+  const users = useAdminUsers({ q: q.trim(), page: 0, pageSize: 5, sort: 'created_at', filter: 'all' });
   const create = useAdminPartnerAction<{ userId: string; name: string }, Partner>('create');
 
   return (
@@ -134,7 +134,9 @@ function CreatePartnerCard({ onCreated }: { onCreated: (id: string) => void }) {
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="partner@mail.kz" />
           </Field>
           {q.trim().length >= 2 && (
-            users.isPending ? <Skeleton height={60} /> : users.data?.items.length ? (
+            users.isPending ? <Skeleton height={60} /> : users.isError ? (
+              <p className={s.mutedNote}>Не удалось выполнить поиск: {users.error.message}</p>
+            ) : users.data?.items.length ? (
               <div className="stack">
                 {users.data.items.map(user => (
                   <div key={user.userId} className={s.spread}>
