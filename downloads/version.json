@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "minimum_version": "1.4.0",
   "mandatory": true,
-  "win10_url": "https://github.com/SultanHasanov/shk-wb/releases/download/pvz-helper-v1.4.0/pvz-helper-1.4.0-setup.exe",
-  "win7_url": "https://github.com/SultanHasanov/shk-wb/releases/download/pvz-helper-v1.4.0/pvz-helper-1.4.0-setup.exe",
-  "notes": "Вышла новая программа «Помощник ПВЗ» 1.4.0. Нажмите «Обновить программу» — она установится, а «Подбор кодов» закроется автоматически. Ваш ключ доступа перенесётся сам."
+  "win10_url": "https://github.com/SultanHasanov/shk-wb/releases/download/pvz-helper-v1.4.1/pvz-helper-1.4.1-setup.exe",
+  "win7_url": "https://github.com/SultanHasanov/shk-wb/releases/download/pvz-helper-v1.4.1/pvz-helper-1.4.1-setup.exe",
+  "notes": "Вышла новая программа «Помощник ПВЗ». Нажмите «Обновить программу» — она установится, а «Подбор кодов» закроется автоматически. Ваш ключ доступа перенесётся сам."
 }
