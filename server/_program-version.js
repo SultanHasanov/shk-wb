@@ -27,14 +27,22 @@ function isOlder(left, right) {
 }
 
 function enforceProgramVersion(req, res) {
-  const minimum = String(process.env.PROGRAM_MIN_VERSION || '').trim();
+  // «Помощник ПВЗ» (Tauri) нумеруется отдельно и шлёт X-App-Name: pvz-helper —
+  // для него свой минимум PVZ_APP_MIN_VERSION, для «Подбор кодов» — PROGRAM_MIN_VERSION.
+  const helper = String(req.headers['x-app-name'] || '').trim() === 'pvz-helper';
+  const minimum = String((helper ? process.env.PVZ_APP_MIN_VERSION : process.env.PROGRAM_MIN_VERSION) || '').trim();
   if (!minimum || minimum === '0') return true;
   const sent = String(req.headers['x-app-version'] || '').trim();
   if (sent && !isOlder(sent, minimum)) return true;
   // 426 Upgrade Required: сборки до 1.3.3 показывают своё «нет связи с сервером»,
   // 1.3.3 и новее берут отсюда текст и выводят его в строке статуса лицензии.
+  // Помощник по коду UPDATE_REQUIRED сразу показывает экран обязательного обновления.
   res.status(426).json({
-    error: `Программа устарела: нужна версия ${minimum} или новее. Обновитесь через плашку в программе или скачайте установщик на shk-wb.ru/program`,
+    error: helper
+      ? `Версия ${sent || 'программы'} больше не поддерживается: нужна ${minimum} или новее. Обновите программу.`
+      : `Программа устарела: нужна версия ${minimum} или новее. Обновитесь через плашку в программе или скачайте установщик на shk-wb.ru/program`,
+    code: 'UPDATE_REQUIRED',
+    minVersion: minimum,
   });
   return false;
 }

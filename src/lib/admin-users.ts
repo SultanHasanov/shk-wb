@@ -44,6 +44,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   cell_print_license: 'Ключи «Печати ячеек»',
   cell_print_program: 'Пробный доступ «Печати ячеек»',
   cell_print_bundle: 'Программа и ключ «Печати ячеек»',
+  app_subscription: 'Подписка «Помощник ПВЗ»',
 };
 
 export function productLabel(kind: string): string {

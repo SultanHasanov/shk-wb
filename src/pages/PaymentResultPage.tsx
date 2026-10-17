@@ -37,6 +37,7 @@ const PRODUCT_NAMES: Record<string, Text> = {
   cell_print_license: { ru: 'Ключ «Печати ячеек»', kk: '«Ұяшық басып шығару» кілті' },
   cell_print_program: { ru: 'Пробный доступ «Печати ячеек»', kk: '«Ұяшық басып шығару» сынақ қолжетімділігі' },
   cell_print_bundle: { ru: 'Программа и ключ «Печати ячеек»', kk: '«Ұяшық басып шығару» бағдарламасы мен кілті' },
+  app_subscription: { ru: 'Подписка «Помощник ПВЗ»', kk: '«ПВЗ көмекшісі» жазылымы' },
 };
 
 /** Строка с кодом или ключом и кнопкой копирования. */
@@ -255,7 +256,14 @@ export const PaymentResultPage = observer(() => {
                       <SecretRow label={t('Ключ активации', 'Белсендіру кілті')} value={data.licenseKey} />
                     )}
 
-                    {auth.isAuthenticated ? (
+                    {data.productKind === 'app_subscription' ? (
+                      <Alert tone="success">
+                        {t(
+                          'Тариф уже действует. Войдите в программу тем же логином и паролем, что на сайте, — или нажмите «Обновить» в профиле программы, если уже вошли.',
+                          'Тариф қазірдің өзінде жұмыс істейді. Бағдарламаға сайттағы логин мен құпиясөзбен кіріңіз немесе бұрын кірген болсаңыз, бағдарлама профилінде «Жаңарту» басыңыз.',
+                        )}
+                      </Alert>
+                    ) : auth.isAuthenticated ? (
                       <Alert tone="info">
                         {t(
                           'Сохраните код или ключ: он также доступен в кабинете в разделе «Ключи и доступы».',
@@ -284,10 +292,10 @@ export const PaymentResultPage = observer(() => {
                           </Button>
                         </a>
                       )}
-                      <Link to="/cabinet/keys">
+                      <Link to={data.productKind === 'app_subscription' ? '/cabinet/subscription' : '/cabinet/keys'}>
                         <Button variant="secondary">
                           <KeyRound size={18} />
-                          {t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
+                          {data.productKind === 'app_subscription' ? t('Подписка', 'Жазылым') : t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
                         </Button>
                       </Link>
                       {/* Из кабинета логично идти сразу генерировать, а не на главную */}

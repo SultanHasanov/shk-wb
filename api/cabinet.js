@@ -745,7 +745,33 @@ async function cronNotifications(req, res) {
       });
       sent++;
     }
-    return res.json({ checked: licenses.length, created: sent, releasedReservations });
+    // Подписка программы: напоминаем, только если за этим отрезком ничего не оплачено.
+    const subscriptions = await supabaseFetch(
+      `app_subscriptions?canceled=eq.false&ends_at=gte.${encodeURIComponent(start)}&ends_at=lt.${encodeURIComponent(end)}&select=id,user_id,plan,ends_at`,
+    ).catch(() => []);
+    for (const sub of subscriptions) {
+      const later = await supabaseFetch(
+        `app_subscriptions?user_id=eq.${encodeURIComponent(sub.user_id)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(sub.ends_at)}&select=id&limit=1`,
+      );
+      if (later.length) continue;
+      const prefs = await supabaseFetch(
+        `user_preferences?user_id=eq.${encodeURIComponent(sub.user_id)}&select=notify_key_expiry&limit=1`,
+      );
+      if (prefs[0]?.notify_key_expiry === false) continue;
+      const user = await getAuthUser(sub.user_id);
+      await createNotification({
+        userId: sub.user_id,
+        kind: 'key_expiry',
+        title: 'Подписка на «Помощник ПВЗ» скоро закончится',
+        body: `Тариф действует до ${new Date(sub.ends_at).toLocaleDateString('ru-RU')}. Продлите его, чтобы программа работала без перерыва.`,
+        link: '/cabinet/subscription',
+        dedupeKey: `app-sub-expiry-3d:${sub.id}:${String(sub.ends_at).slice(0, 10)}`,
+        email: user?.email?.endsWith('@users.invalid') ? null : user?.email,
+        emailEnabled: true,
+      });
+      sent++;
+    }
+    return res.json({ checked: licenses.length + subscriptions.length, created: sent, releasedReservations });
   } catch (error) {
     console.error(error);
     return res.status(502).json({ error: 'Notification job failed' });

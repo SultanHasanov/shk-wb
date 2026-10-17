@@ -10,6 +10,7 @@ import {
   Handshake,
   Home,
   KeyRound,
+  Laptop,
   LogOut,
   Menu,
   Package,
@@ -31,11 +32,13 @@ import { forgetPendingOrder, readPendingOrders } from '../lib/pending-orders';
 import { preferCurrency } from '../lib/currency';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { type T, useLocalePath, useT } from '../i18n';
+import { APP_SUBSCRIPTIONS_LIVE } from '../lib/app-release';
 
 const cabinetNavItems = (t: T) => [
   { to: '/cabinet', label: t('Обзор', 'Шолу'), Icon: Home, end: true },
   // Раньше за генерацией приходилось уходить на публичную главную и возвращаться руками
   { to: '/cabinet/generator', label: t('Генератор', 'Генератор'), Icon: QrCode, end: false },
+  ...(APP_SUBSCRIPTIONS_LIVE ? [{ to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false }] : []),
   { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
   { to: '/cabinet/packages', label: t('Пакеты и код', 'Пакеттер мен код'), Icon: Package, end: false },
   { to: '/cabinet/history', label: t('История генераций', 'Генерациялар тарихы'), Icon: FileClock, end: false },
@@ -52,6 +55,7 @@ const titlesFor = (t: T): Record<string, string> => ({
   '/cabinet': t('Обзор', 'Шолу'),
   '/cabinet/generator': t('Генератор', 'Генератор'),
   '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
+  '/cabinet/subscription': t('Подписка', 'Жазылым'),
   '/cabinet/keys': t('Ключи и доступы', 'Кілттер мен қолжетімділік'),
   '/cabinet/packages': t('Пакеты и код доступа', 'Пакеттер мен қолжетімділік коды'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),

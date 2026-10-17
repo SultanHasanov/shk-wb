@@ -12,6 +12,7 @@ const {
   pricing,
   yookassa,
 } = require('../server/_payments');
+const { orderSnapshot, PLANS } = require('../server/_app-plans');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
@@ -33,6 +34,8 @@ function publicOrder(row) {
     deviceLimit: row.cell_print_device_limit,
     marketplaceScope: row.cell_print_marketplace_scope,
     renewal: Boolean(row.renewal_target_key),
+    appPlan: row.app_plan || null,
+    appTermMonths: row.app_term_months || null,
     downloadUrl:
       row.status === 'succeeded'
         ? cellProgram
@@ -107,6 +110,8 @@ module.exports = async function handler(req, res) {
       const productKind =
         requestedKind === 'individual_stickers'
           ? 'individual_stickers'
+          : requestedKind === 'app_subscription'
+          ? 'app_subscription'
           : requestedKind === 'program_license'
           ? 'program_license'
           : cellKinds.includes(requestedKind)
@@ -140,6 +145,14 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'Введите корректную электронную почту' });
       if (returnTarget === 'telegram' && !user)
         return res.status(401).json({ error: 'Для оплаты через Telegram войдите в аккаунт' });
+      const appPlan = String(req.body?.appPlan || '');
+      const appTerm = Number(req.body?.appTermMonths || 0);
+      const appSnapshot = productKind === 'app_subscription' ? orderSnapshot(appPlan, appTerm) : null;
+      if (productKind === 'app_subscription') {
+        // Подписка живёт на аккаунте: без входа её некуда зачислить.
+        if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы оформить подписку' });
+        if (!appSnapshot) return res.status(400).json({ error: 'Выберите тариф и срок' });
+      }
       let individualOrder = null;
       if (productKind === 'individual_stickers') {
         if (!user) return res.status(401).json({ error: 'Войдите в кабинет для оплаты заказа' });
@@ -174,6 +187,8 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'Выберите срок и число устройств' });
       }
       if (renewalTargetKey) {
+        if (productKind === 'app_subscription')
+          return res.status(400).json({ error: 'Подписка продлевается новым заказом' });
         if(!user)return res.status(401).json({ error: 'Для продления ключа войдите в аккаунт' });
         if (!['program_license', 'cell_print_license', 'stickers'].includes(productKind))
           return res.status(400).json({ error: 'Этот товар нельзя продлить' });
@@ -226,6 +241,8 @@ module.exports = async function handler(req, res) {
               individualOrder: { id: individualOrder.id, quantity: individualOrder.quantity },
               total: Number(individualOrder.amount_due),
             }
+          : productKind === 'app_subscription'
+          ? appSnapshot
           : productKind === 'program_license'
           ? {
               license: { iterations: licenseIterations, total: LICENSE_PRICES[licenseIterations] },
@@ -290,6 +307,10 @@ module.exports = async function handler(req, res) {
       if (productKind === 'individual_stickers')
         orderPayload.individual_sticker_order_id = individualOrder.id;
       if (productKind === 'program_license') orderPayload.license_iterations = licenseIterations;
+      if (productKind === 'app_subscription') {
+        orderPayload.app_plan = appPlan;
+        orderPayload.app_term_months = appTerm;
+      }
       if (cellKinds.includes(productKind)) {
         orderPayload.cell_print_duration_days =
           cellDays + (productKind === 'cell_print_bundle' ? 3 : 0);
@@ -306,7 +327,7 @@ module.exports = async function handler(req, res) {
       // still valid. Reuse that checkout instead of filling the admin list with copies
       // which YooKassa will cancel about an hour later. Balance payments are excluded:
       // their reservation belongs to one concrete order.
-      if (user && requestedCredit === 0 && !promoCode && !renewalTargetKey) {
+      if (user && requestedCredit === 0 && !promoCode && !renewalTargetKey && productKind !== 'app_subscription') {
         const recentSince = new Date(Date.now() - 55 * 60 * 1000).toISOString();
         const existing = await supabaseFetch(
           `payment_orders?user_id=eq.${encodeURIComponent(user.id)}` +
@@ -368,6 +389,8 @@ module.exports = async function handler(req, res) {
         const description =
           productKind === 'individual_stickers'
             ? `Индивидуальный заказ: ${individualOrder.quantity} стикеров, заказ ${order.id}`
+            : productKind === 'app_subscription'
+            ? `Помощник ПВЗ, тариф «${PLANS[appPlan].title}» на ${appTerm} мес., заказ ${order.id}`
             : productKind === 'program_license'
             ? `${renewalTargetKey ? 'Пополнение' : 'Ключ'} программы: ${licenseIterations} итераций, заказ ${order.id}`
             : cellKinds.includes(productKind)

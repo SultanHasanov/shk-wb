@@ -14,6 +14,7 @@ import {
   ProfilePage,
   ReferralsPage,
   SettingsPage,
+  SubscriptionPage,
 } from '../pages/cabinet';
 
 /**
@@ -30,6 +31,7 @@ export default function CabinetRoutes() {
           <Route path="generator" element={<CabinetGeneratorPage />} />
           {/* Покупка из кабинета возвращается сюда же, а не на публичную страницу */}
           <Route path="payment-result" element={<PaymentResultPage />} />
+          <Route path="subscription" element={<SubscriptionPage />} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="packages" element={<PackagesPage />} />
           <Route path="history" element={<HistoryPage />} />

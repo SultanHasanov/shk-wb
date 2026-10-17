@@ -1,5 +1,6 @@
 import { Trash2 } from 'lucide-react';
 import { type AdminProgramKey, useAdminResource, useAdminResourceMutation } from '../../api/admin';
+import { useAppPlans } from '../../api/app';
 import { shortDate } from '../../lib/admin-users';
 import { Alert, Badge, Button, Card, Field, Input, Skeleton, Table, useToast } from '../../ui';
 import s from '../../layout/AdminShell.module.css';
@@ -9,6 +10,7 @@ type Promo = { id: number; code: string; limit: number; used: number; active: bo
 /** Ключ программы вводится вручную: так было и в старой админке, формат хранит бизнес. */
 export function AdminProgramPage() {
   const toast = useToast();
+  const plans = useAppPlans();
   const keys = useAdminResource<AdminProgramKey>('key');
   const keyMutation = useAdminResourceMutation<{ key: string; limit: number; note: string; used: number; active: boolean; createdAt: string }>('key');
   const promos = useAdminResource<Promo>('programPromo');
@@ -16,6 +18,46 @@ export function AdminProgramPage() {
 
   return (
     <div className="page stack-lg">
+      <Card>
+        <h3>Подписки «Помощник ПВЗ»</h3>
+        <p className={s.mutedNote}>
+          Тарифы и цены — из конфигурации программы (server/_app-plans.js). Выдать подписку вручную помимо оплаты,
+          отвязать компьютер и посмотреть расход лимитов можно на странице пользователя: «Пользователи» → открыть человека → блок «Помощник ПВЗ».
+        </p>
+        {plans.isPending ? (
+          <Skeleton height={140} />
+        ) : plans.data ? (
+          <Table>
+            <thead>
+              <tr>
+                <th>Тариф</th>
+                <th>Подборы/мес</th>
+                <th>Стикеры/мес</th>
+                <th>ПК</th>
+                {plans.data.terms.map(t => (
+                  <th key={t.months}>{t.months} мес{t.discountPercent ? ` (−${t.discountPercent}%)` : ''}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {plans.data.plans.map(plan => (
+                <tr key={plan.id}>
+                  <td><b>{plan.title}</b></td>
+                  <td>{plan.codes}</td>
+                  <td>{plan.stickers || '—'}</td>
+                  <td>{plan.devices}</td>
+                  {plans.data!.terms.map(t => (
+                    <td key={t.months}>{plan.prices[String(t.months)]} ₽</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <Alert tone="error">Не удалось загрузить тарифы.</Alert>
+        )}
+      </Card>
+
       <Card>
         <h3>Создать лицензионный ключ</h3>
         <form

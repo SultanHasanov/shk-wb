@@ -263,6 +263,28 @@ export type AdminUserDetail = {
   }[];
   historyEntries: number;
   actions: AdminAction[];
+  app: {
+    entitlements: {
+      plan: string | null;
+      ends_at: string | null;
+      codes_limit: number | null;
+      codes_used: number | null;
+      stickers_limit: number | null;
+      stickers_used: number | null;
+      device_limit: number | null;
+      packs_left: number | null;
+    } | null;
+    subscriptions: Array<{
+      id: string; plan: string; startsAt: string; endsAt: string; canceled: boolean;
+      source: string; monthlyPrice: number; codes: number; stickers: number;
+      deviceLimit: number; createdAt: string;
+    }>;
+    devices: Array<{
+      id: string; name: string; appVersion: string; lastSeenAt: string;
+      createdAt: string; revokedAt: string | null;
+    }>;
+    usage: Array<{ id: number; kind: string; amount: number; source: string; createdAt: string }>;
+  };
 };
 
 export type AdminStats = {

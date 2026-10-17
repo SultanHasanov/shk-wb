@@ -49,6 +49,9 @@ async function completeOrder(order, payment) {
     }else if(order.product_kind==='individual_stickers'){
       await supabaseFetch('rpc/complete_individual_sticker_order',{method:'POST',body:JSON.stringify({p_payment_order_id:order.id})});
       completed={...completed,status:'succeeded'};
+    }else if(order.product_kind==='app_subscription'){
+      await supabaseFetch('rpc/complete_app_subscription_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
+      completed={...completed,status:'succeeded'};
     }else if(order.product_kind==='program_license'){
       const key=await supabaseFetch('rpc/complete_program_license_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
       completed={...completed,status:'succeeded',program_license_key:String(key)};
@@ -74,7 +77,9 @@ async function notifyCompleted(order){
   const secret=order.access_code||order.program_license_key||order.cell_print_license_key||null;
   const secretLabel=order.access_code?'Код доступа':'Ключ активации';
   const deliveryLine=secret?` ${secretLabel}: ${secret}.`:'';
-  const body=`Заказ ${String(order.id).slice(0,8)} готов.${deliveryLine} Данные покупки доступны в личном кабинете.`;
+  const body=order.product_kind==='app_subscription'
+    ?`Подписка «Помощник ПВЗ» оплачена (заказ ${String(order.id).slice(0,8)}). Тариф уже доступен в программе — достаточно войти в аккаунт.`
+    :`Заказ ${String(order.id).slice(0,8)} готов.${deliveryLine} Данные покупки доступны в личном кабинете.`;
   if(order.user_id){
     const prefs=await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(order.user_id)}&select=notify_order_status&limit=1`).catch(()=>[]);
     await createNotification({userId:order.user_id,kind:'order',title:'Заказ успешно оплачен',body,link:'/cabinet/orders',dedupeKey:`order-succeeded:${order.id}`,email:order.email||null,emailEnabled:prefs[0]?.notify_order_status!==false}).catch(()=>{});

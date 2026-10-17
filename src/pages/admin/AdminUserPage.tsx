@@ -26,6 +26,7 @@ import {
 } from '../../ui';
 import s from '../../layout/AdminShell.module.css';
 
+const PLAN_LABEL: Record<string, string> = { basic: 'Базовый', standard: 'Стандарт', pro: 'Про' };
 const CELL_DURATIONS = [3, 7, 30, 90, 180, 365];
 const CELL_DEVICES = [1, 2, 3, 5, 10, 20];
 
@@ -86,6 +87,11 @@ export function AdminUserPage() {
   const block = useAdminUserAction<{ userId: string }>('block');
   const unblock = useAdminUserAction<{ userId: string }>('unblock');
   const remove = useAdminUserAction<{ userId: string; confirm: string }>('account', 'DELETE');
+  const grantApp = useAdminUserAction<{ userId: string; plan: string; months: number }>('grantAppSubscription');
+  const revokeApp = useAdminUserAction<{ userId: string; id: string }>('revokeAppSubscription');
+  const revokeDevice = useAdminUserAction<{ userId: string; id: string }>('revokeAppDevice');
+  const [appPlan, setAppPlan] = useState('standard');
+  const [appMonths, setAppMonths] = useState(1);
 
   /** Одинаковый хвост у всех действий: тост об успехе, тост об ошибке, закрытие модалки. */
   const run = <TBody,>(
@@ -308,8 +314,136 @@ export function AdminUserPage() {
       </Card>
 
       <Card>
+        <h3>Помощник ПВЗ — подписка</h3>
+        {(() => {
+          const ent = user.app?.entitlements;
+          const planName = PLAN_LABEL[ent?.plan ?? ''] ?? 'без тарифа';
+          return (
+            <>
+              <div className={`${s.tiles} section`}>
+                <Stat label="Тариф сейчас" value={planName} />
+                <Stat label="Действует до" value={ent?.ends_at ? shortDate(ent.ends_at) : '—'} />
+                <Stat
+                  label="Подборы за месяц"
+                  value={ent?.codes_limit != null ? `${ent.codes_used ?? 0} из ${ent.codes_limit}` : '—'}
+                />
+                <Stat label="Пакеты подборов (ключи)" value={String(ent?.packs_left ?? 0)} />
+              </div>
+
+              <div className={s.toolbar} style={{ marginTop: 12 }}>
+                <Field label="Тариф">
+                  <Select value={appPlan} onChange={e => setAppPlan(e.target.value)}>
+                    <option value="basic">Базовый</option>
+                    <option value="standard">Стандарт</option>
+                    <option value="pro">Про</option>
+                  </Select>
+                </Field>
+                <Field label="Срок">
+                  <Select value={String(appMonths)} onChange={e => setAppMonths(Number(e.target.value))}>
+                    <option value="1">1 месяц</option>
+                    <option value="3">3 месяца</option>
+                    <option value="6">6 месяцев</option>
+                    <option value="12">12 месяцев</option>
+                  </Select>
+                </Field>
+                <Button
+                  loading={grantApp.isPending}
+                  onClick={() =>
+                    run(grantApp, { userId, plan: appPlan, months: appMonths }, 'Подписка выдана')
+                  }
+                >
+                  <Plus size={16} />
+                  Выдать подписку
+                </Button>
+              </div>
+              <p className={s.mutedNote}>
+                Выдаётся помимо оплаты (тариф применяется как при покупке: продление, повышение или очередь).
+              </p>
+            </>
+          );
+        })()}
+
+        {user.app?.subscriptions?.length ? (
+          <Table>
+            <thead>
+              <tr><th>Тариф</th><th>Период</th><th>Откуда</th><th>Лимиты</th><th>Статус</th><th /></tr>
+            </thead>
+            <tbody>
+              {user.app.subscriptions.map(sub => {
+                const active = !sub.canceled && Date.parse(sub.endsAt) > Date.now() && Date.parse(sub.startsAt) <= Date.now();
+                const future = !sub.canceled && Date.parse(sub.startsAt) > Date.now();
+                return (
+                  <tr key={sub.id}>
+                    <td>{PLAN_LABEL[sub.plan] ?? sub.plan}</td>
+                    <td>{shortDate(sub.startsAt)} — {shortDate(sub.endsAt)}</td>
+                    <td><Badge tone={sub.source === 'admin' ? 'warning' : 'default'}>{sub.source === 'admin' ? 'админ' : sub.source === 'partner' ? 'партнёр' : 'оплата'}</Badge></td>
+                    <td>{sub.codes} подб.{sub.stickers ? ` · ${sub.stickers} стик.` : ''} · {sub.deviceLimit} ПК</td>
+                    <td><Badge tone={active ? 'success' : future ? 'default' : 'error'}>{active ? 'активна' : future ? 'в очереди' : sub.canceled ? 'отозвана' : 'истекла'}</Badge></td>
+                    <td>
+                      {(active || future) && (
+                        <Button variant="ghost" size="sm" onClick={() => run(revokeApp, { userId, id: sub.id }, 'Подписка отозвана')}>
+                          <Trash2 size={16} />
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        ) : (
+          <p className={s.mutedNote}>Подписок нет.</p>
+        )}
+
+        <h4 style={{ marginTop: 16 }}>Компьютеры ({user.app?.devices?.filter(d => !d.revokedAt).length ?? 0})</h4>
+        {user.app?.devices?.length ? (
+          <Table>
+            <thead><tr><th>Название</th><th>Версия</th><th>Последний вход</th><th>Статус</th><th /></tr></thead>
+            <tbody>
+              {user.app.devices.map(d => (
+                <tr key={d.id}>
+                  <td>{d.name}</td>
+                  <td className="mono">{d.appVersion || '—'}</td>
+                  <td>{d.lastSeenAt ? dateTime(d.lastSeenAt) : '—'}</td>
+                  <td><Badge tone={d.revokedAt ? 'error' : 'success'}>{d.revokedAt ? 'отвязан' : 'активен'}</Badge></td>
+                  <td>
+                    {!d.revokedAt && (
+                      <Button variant="ghost" size="sm" onClick={() => run(revokeDevice, { userId, id: d.id }, 'Компьютер отвязан')}>
+                        <Trash2 size={16} />
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <p className={s.mutedNote}>Компьютеров нет.</p>
+        )}
+
+        {user.app?.usage?.length ? (
+          <details style={{ marginTop: 12 }}>
+            <summary className={s.mutedNote}>Последние списания ({user.app.usage.length})</summary>
+            <Table>
+              <thead><tr><th>Когда</th><th>Что</th><th>Сколько</th><th>Откуда</th></tr></thead>
+              <tbody>
+                {user.app.usage.map(u => (
+                  <tr key={u.id}>
+                    <td>{dateTime(u.createdAt)}</td>
+                    <td>{u.kind === 'code' ? 'подбор кода' : 'стикеры'}</td>
+                    <td>{u.amount}</td>
+                    <td>{u.source === 'pack' ? 'пакет' : 'квота'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </details>
+        ) : null}
+      </Card>
+
+      <Card>
         <div className={s.spread}>
-          <h3>Ключи «Подбора кодов»</h3>
+          <h3>Ключи «Подбора кодов» (пакеты подборов)</h3>
           <Button size="sm" variant="secondary" onClick={() => setProgramOpen(true)}>
             <KeyRound size={16} />
             Выдать ключ

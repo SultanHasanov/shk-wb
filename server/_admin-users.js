@@ -6,6 +6,7 @@ const {
   RESOURCES, addStickerGenerations, checkCellLicensePatch, checkStickerAccessPatch,
   createCellLicense, createProgramKey, createStickerAccessCode, isUuid, recordAdminAction,
 } = require('./_admin-grants');
+const { PLANS, TERMS, isPlan, isTerm, orderSnapshot } = require('./_app-plans');
 
 /**
  * Раздел «Пользователи» админки.
@@ -109,7 +110,7 @@ async function listUsers(req, res) {
 
 async function userDetail(req, res, userId) {
   const q = encodeURIComponent(userId);
-  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions] = await Promise.all([
+  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions, appSubscriptions, appDevices, appUsage, appEnt] = await Promise.all([
     getAuthUser(userId),
     supabaseFetch(`user_profiles?user_id=eq.${q}&select=*&limit=1`),
     supabaseFetch(`user_preferences?user_id=eq.${q}&select=*&limit=1`),
@@ -124,6 +125,11 @@ async function userDetail(req, res, userId) {
     supabaseFetch(`in_app_notifications?user_id=eq.${q}&select=id,kind,title,created_at,read_at&order=created_at.desc&limit=20`),
     supabaseFetch(`user_generation_history?user_id=eq.${q}&select=id&limit=1000`),
     supabaseFetch(`admin_actions?target_user_id=eq.${q}&select=*&order=created_at.desc&limit=50`),
+    // «Помощник ПВЗ»: подписки (отрезки), привязанные ПК и расход лимитов.
+    supabaseFetch(`app_subscriptions?user_id=eq.${q}&select=*&order=starts_at.desc&limit=50`).catch(() => []),
+    supabaseFetch(`app_devices?user_id=eq.${q}&select=*&order=last_seen_at.desc&limit=50`).catch(() => []),
+    supabaseFetch(`app_usage?user_id=eq.${q}&select=*&order=created_at.desc&limit=100`).catch(() => []),
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
   ]);
   if (!authUser) return res.status(404).json({ error: 'Пользователь не найден' });
   const licenseIds = cellLicenses.map(row => row.id);
@@ -213,6 +219,21 @@ async function userDetail(req, res, userId) {
     notifications,
     historyEntries: historyCount.length,
     actions,
+    app: {
+      entitlements: appEnt || null,
+      subscriptions: (appSubscriptions || []).map(s => ({
+        id: s.id, plan: s.plan, startsAt: s.starts_at, endsAt: s.ends_at, canceled: s.canceled,
+        source: s.source, monthlyPrice: Number(s.monthly_price), codes: s.codes_per_month,
+        stickers: s.stickers_per_month, deviceLimit: s.device_limit, createdAt: s.created_at,
+      })),
+      devices: (appDevices || []).map(d => ({
+        id: d.id, name: d.name, appVersion: d.app_version, lastSeenAt: d.last_seen_at,
+        createdAt: d.created_at, revokedAt: d.revoked_at,
+      })),
+      usage: (appUsage || []).map(u => ({
+        id: u.id, kind: u.kind, amount: u.amount, source: u.source, createdAt: u.created_at,
+      })),
+    },
   });
 }
 
@@ -301,6 +322,46 @@ module.exports = async function handler(req, res) {
       await notifyUser(userId, 'Вам выдан ключ «Печати ячеек»',
         `Ключ ${created.row.key} на ${created.row.duration_days} дней, устройств: ${created.row.device_limit}.`, '/cabinet/keys');
       return res.status(201).json(RESOURCES.cellLicense.fromDb(created.row));
+    }
+    // Выдать подписку «Помощник ПВЗ» помимо оплаты: тариф применяется той же
+    // логикой, что и платная (продление/повышение/понижение), source='admin'.
+    if (req.method === 'POST' && action === 'grantAppSubscription') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const plan = String(req.body?.plan || '');
+      const months = Number(req.body?.months || 0);
+      if (!isPlan(plan) || !isTerm(months)) return badRequest(res, 'Выберите тариф и срок');
+      const snap = orderSnapshot(plan, months);
+      if (!snap) return badRequest(res, 'Не удалось собрать тариф');
+      await supabaseFetch('rpc/admin_grant_app_subscription', {
+        method: 'POST',
+        body: JSON.stringify({ p_user: userId, p_plan: plan, p_months: months, p_snap: snap.app }),
+      });
+      await recordAdminAction(req, 'grantAppSubscription', userId, { plan, months });
+      await notifyUser(userId, 'Вам выдана подписка «Помощник ПВЗ»',
+        `Тариф ${PLANS[plan].title} на ${months} мес. Программа готова к работе.`, '/cabinet/subscription');
+      return res.status(201).json({ ok: true });
+    }
+    // Отозвать конкретный отрезок подписки (активный обрывается сейчас).
+    if (req.method === 'POST' && action === 'revokeAppSubscription') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const subId = String(req.body?.id || '');
+      if (!isUuid(subId)) return badRequest(res, 'Некорректная подписка');
+      await supabaseFetch('rpc/admin_revoke_app_subscription', {
+        method: 'POST', body: JSON.stringify({ p_sub: subId }),
+      });
+      await recordAdminAction(req, 'revokeAppSubscription', userId, { id: subId });
+      return res.status(200).json({ ok: true });
+    }
+    // Отвязать ПК от аккаунта (освобождает слот в лимите устройств).
+    if (req.method === 'POST' && action === 'revokeAppDevice') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const deviceId = String(req.body?.id || '');
+      if (!isUuid(deviceId)) return badRequest(res, 'Некорректное устройство');
+      await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}`, {
+        method: 'PATCH', body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+      });
+      await recordAdminAction(req, 'revokeAppDevice', userId, { id: deviceId });
+      return res.status(200).json({ ok: true });
     }
     if (req.method === 'POST' && action === 'attach') {
       // Привязка уже существующего актива: человек купил без входа, а потом

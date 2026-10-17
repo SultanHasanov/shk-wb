@@ -31,6 +31,14 @@
     { "source": "/api/cabinet/devices/:id", "destination": "/api/cabinet?action=device&id=:id" },
     { "source": "/api/cabinet/telegram", "destination": "/api/cabinet?action=telegram" },
     { "source": "/api/cabinet/account", "destination": "/api/cabinet?action=account" },
+    { "source": "/api/trial", "destination": "/api/app?action=trial" },
+    { "source": "/api/app/devices/:id", "destination": "/api/app?action=device&id=:id" },
+    { "source": "/api/app/login/start", "destination": "/api/app?action=login-start" },
+    { "source": "/api/app/login/poll", "destination": "/api/app?action=login-poll" },
+    { "source": "/api/app/login/request", "destination": "/api/app?action=login-request" },
+    { "source": "/api/app/login/approve", "destination": "/api/app?action=login-approve" },
+    { "source": "/api/app/update/download", "destination": "/api/app?action=update-download" },
+    { "source": "/api/app/:action(plans|login|refresh|register-device|me|consume|usage|claim-key|site-link|logout|update|lease)", "destination": "/api/app?action=:action" },
     { "source": "/api/admin/cabinet/withdrawals", "destination": "/api/admin/data?cabinet=withdrawals" },
     { "source": "/api/admin/cabinet/withdrawal", "destination": "/api/admin/data?cabinet=withdrawal" },
     { "source": "/api/admin/cabinet/news", "destination": "/api/admin/data?cabinet=news" },
@@ -63,6 +71,7 @@
     ,{ "source": "/bot-checkout", "destination": "/" }
     ,{ "source": "/telegram-account", "destination": "/" }
     ,{ "source": "/login", "destination": "/" }
+    ,{ "source": "/app-login", "destination": "/" }
     ,{ "source": "/register", "destination": "/" }
     ,{ "source": "/forgot-password", "destination": "/" }
     ,{ "source": "/reset-password", "destination": "/" }
@@ -105,7 +114,7 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
-      "source": "/:section(cabinet|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r)/:path*",
+      "source": "/:section(cabinet|app-login|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r)/:path*",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]

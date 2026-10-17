@@ -83,4 +83,4 @@ function readReferralCookieDetails(req) {
   return { code, capturedAt:Number(capturedAt) };
 }
 
-module.exports = { deleteAuthUser, getAuthUser, optionalUser, readReferralCookie, readReferralCookieDetails, referralCookie, requireUser, sessionIssuedRecently };
+module.exports = { authConfig, deleteAuthUser, getAuthUser, optionalUser, readReferralCookie, readReferralCookieDetails, referralCookie, requireUser, sessionIssuedRecently };
