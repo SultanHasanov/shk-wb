@@ -42,7 +42,7 @@ import { type T, useLocale, useLocalePath, useT } from '../i18n';
 type Payment = { confirmationUrl: string };
 
 /** Версия на странице — держать в согласии с downloads/version.json. */
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.4.2';
 
 const features = (t: T) => [
   {

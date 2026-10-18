@@ -1,8 +1,8 @@
 {
-  "version": "1.4.1",
+  "version": "1.4.2",
   "minimum_version": "1.4.0",
   "mandatory": true,
-  "win10_url": "https://shk-wb.ru/dl/pvz-helper-1.4.1-setup.exe",
-  "win7_url": "https://shk-wb.ru/dl/pvz-helper-1.4.1-setup.exe",
+  "win10_url": "https://shk-wb.ru/dl/pvz-helper-1.4.2-setup.exe",
+  "win7_url": "https://shk-wb.ru/dl/pvz-helper-1.4.2-setup.exe",
   "notes": "Вышла новая программа «Помощник ПВЗ». Нажмите «Обновить программу» — она установится, а «Подбор кодов» закроется автоматически. Ваш ключ доступа перенесётся сам."
 }
