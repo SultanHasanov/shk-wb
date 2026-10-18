@@ -70,7 +70,7 @@ const OG_PROGRAM = {
   path: '/images/screenshot-crack-tool.png',
   width: 1726,
   height: 1256,
-  alt: 'Интерфейс программы «Подбор кодов» для ПВЗ',
+  alt: 'Интерфейс программы «Помощник ПВЗ» для ПВЗ',
 };
 
 /** Хлебные крошки одинаковы по форме на всех вложенных страницах. */
@@ -162,9 +162,9 @@ export const PUBLIC_PAGES = {
 
   '/program': {
     fallback: {
-      title: 'Подбор кодов — программа для ПВЗ Wildberries на Windows — ШК ВБ',
+      title: 'Помощник ПВЗ — программа для ПВЗ Wildberries на Windows — ШК ВБ',
       description:
-        'Программа находит код клиента по номеру ячейки, показывает товары заказа и отзывы ПВЗ. Скачивание бесплатное, списание только за успешный подбор.',
+        'Подбор кода клиента по номеру ячейки, ячейки и товары «В пути», отзывы, досье клиента, стикеры и сотрудники. Скачивание бесплатное, тарифы от месяца.',
     },
     ogType: 'website',
     image: OG_PROGRAM,
@@ -172,27 +172,27 @@ export const PUBLIC_PAGES = {
       {
         '@type': 'SoftwareApplication',
         '@id': `${ORIGIN}/program#app`,
-        name: 'Подбор кодов',
+        name: 'Помощник ПВЗ',
         url: `${ORIGIN}/program`,
         applicationCategory: 'BusinessApplication',
-        operatingSystem: 'Windows 7, Windows 10, Windows 11',
+        operatingSystem: 'Windows 10, Windows 11',
         // Держать в согласии с downloads/version.json
-        softwareVersion: '1.3.4',
+        softwareVersion: '1.4.1',
         inLanguage: 'ru-RU',
         description:
-          'Программа для сотрудников ПВЗ: поиск кода клиента по номеру ячейки, проверка отзывов и просмотр товаров заказа по доступным рабочим данным.',
+          'Программа для сотрудников ПВЗ: подбор кода клиента по номеру ячейки, ячейки и товары «В пути», отзывы, досье клиента, стикеры и учёт сотрудников.',
         screenshot: `${ORIGIN}${OG_PROGRAM.path}`,
-        fileSize: '16 MB',
+        fileSize: '4 MB',
         offers: {
           '@type': 'Offer',
-          // Установщик отдаётся бесплатно, платные только итерации подбора
+          // Установщик отдаётся бесплатно, платная — подписка на тариф
           price: '0',
           priceCurrency: 'RUB',
           availability: 'https://schema.org/InStock',
           url: `${ORIGIN}/program`,
         },
       },
-      breadcrumbs('/program', 'Подбор кодов'),
+      breadcrumbs('/program', 'Помощник ПВЗ'),
     ],
   },
 
@@ -211,7 +211,7 @@ export const PUBLIC_PAGES = {
         name: 'Печать ячеек',
         url: `${ORIGIN}/cell-print`,
         applicationCategory: 'BusinessApplication',
-        operatingSystem: 'Windows 7, Windows 10, Windows 11',
+        operatingSystem: 'Windows 10, Windows 11',
         // Последний релиз: коммит 08f6c8c
         softwareVersion: '1.1.1',
         inLanguage: 'ru-RU',

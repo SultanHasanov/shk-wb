@@ -30,7 +30,7 @@ const titles: Record<string, string> = {
   '/panel/sticker-pool': 'Диапазон номеров стикеров',
   '/panel/box-pool': 'Диапазон номеров коробок',
   '/panel/payments': 'Оплата',
-  '/panel/program': 'Программа «Подбор кодов»',
+  '/panel/program': 'Программа «Помощник ПВЗ»',
   '/panel/cell-print': 'Печать ячеек',
   '/panel/announcements': 'Объявления',
   '/panel/cabinet': 'Выплаты и рассылка',

@@ -199,7 +199,7 @@ async function getAssets(userId) {
       type: 'program',
       id: x.id,
       key: x.key,
-      label: 'Подбор кодов',
+      label: 'Пакет подборов',
       active: x.active,
       createdAt: x.created_at,
       used: x.used,
@@ -235,10 +235,10 @@ function orderLabel(row) {
   if (row.product_kind === 'stickers')
     return `${row.renewal_target_key ? 'Пополнение кода' : 'Пакет генераций'} · ${Number(row.range_quantity || 0) + Number(row.custom_quantity || 0)} шт.`;
   if (row.product_kind === 'program_license')
-    return `${row.renewal_target_key ? 'Пополнение' : 'Подбор кодов'} · ${row.license_iterations} итераций`;
+    return `${row.renewal_target_key ? 'Пополнение пакета' : 'Пакет подборов'} · ${row.license_iterations} подборов`;
   if (String(row.product_kind).startsWith('cell_print'))
     return `${row.renewal_target_key ? 'Продление' : 'Печать ячеек'} · ${{wb:'Wildberries',ozon:'Ozon',both:'WB + Ozon'}[row.cell_print_marketplace_scope]||'Wildberries'} · ${row.cell_print_duration_days || 0} дней · ${row.cell_print_device_limit || 0} устройств`;
-  return 'Программа «Подбор кодов»';
+  return 'Программа «Помощник ПВЗ»';
 }
 function mapOrder(row) {
   return {

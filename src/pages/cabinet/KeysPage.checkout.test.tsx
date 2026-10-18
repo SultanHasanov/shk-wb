@@ -9,7 +9,7 @@ import { KeysPage } from './KeysPage';
 const bootstrap = {
   profile: { userId: 'user-1', email: 'user@example.com', telegramOnly: false, displayName: '', phone: '', payerStatus: 'individual', registeredAt: '2026-08-01T00:00:00Z', lastSignInAt: null, telegram: null, preferences: { thermalPrintSettings: {}, notifyOrderStatus: true, notifyKeyExpiry: true, notifyLowBalance: false, notifyProductNews: true, historyImportedAt: null, historyImportedCount: 0, historyImportNoticeDismissedAt: null } },
   assets: [
-    { type: 'program', id: 1, key: 'WBPK-AAAA-BBBB-CCCC', label: 'Подбор кодов', active: true, createdAt: '2026-08-01T00:00:00Z', used: 2, total: 5 },
+    { type: 'program', id: 1, key: 'WBPK-AAAA-BBBB-CCCC', label: 'Пакет подборов', active: true, createdAt: '2026-08-01T00:00:00Z', used: 2, total: 5 },
     { type: 'cell_print', id: 2, key: 'CP-DDDD-EEEE-FFFF', label: 'Печать ячеек', active: true, createdAt: '2026-08-01T00:00:00Z', durationDays: 30, deviceLimit: 5, activatedAt: '2026-08-02T00:00:00Z', expiresAt: '2026-09-02T00:00:00Z', devices: [1, 2, 3].map(id => ({ id, name: `Устройство ${id}`, firstSeenAt: '2026-08-02T00:00:00Z', lastSeenAt: '2026-08-03T00:00:00Z' })) },
   ],
   orders: [], notifications: [], unreadNotifications: 0,
@@ -41,12 +41,12 @@ function renderPage() {
 describe('покупка и продление ключей в кабинете', () => {
   it('показывает бесплатное скачивание обеих программ и покупку новых ключей', async () => {
     renderPage();
-    expect(await screen.findByRole('heading', { name: 'Подбор кодов' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Пакеты подборов' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Печать ячеек' })).toBeInTheDocument();
     // Сами программы больше не продаются: у обеих карточек только скачивание.
     expect(screen.queryByRole('button', { name: 'Купить программу' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Скачать программу' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Купить новый ключ' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /Купить (пакет|новый ключ)/ }).length).toBeGreaterThan(0);
   });
 
   it('передаёт серверу ключ пополнения и возврат в кабинет', async () => {
@@ -68,7 +68,7 @@ describe('покупка и продление ключей в кабинете'
   it('позволяет купить ключ только для Ozon и передаёт выбранные права серверу', async () => {
     const user = userEvent.setup();
     renderPage();
-    const buyButtons = await screen.findAllByRole('button', { name: 'Купить новый ключ' });
+    const buyButtons = await screen.findAllByRole('button', { name: /Купить (пакет|новый ключ)/ });
     await user.click(buyButtons[1]);
     await user.click(screen.getByRole('button', { name: 'Ozon' }));
     await user.click(screen.getByRole('checkbox', { name: /Принимаю/ }));

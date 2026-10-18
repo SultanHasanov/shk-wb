@@ -524,6 +524,22 @@ module.exports = async function handler(req, res) {
     // без которых программа всё равно не ищет. Токеновый action=download выше
     // не трогаем — по нему качают ранее оплаченные заказы и промокоды.
     if (action === 'download-program' && req.method === 'GET') {
+      // «Помощник ПВЗ» лежит на GitHub Releases: ссылку берём из манифеста версии,
+      // чтобы при выпуске обновления менять её в одном месте (downloads/version.json).
+      for (const manifest of [
+        path.join(__dirname, '..', 'dist', 'downloads', 'version.json'),
+        path.join(__dirname, '..', 'downloads', 'version.json'),
+      ]) {
+        try {
+          const url = JSON.parse(fs.readFileSync(manifest, 'utf8')).win10_url;
+          if (/^https:\/\//.test(url || '')) {
+            res.setHeader('Cache-Control', 'no-store');
+            res.statusCode = 302;
+            res.setHeader('Location', url);
+            return res.end();
+          }
+        } catch { /* нет файла — пробуем следующий */ }
+      }
       const installer = path.join(__dirname, '_private', 'program-installer.exe');
       const stat = fs.statSync(installer);
       res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');

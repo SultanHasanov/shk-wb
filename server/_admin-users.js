@@ -307,8 +307,8 @@ module.exports = async function handler(req, res) {
       });
       if (created.error) return badRequest(res, created.error);
       await recordAdminAction(req, 'grantProgramKey', userId, { key: created.row.key, limit: created.row.usage_limit });
-      await notifyUser(userId, 'Вам выдан ключ «Подбора кодов»',
-        `Ключ ${created.row.key}, ${created.row.usage_limit} итераций.`, '/cabinet/keys');
+      await notifyUser(userId, 'Вам выдан пакет подборов «Помощник ПВЗ»',
+        `Ключ ${created.row.key}, ${created.row.usage_limit} подборов.`, '/cabinet/keys');
       return res.status(201).json(RESOURCES.key.fromDb(created.row));
     }
     if (req.method === 'POST' && action === 'grantCellLicense') {
