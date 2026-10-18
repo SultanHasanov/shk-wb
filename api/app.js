@@ -5,6 +5,7 @@ const { requireUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
+const { appFreeMode } = require('../server/_app-free');
 const appUpdate = require('../server/_app-update');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
@@ -54,8 +55,9 @@ module.exports = async function handler(req, res) {
     if (action === 'trial') return await legacyTrial(req, res);
 
     if (action === 'plans' && req.method === 'GET') {
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      return res.status(200).json(publicPlans());
+      // Короткий кэш: freeMode переключается из админки и должен доехать быстро.
+      res.setHeader('Cache-Control', 'public, max-age=30');
+      return res.status(200).json({ ...publicPlans(), freeMode: await appFreeMode() });
     }
 
     // Подтверждение входа со страницы сайта — без заголовка версии программы.

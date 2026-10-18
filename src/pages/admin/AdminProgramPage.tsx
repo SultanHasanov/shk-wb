@@ -1,8 +1,8 @@
 import { Trash2 } from 'lucide-react';
-import { type AdminProgramKey, useAdminResource, useAdminResourceMutation } from '../../api/admin';
+import { type AdminProgramKey, useAdminAppFreeMode, useAdminResource, useAdminResourceMutation, useSetAdminAppFreeMode } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
 import { shortDate } from '../../lib/admin-users';
-import { Alert, Badge, Button, Card, Field, Input, Skeleton, Table, useToast } from '../../ui';
+import { Alert, Badge, Button, Card, Field, Input, Skeleton, Switch, Table, useToast } from '../../ui';
 import s from '../../layout/AdminShell.module.css';
 
 type Promo = { id: number; code: string; limit: number; used: number; active: boolean; note: string | null };
@@ -15,9 +15,38 @@ export function AdminProgramPage() {
   const keyMutation = useAdminResourceMutation<{ key: string; limit: number; note: string; used: number; active: boolean; createdAt: string }>('key');
   const promos = useAdminResource<Promo>('programPromo');
   const promoMutation = useAdminResourceMutation<{ code: string; limit: number; note: string; active: boolean }>('programPromo');
+  const freeMode = useAdminAppFreeMode();
+  const setFreeMode = useSetAdminAppFreeMode();
 
   return (
     <div className="page stack-lg">
+      <Card>
+        <h3>Бесплатный режим программы</h3>
+        {freeMode.isPending ? (
+          <Skeleton height={48} />
+        ) : freeMode.isError ? (
+          <Alert tone="error">Не удалось загрузить настройку: {freeMode.error.message}</Alert>
+        ) : (
+          <Switch
+            checked={freeMode.data.enabled}
+            disabled={setFreeMode.isPending}
+            onChange={e =>
+              setFreeMode.mutate(e.target.checked, {
+                onSuccess: d => toast(d.enabled
+                  ? 'Программа бесплатна для всех'
+                  : `Тарифы снова платные. Подписки продлены на бесплатный период: ${d.extended?.users ?? 0} польз.`, 'success'),
+                onError: error => toast(error.message, 'error'),
+              })
+            }
+            description="Пока включено, каждый вошедший в программу аккаунтом сайта получает тариф Про: все разделы открыты, подборы кода не списываются, лимит компьютеров не действует. Включается в программе в течение минуты, без обновления. Купленные подписки в это время не расходуются: при выключении они продлеваются на длину бесплатного периода. Стикеры по-прежнему расходуют генерации (квота Про или пакеты)."
+          >
+            Все функции «Помощника ПВЗ» бесплатно
+          </Switch>
+        )}
+        {freeMode.data?.since && (
+          <p className={s.mutedNote}>Включён с {new Date(freeMode.data.since).toLocaleString('ru-RU')}.</p>
+        )}
+      </Card>
       <Card>
         <h3>Подписки «Помощник ПВЗ»</h3>
         <p className={s.mutedNote}>

@@ -12,8 +12,9 @@ const { enforceRateLimit } = require('../../server/_rate-limit');
 // «Пользователи», и вторая копия проверок разошлась бы с этой.
 const {
   RESOURCES, checkCellLicensePatch, checkProgramPromoPatch, checkStickerAccessPatch,
-  createCellLicense, createStickerAccessCode, validateProgramPromo,
+  createCellLicense, createStickerAccessCode, recordAdminAction, validateProgramPromo,
 } = require('../../server/_admin-grants');
+const { freeModeState, setAppFreeMode } = require('../../server/_app-free');
 
 module.exports = async function handler(req, res) {
   if (req.query.cabinet) return handleCabinetAdmin(req, res);
@@ -28,6 +29,7 @@ module.exports = async function handler(req, res) {
   if (req.query.resource === 'paymentAdmin') return handlePaymentAdmin(req, res);
   if (req.query.resource === 'stats') return handleStats(req, res);
   if (req.query.resource === 'freeGenerations') return handleFreeGenerations(req, res);
+  if (req.query.resource === 'appFreeMode') return handleAppFreeMode(req, res);
   const config = RESOURCES[req.query.resource];
   const id = req.query.id;
   if (!config || (id && !/^\d+$/.test(String(id)) && !(req.query.resource === 'cellRelease' && id === 'true'))) {
@@ -149,6 +151,20 @@ async function handleStats(req, res) {
 }
 
 /** Бесплатные первые генерации: партии с access_code is null. */
+// Бесплатный режим «Помощника ПВЗ»: GET — состояние, POST {enabled} — переключить.
+async function handleAppFreeMode(req, res) {
+  try {
+    if (req.method === 'GET') return res.json(await freeModeState());
+    if (req.method === 'POST') {
+      const state = await setAppFreeMode(req.body?.enabled === true);
+      await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, extended: state.extended }).catch(() => {});
+      return res.json(state);
+    }
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  } catch (error) { return sendApiError(res, error); }
+}
+
 async function handleFreeGenerations(req, res) {
   if (req.method !== 'GET') { res.setHeader('Allow','GET'); return res.status(405).json({error:'Method not allowed'}); }
   try {

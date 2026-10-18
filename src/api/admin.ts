@@ -445,6 +445,28 @@ export type AdminFreeGenerations = {
   conversion: { freeVisitors: number; converted: number };
 };
 
+/** Бесплатный режим «Помощника ПВЗ»: всем вошедшим — Про без лимитов. */
+export type AdminAppFreeMode = { enabled: boolean; since: string | null; extended?: { users: number; segments: number } | null };
+
+export function useAdminAppFreeMode() {
+  return useQuery({
+    queryKey: ['admin', 'app-free-mode'] as const,
+    queryFn: () => adminApi<AdminAppFreeMode>(`${RESOURCE}appFreeMode`),
+  });
+}
+
+export function useSetAdminAppFreeMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      adminApi<AdminAppFreeMode>(`${RESOURCE}appFreeMode`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    onSuccess: data => {
+      queryClient.setQueryData(['admin', 'app-free-mode'], data);
+      queryClient.invalidateQueries({ queryKey: ['app-plans'] });
+    },
+  });
+}
+
 export function useAdminFreeGenerations() {
   return useQuery({
     queryKey: adminKeys.freeGenerations,

@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, getAuthUser } = require('./_user-auth');
 const { PLANS, isPlan } = require('./_app-plans');
+const { appFreeMode } = require('./_app-free');
 
 const DEVICE_RE = /^[a-f0-9]{64}$/;
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -105,7 +106,27 @@ function deviceHashFrom(req) {
   return DEVICE_RE.test(value) ? value : null;
 }
 
+// В бесплатном режиме лимит ПК не действует: ПК добавляем/возвращаем напрямую.
+async function registerDeviceFree(userId, deviceHash, name, version) {
+  const now = new Date().toISOString();
+  const fields = { last_seen_at: now, app_version: String(version || '').slice(0, 32), revoked_at: null };
+  if (name) fields.name = String(name).slice(0, 80);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${deviceHash}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(fields),
+  });
+  if (rows.length) return rows[0].id;
+  const created = await supabaseFetch('app_devices', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ user_id: userId, device_hash: deviceHash, name: String(name || '').trim().slice(0, 80) || 'Компьютер', app_version: fields.app_version }),
+  });
+  return created[0].id;
+}
+
 async function registerDevice(userId, deviceHash, name, version) {
+  if (await appFreeMode()) return registerDeviceFree(userId, deviceHash, name, version);
   try {
     return await supabaseFetch('rpc/app_register_device', {
       method: 'POST',
@@ -164,13 +185,14 @@ function technicalEmail(email) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
     supabaseFetch(`license_keys?owner_user_id=eq.${uid}&active=eq.true&select=key,usage_limit,used,created_at&order=created_at.asc`),
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${uid}&active=eq.true&app_subscription_id=is.null&select=generation_limit,generation_used`),
     listDevices(user.id, currentHash),
+    appFreeMode(),
   ]);
   const profile = profiles[0] || {};
   const tg = telegram[0] || null;
@@ -184,8 +206,11 @@ async function accountSummary(user, currentHash) {
       phone: profile.phone || null,
       telegram: tg ? { username: tg.username || null } : null,
     },
+    // Бесплатный режим (админка): всем вошедшим — Про. Программа читает поле plan первым.
+    freeMode: free,
+    ...(free ? { plan: 'pro' } : {}),
     // Без подписки, но с пакетами подбор кода всё равно работает — как «Базовый» без квоты.
-    effectivePlan: plan || (packsLeft > 0 ? 'basic' : null),
+    effectivePlan: free ? 'pro' : plan || (packsLeft > 0 ? 'basic' : null),
     subscription: plan ? {
       plan,
       title: PLANS[plan].title,
@@ -203,12 +228,14 @@ async function accountSummary(user, currentHash) {
     packs: packs.map(row => ({ key: row.key, total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used) })).filter(p => p.left > 0),
     packsLeft,
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
-    deviceLimit: Number(ent.device_limit || 1),
+    deviceLimit: free ? 99 : Number(ent.device_limit || 1),
     devices,
   };
 }
 
 async function consumeCode(userId, deviceId, meta) {
+  // Бесплатный режим: подбор не списываем ни из квоты, ни из пакетов.
+  if (await appFreeMode()) return { ok: true, free: true };
   try {
     return await supabaseFetch('rpc/app_consume', {
       method: 'POST',

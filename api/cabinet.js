@@ -1,5 +1,6 @@
 const { z } = require('zod');
-const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const { appFreeMode } = require('../server/_app-free');
 const {
   deleteAuthUser,
   getAuthUser,
@@ -746,7 +747,8 @@ async function cronNotifications(req, res) {
       sent++;
     }
     // Подписка программы: напоминаем, только если за этим отрезком ничего не оплачено.
-    const subscriptions = await supabaseFetch(
+    // В бесплатном режиме не напоминаем: при его выключении подписки продлятся.
+    const subscriptions = await appFreeMode() ? [] : await supabaseFetch(
       `app_subscriptions?canceled=eq.false&ends_at=gte.${encodeURIComponent(start)}&ends_at=lt.${encodeURIComponent(end)}&select=id,user_id,plan,ends_at`,
     ).catch(() => []);
     for (const sub of subscriptions) {

@@ -19,9 +19,12 @@ export type AppPlans = {
   terms: Array<{ months: number; discountPercent: number }>;
   features: Record<string, string>;
   plans: AppPlan[];
+  /** Бесплатный режим из админки: всем вошедшим — Про без лимитов. */
+  freeMode?: boolean;
 };
 export type AppDevice = { id: string; name: string; appVersion: string; lastSeenAt: string; createdAt: string; current: boolean };
 export type AppAccount = {
+  freeMode?: boolean;
   user: { id: string; email: string | null; name: string | null; phone: string | null; telegram: { username: string | null } | null };
   effectivePlan: AppPlanId | null;
   subscription: { plan: AppPlanId; title: string; startsAt: string; endsAt: string; paidUntil: string; nextPlan: AppPlanId | null } | null;
