@@ -16,7 +16,11 @@ import {
   iterationWord,
   LICENSE_PRICES,
   MIN_PER_UNIT,
+  MAX_TOPUP,
+  MIN_TOPUP,
   PACKAGE_PRICES,
+  TOPUP_BONUS_STEPS,
+  topupBonus,
 } from './pricing';
 
 const payments = () => readFileSync(resolve(process.cwd(), 'server/_payments.js'), 'utf8');
@@ -57,6 +61,18 @@ function readCellPrintTable(): Record<string, Record<string, number>> {
 describe('цены пакетов', () => {
   it('совпадают с server/_payments.js', () => {
     expect(PACKAGE_PRICES).toEqual(readFlatTable('PACKAGE_PRICES'));
+  });
+
+  it('пополнение баланса совпадает с server/_wallet.js', async () => {
+    const { createRequire } = await import('node:module');
+    const wallet = createRequire(import.meta.url)('../../server/_wallet.js') as {
+      MIN_TOPUP: number; MAX_TOPUP: number; TOPUP_BONUS_STEPS: Array<[number, number]>; topupBonus: (rub: number) => number;
+    };
+    expect([MIN_TOPUP, MAX_TOPUP]).toEqual([wallet.MIN_TOPUP, wallet.MAX_TOPUP]);
+    expect(TOPUP_BONUS_STEPS).toEqual(wallet.TOPUP_BONUS_STEPS);
+    for (const rub of [100, 499, 500, 999, 1000, 1234]) expect(topupBonus(rub)).toBe(wallet.topupBonus(rub));
+    expect(topupBonus(500)).toBe(25);
+    expect(topupBonus(1000)).toBe(100);
   });
 
   it('считает цену за штуку', () => {

@@ -757,6 +757,63 @@ ${body}`, {
   return sent;
 }
 
+/**
+ * Напоминание в Telegram-бот за 2 дня до конца подписки «Помощника ПВЗ» и ключа «Печати ячеек» —
+ * всем, у кого кабинет связан с Telegram (где бы ни покупали), с кнопкой «Продлить с баланса».
+ * Крон раз в сутки, поэтому окно — ровно сутки: [now+1д, now+2д). Дедуп — через createNotification.
+ */
+async function notifyTelegramExpiry2d() {
+  const start = new Date(Date.now() + 86400000).toISOString(),
+    end = new Date(Date.now() + 2 * 86400000).toISOString();
+  const items = [];
+  const licenses = await supabaseFetch(
+    `cell_print_licenses?owner_user_id=not.is.null&active=eq.true&expires_at=gte.${encodeURIComponent(start)}&expires_at=lt.${encodeURIComponent(end)}&select=id,key,owner_user_id,expires_at`,
+  ).catch(() => []);
+  for (const license of licenses) {
+    items.push({
+      userId: license.owner_user_id,
+      dedupeKey: `tg-expiry-2d:cell:${license.id}:${String(license.expires_at).slice(0, 10)}`,
+      title: 'Через 2 дня заканчивается ключ «Печати ячеек»',
+      body: `Ключ ${license.key} действует до ${new Date(license.expires_at).toLocaleDateString('ru-RU')}.`,
+      button: { text: '🔄 Продлить с баланса', callback_data: `shop:cp:r:${license.id}` },
+    });
+  }
+  // В бесплатный период подписки не напоминаем: при его выключении они сдвинутся.
+  const subscriptions = await appFreeMode() ? [] : await supabaseFetch(
+    `app_subscriptions?canceled=eq.false&ends_at=gte.${encodeURIComponent(start)}&ends_at=lt.${encodeURIComponent(end)}&select=id,user_id,plan,ends_at`,
+  ).catch(() => []);
+  for (const sub of subscriptions) {
+    const later = await supabaseFetch(
+      `app_subscriptions?user_id=eq.${encodeURIComponent(sub.user_id)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(sub.ends_at)}&select=id&limit=1`,
+    ).catch(() => []);
+    if (later.length) continue;
+    items.push({
+      userId: sub.user_id,
+      dedupeKey: `tg-expiry-2d:app:${sub.id}:${String(sub.ends_at).slice(0, 10)}`,
+      title: 'Через 2 дня заканчивается подписка «Помощник ПВЗ»',
+      body: `Тариф действует до ${new Date(sub.ends_at).toLocaleDateString('ru-RU')}.`,
+      button: { text: '🔄 Продлить с баланса', callback_data: `shop:helper:${sub.plan}` },
+    });
+  }
+  let sent = 0;
+  for (const item of items) {
+    const tg = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(item.userId)}&select=telegram_user_id&limit=1`).catch(() => []);
+    const telegramId = tg[0]?.telegram_user_id;
+    if (!telegramId) continue;
+    const prefs = await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(item.userId)}&select=notify_key_expiry&limit=1`).catch(() => []);
+    if (prefs[0]?.notify_key_expiry === false) continue;
+    // Письмо за 3 дня уже ушло — здесь только запись для дедупа и сообщение в бот.
+    const notification = await createNotification({ userId: item.userId, kind: 'key_expiry', title: item.title, body: item.body, link: '/cabinet/keys', dedupeKey: item.dedupeKey, email: null, emailEnabled: false });
+    if (!notification) continue;
+    const wallet = await supabaseFetch(`wallet_accounts?user_id=eq.${encodeURIComponent(item.userId)}&select=balance_kopecks&limit=1`).catch(() => []);
+    const balance = Number(wallet[0]?.balance_kopecks || 0) / 100;
+    await sendMessage(telegramId, `<b>${item.title}</b>\n\n${item.body}\n\n💰 На балансе: ${balance.toLocaleString('ru-RU')} ₽`, {
+      reply_markup: { inline_keyboard: [[item.button], [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] },
+    }).then(() => { sent++; }).catch(() => {});
+  }
+  return sent;
+}
+
 async function cronNotifications(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
   const expected = process.env.CRON_SECRET;
@@ -778,6 +835,7 @@ async function cronNotifications(req, res) {
     // за 7 и за 1 день предупреждаем всех, кто пользуется программой и не оплатил дальше.
     const freeEnded = await expireAppFreeMode().catch(error => { console.error(error); return null; });
     sent += await notifyFreePeriodEnd().catch(error => { console.error(error); return 0; });
+    sent += await notifyTelegramExpiry2d().catch(error => { console.error(error); return 0; });
     for (const license of licenses) {
       const prefs = await supabaseFetch(
         `user_preferences?user_id=eq.${encodeURIComponent(license.owner_user_id)}&select=notify_key_expiry&limit=1`,

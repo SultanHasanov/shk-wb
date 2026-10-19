@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { TelegramLogin } from '../auth/TelegramLogin';
-import { getPack, PACKAGE_PRICES } from '../lib/pricing';
+import { getPack, MAX_TOPUP, MIN_TOPUP, PACKAGE_PRICES, topupBonus } from '../lib/pricing';
 import { rememberPendingOrder } from '../lib/pending-orders';
 import { useStores } from '../stores/root-store';
 import { Alert, Button, Card, Spinner } from '../ui';
@@ -15,15 +15,28 @@ export const BotCheckoutPage = observer(() => {
   const [error, setError] = useState('');
   const [paymentUrl, setPaymentUrl] = useState('');
   const quantity = Number(params.get('quantity'));
-  const valid = Number.isInteger(quantity) && PACKAGE_PRICES[quantity] !== undefined;
-  const pack = valid ? getPack(quantity) : null;
+  // ?kind=topup&amount=N — пополнение баланса из бота, иначе пакет генераций стикеров (?quantity=N).
+  const topup = params.get('kind') === 'topup';
+  const amount = Number(params.get('amount'));
+  // «Пополнить и купить»: что бот купит сам после оплаты и какой экран обновит (проверяет сервер).
+  const then = params.get('then') || '';
+  const screen = Number(params.get('m') || 0);
+  const valid = topup
+    ? Number.isInteger(amount) && amount >= MIN_TOPUP && amount <= MAX_TOPUP
+    : Number.isInteger(quantity) && PACKAGE_PRICES[quantity] !== undefined;
+  const pack = valid && !topup ? getPack(quantity) : null;
+  const bonus = topup && valid ? topupBonus(amount) : 0;
 
   useEffect(() => {
     if (!valid || !auth.isAuthenticated || started.current) return;
     started.current = true;
     api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
       method: 'POST',
-      body: JSON.stringify({ productKind: 'stickers', quantity, accepted: true, returnTo: 'telegram' }),
+      body: JSON.stringify(
+        topup
+          ? { productKind: 'wallet_topup', walletAmount: amount, walletThen: then || undefined, walletMessage: screen || undefined, accepted: true, returnTo: 'telegram' }
+          : { productKind: 'stickers', quantity, accepted: true, returnTo: 'telegram' },
+      ),
     }).then(data => {
       rememberPendingOrder(localStorage, data.token);
       setPaymentUrl(data.confirmationUrl);
@@ -31,14 +44,21 @@ export const BotCheckoutPage = observer(() => {
       started.current = false;
       setError(reason instanceof Error ? reason.message : 'Не удалось открыть оплату');
     });
-  }, [auth.isAuthenticated, quantity, valid]);
+  }, [amount, auth.isAuthenticated, quantity, screen, then, topup, valid]);
 
   return (
     <Card>
       <div className="stack" style={{ textAlign: 'center' }}>
-        <h1 style={{ margin: 0 }}>Оплата пакета</h1>
+        <h1 style={{ margin: 0 }}>{topup ? 'Пополнение баланса' : 'Оплата пакета'}</h1>
         {pack && <p style={{ margin: 0 }}>{pack.quantity} шт. — <strong>{pack.total} ₽</strong></p>}
-        {!valid && <Alert tone="error">Выбран неизвестный пакет. Вернитесь в бот и повторите выбор.</Alert>}
+        {topup && valid && (
+          <p style={{ margin: 0 }}>
+            Оплата <strong>{amount} ₽</strong> — на баланс зачислим <strong>{amount + bonus} ₽</strong>
+            {bonus > 0 && <> (бонус {bonus} ₽)</>}
+          </p>
+        )}
+        {topup && valid && then && <p className="muted" style={{ margin: 0 }}>После оплаты бот сам завершит покупку.</p>}
+        {!valid && <Alert tone="error">{topup ? `Сумма должна быть от ${MIN_TOPUP} до 50 000 ₽.` : 'Выбран неизвестный пакет.'} Вернитесь в бот и повторите выбор.</Alert>}
         {valid && auth.status === 'initializing' && <><Spinner /><p className="muted">Проверяем вход…</p></>}
         {valid && auth.status === 'anonymous' && (
           <>

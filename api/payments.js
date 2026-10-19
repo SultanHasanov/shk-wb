@@ -12,6 +12,7 @@ const {
   pricing,
   yookassa,
 } = require('../server/_payments');
+const { topupBonus, validTopup } = require('../server/_wallet');
 const { ADDONS, addonSnapshot, orderSnapshot, PLANS } = require('../server/_app-plans');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
@@ -56,6 +57,7 @@ function publicOrder(row) {
     appTermMonths: row.app_term_months || null,
     appAddon: row.app_addon || null,
     appAddonMonths: row.app_addon_months || null,
+    walletTopupKopecks: row.wallet_topup_kopecks || null,
     downloadUrl:
       row.status === 'succeeded'
         ? cellProgram
@@ -136,6 +138,8 @@ module.exports = async function handler(req, res) {
           ? 'app_addon'
           : requestedKind === 'program_license'
           ? 'program_license'
+          : requestedKind === 'wallet_topup'
+          ? 'wallet_topup'
           : cellKinds.includes(requestedKind)
             ? requestedKind
             : 'stickers';
@@ -194,6 +198,18 @@ module.exports = async function handler(req, res) {
         );
         if (!subs.length)
           return res.status(409).json({ error: `Услуга «${ADDONS[appAddon].title}» подключается к тарифу «${PLANS[ADDONS[appAddon].minPlan].title}» или выше`, code: 'PLAN_REQUIRED' });
+      }
+      // Пополнение баланса (тратится в Telegram-боте): баланс живёт на аккаунте, без входа некуда зачислить.
+      const walletAmount = Number(req.body?.walletAmount || 0);
+      // «Пополнить на X ₽ и купить» из бота: что купить сразу после зачисления (afterWalletTopup)
+      // и какой экран бота превратить в «Готово». Принимаем только известный формат.
+      const walletThen = String(req.body?.walletThen || '');
+      const walletThenValid = /^(gen|rv:(all|[1-5]):\d{1,4}:\d|shop:[a-z0-9:]{1,60})$/.test(walletThen);
+      const walletMessage = Number(req.body?.walletMessage || 0);
+      if (productKind === 'wallet_topup') {
+        if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы пополнить баланс' });
+        if (!validTopup(walletAmount))
+          return res.status(400).json({ error: 'Сумма пополнения — целое число от 25 до 50 000 ₽' });
       }
       let individualOrder = null;
       if (productKind === 'individual_stickers') {
@@ -287,6 +303,16 @@ module.exports = async function handler(req, res) {
           ? appSnapshot
           : productKind === 'app_addon'
           ? addonSnap
+          : productKind === 'wallet_topup'
+          ? {
+              wallet: {
+                amount: walletAmount,
+                bonus: topupBonus(walletAmount),
+                ...(walletThenValid ? { then: walletThen } : {}),
+                ...(walletThenValid && Number.isSafeInteger(walletMessage) && walletMessage > 0 ? { message: walletMessage } : {}),
+              },
+              total: walletAmount,
+            }
           : productKind === 'program_license'
           ? {
               license: { iterations: licenseIterations, total: LICENSE_PRICES[licenseIterations] },
@@ -351,6 +377,8 @@ module.exports = async function handler(req, res) {
       if (productKind === 'individual_stickers')
         orderPayload.individual_sticker_order_id = individualOrder.id;
       if (productKind === 'program_license') orderPayload.license_iterations = licenseIterations;
+      if (productKind === 'wallet_topup')
+        orderPayload.wallet_topup_kopecks = (walletAmount + topupBonus(walletAmount)) * 100;
       if (productKind === 'app_subscription') {
         orderPayload.app_plan = appPlan;
         orderPayload.app_term_months = appTerm;
@@ -375,7 +403,7 @@ module.exports = async function handler(req, res) {
       // still valid. Reuse that checkout instead of filling the admin list with copies
       // which YooKassa will cancel about an hour later. Balance payments are excluded:
       // their reservation belongs to one concrete order.
-      if (user && requestedCredit === 0 && !promoCode && !renewalTargetKey && productKind !== 'app_subscription' && productKind !== 'app_addon') {
+      if (user && requestedCredit === 0 && !promoCode && !renewalTargetKey && productKind !== 'app_subscription' && productKind !== 'app_addon' && productKind !== 'wallet_topup') {
         const recentSince = new Date(Date.now() - 55 * 60 * 1000).toISOString();
         const existing = await supabaseFetch(
           `payment_orders?user_id=eq.${encodeURIComponent(user.id)}` +
@@ -442,6 +470,8 @@ module.exports = async function handler(req, res) {
             ? `Помощник ПВЗ, тариф «${PLANS[appPlan].title}» на ${appTerm} мес., заказ ${order.id}`
             : productKind === 'app_addon'
             ? `Помощник ПВЗ, услуга «${ADDONS[appAddon].title}» на ${appAddonMonths} мес., заказ ${order.id}`
+            : productKind === 'wallet_topup'
+            ? `Пополнение баланса shk-wb.ru на ${walletAmount} ₽, заказ ${order.id}`
             : productKind === 'program_license'
             ? `${renewalTargetKey ? 'Пополнение' : 'Ключ'} программы: ${licenseIterations} итераций, заказ ${order.id}`
             : cellKinds.includes(productKind)

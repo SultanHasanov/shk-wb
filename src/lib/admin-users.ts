@@ -41,6 +41,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   individual_stickers: 'Индивидуальные стикеры',
   program: 'Программа «Помощник ПВЗ»',
   program_license: 'Пакет подборов «Помощника ПВЗ»',
+  wallet_topup: 'Пополнение баланса (бот)',
   cell_print_license: 'Ключи «Печати ячеек»',
   cell_print_program: 'Пробный доступ «Печати ячеек»',
   cell_print_bundle: 'Программа и ключ «Печати ячеек»',

@@ -5,6 +5,9 @@ const { sendMessage } = require('./_telegram-api');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
 const LICENSE_PRICES = Object.freeze({ 1:25, 3:40, 5:50, 10:90, 20:150 });
+// «Кто поставил оценку» в Telegram-боте: цена за одного автора, списывается с баланса
+// (сама сумма списания зашита в bot_review_spend, миграция 20261023_wallet.sql — менять вместе).
+const REVIEW_PRICE = 25;
 const CELL_PRINT_PRICES = Object.freeze({7:{1:50,2:85,3:115,5:175,10:300,20:500},30:{1:150,2:255,3:345,5:525,10:900,20:1500},90:{1:350,2:595,3:805,5:1225,10:2100,20:3500},180:{1:600,2:1020,3:1380,5:2100,10:3600,20:6000},365:{1:1000,2:1700,3:2300,5:3500,10:6000,20:10000}});
 
 function hasYookassa() { return Boolean(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY); }
@@ -55,6 +58,9 @@ async function completeOrder(order, payment) {
     }else if(order.product_kind==='app_addon'){
       await supabaseFetch('rpc/complete_app_addon_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
       completed={...completed,status:'succeeded'};
+    }else if(order.product_kind==='wallet_topup'){
+      const balance=await supabaseFetch('rpc/complete_wallet_topup_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
+      completed={...completed,status:'succeeded',wallet_balance_kopecks:Number(balance)};
     }else if(order.product_kind==='program_license'){
       const key=await supabaseFetch('rpc/complete_program_license_order',{method:'POST',body:JSON.stringify({p_order_id:order.id})});
       completed={...completed,status:'succeeded',program_license_key:String(key)};
@@ -76,7 +82,21 @@ async function completeOrder(order, payment) {
     throw error;
   }
 }
+/** Пригласившему — в Telegram-бот: «+X ₽ с оплаты друга». Награду пишет SQL-триггер при статусе succeeded. */
+async function notifyReferralReward(order){
+  if(!(Number(order.amount||0)>0))return;
+  const rewards=await supabaseFetch(`referral_ledger?order_id=eq.${encodeURIComponent(order.id)}&kind=eq.reward&select=user_id,amount_kopecks&limit=1`);
+  const reward=rewards[0];
+  if(!reward?.user_id)return;
+  const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(reward.user_id)}&select=telegram_user_id&limit=1`);
+  const telegramId=identities[0]?.telegram_user_id;
+  if(!telegramId)return;
+  const rub=(Number(reward.amount_kopecks)/100).toLocaleString('ru-RU');
+  await sendMessage(telegramId,`<b>💸 +${rub} ₽</b> — ваш коллега сделал оплату.`,{reply_markup:{inline_keyboard:[[{text:'👥 Мои приглашения',callback_data:'menu:ref'}]]}});
+}
 async function notifyCompleted(order){
+  // Покупку с баланса делает бот и сам показывает результат — письма и сообщения не нужны.
+  if(Number(order.wallet_paid_kopecks||0)>0)return;
   const secret=order.access_code||order.program_license_key||order.cell_print_license_key||null;
   const secretLabel=order.access_code?'Код доступа':'Ключ активации';
   const deliveryLine=secret?` ${secretLabel}: ${secret}.`:'';
@@ -84,6 +104,8 @@ async function notifyCompleted(order){
     ?`Подписка «Помощник ПВЗ» оплачена (заказ ${String(order.id).slice(0,8)}). Тариф уже доступен в программе — достаточно войти в аккаунт.`
     :order.product_kind==='app_addon'
     ?`Услуга «Архив клиентов» для «Помощника ПВЗ» подключена (заказ ${String(order.id).slice(0,8)}). Архив откроется в программе в течение нескольких минут или по кнопке «Обновить».`
+    :order.product_kind==='wallet_topup'
+    ?`Баланс пополнен на ${(Number(order.wallet_topup_kopecks||0)/100).toLocaleString('ru-RU')} ₽ (заказ ${String(order.id).slice(0,8)}). Тратить его можно в Telegram-боте.`
     :`Заказ ${String(order.id).slice(0,8)} готов.${deliveryLine} Данные покупки доступны в личном кабинете.`;
   if(order.user_id){
     const prefs=await supabaseFetch(`user_preferences?user_id=eq.${encodeURIComponent(order.user_id)}&select=notify_order_status&limit=1`).catch(()=>[]);
@@ -92,10 +114,28 @@ async function notifyCompleted(order){
     await sendEmail({userId:null,notificationId:null,to:order.email,subject:'Заказ успешно оплачен',text:body,dedupeKey:`email:order-succeeded:${order.id}`}).catch(()=>{});
   }
   if(!order.user_id)return;
+  await notifyReferralReward(order).catch(()=>{});
   if(order.product_kind==='individual_stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
     if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nСтикеры доступны в истории кабинета и через кнопку «Мои заказы» в боте.',{reply_markup:{inline_keyboard:[[{text:'📦 Мои заказы',callback_data:'orders:list'}],[{text:'🌐 Открыть кабинет',web_app:{url:'https://shk-wb.ru/cabinet/history'}}]]}}).catch(()=>{});
+  }else if(order.product_kind==='wallet_topup'){
+    const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
+    const telegramId=identities[0]?.telegram_user_id;
+    const credited=Number(order.wallet_topup_kopecks||0)/100, paid=Number(order.gross_amount||0), bonus=Math.max(0,credited-paid);
+    const balanceLine=order.wallet_balance_kopecks!=null?`
+На балансе: <b>${(order.wallet_balance_kopecks/100).toLocaleString('ru-RU')} ₽</b>`:'';
+    if(!telegramId)return;
+    const bonusText=bonus?` (бонус ${bonus.toLocaleString('ru-RU')} ₽)`:'';
+    // Пополняли ради покупки («Пополнить на X ₽ и купить») — проводим её сразу, без повторных нажатий.
+    if(order.pricing_snapshot?.wallet?.then){
+      await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}. Оплачиваю покупку…`).catch(()=>{});
+      // Лениво: бот сам подключает этот модуль (через _wallet.js), прямой require дал бы цикл.
+      const started=await require('./_telegram-wb-bot').afterWalletTopup(order).catch(error=>{console.error('Auto purchase after top-up failed',error.message);return false;});
+      if(!started)await sendMessage(telegramId,'Не получилось провести покупку автоматически — откройте её снова, оплата пройдёт с баланса.',{reply_markup:{inline_keyboard:[[{text:'☰ Меню',callback_data:'menu:home'}]]}}).catch(()=>{});
+      return;
+    }
+    await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}${balanceLine}`,{reply_markup:{inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'}]]}}).catch(()=>{});
   }else if(order.product_kind==='stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
@@ -106,4 +146,4 @@ async function notifyCompleted(order){
     }
   }
 }
-module.exports = { CELL_PRINT_PRICES, completeOrder, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, yookassa };
+module.exports = { CELL_PRINT_PRICES, completeOrder, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };

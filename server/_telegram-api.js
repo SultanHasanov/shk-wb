@@ -69,6 +69,17 @@ function sendMessage(chatId, text, options = {}) {
   });
 }
 
+function editMessageText(chatId, messageId, text, options = {}) {
+  return telegramRequest('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    ...options,
+  });
+}
+
 function sendPhoto(chatId, photo, options = {}) {
   return telegramRequest('sendPhoto', { chat_id: chatId, photo, ...options });
 }
@@ -99,4 +110,4 @@ async function deleteMessage(chatId, messageId) {
   }
 }
 
-module.exports = { answerCallbackQuery, deleteMessage, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest };
+module.exports = { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest };

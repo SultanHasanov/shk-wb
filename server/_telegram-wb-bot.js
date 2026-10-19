@@ -2,10 +2,13 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { supabaseFetch } = require('./_supabase');
-const { answerCallbackQuery, deleteMessage, sendDocument, sendMediaGroup, sendMessage, sendPhoto } = require('./_telegram-api');
+const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
-const { PACKAGE_PRICES } = require('./_payments');
-const { accountHasValuableData, isTechnicalTelegramUser } = require('./_telegram-account');
+const { CELL_PRINT_PRICES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
+const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
+const wallet = require('./_wallet');
+const { appFreeMode, appFreeUntil } = require('./_app-free');
+const { isTechnicalTelegramUser } = require('./_telegram-account');
 const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 
@@ -39,16 +42,28 @@ function persistLocalConnections() {
   fs.writeFileSync(temporary, JSON.stringify([...localWbConnections.values()]), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(temporary, file);
 }
+// Постоянная клавиатура — только быстрый возврат. Всё остальное в инлайн-меню (showMainMenu).
 const HOME_KEYBOARD = {
-  keyboard: [
-    [{ text: '🏷 Стикеры для товаров' }, { text: '📦 QR для коробок' }],
-    [{ text: '➕ Создать ШК' }, { text: '💳 Остаток' }],
-    [{ text: '👤 Аккаунт' }, { text: '🆘 Помощь' }],
-    [{ text: '⭐ Отзывы ПВЗ' }, { text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
-  ],
+  keyboard: [[{ text: '☰ Меню' }, { text: '🏷 Стикеры и QR' }]],
   resize_keyboard: true,
   is_persistent: false,
 };
+
+// Ссылки на программы показываем текстом, а не кнопкой: их копируют и открывают на ПК пункта.
+const PROGRAM_URL = 'https://shk-wb.ru/program';
+const CELL_PRINT_URL = 'https://shk-wb.ru/cell-print';
+const SUPPORT_URL = 'https://t.me/roma_denosov';
+const CHANNEL_URL = 'https://t.me/wbtools_ru';
+
+const BOT_COMMANDS = [
+  { command: 'menu', description: 'Главное меню' },
+  { command: 'stickers', description: 'Стикеры товаров и QR коробок' },
+  { command: 'code', description: 'Найти код клиента' },
+  { command: 'reviews', description: 'Отзывы ПВЗ и кто поставил оценку' },
+  { command: 'profile', description: 'Профиль, баланс, продление' },
+  { command: 'invite', description: 'Пригласить друга — 10% с его оплат' },
+  { command: 'help', description: 'Как пользоваться ботом' },
+];
 
 function publicUrl(path) {
   const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.ru' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.ru';
@@ -161,21 +176,201 @@ async function touchSubscriber(from, chatId) {
 
 function choiceKeyboard(rows) { return { inline_keyboard: rows }; }
 
-function kindKeyboard() {
-  return choiceKeyboard([[{ text: '🏷 Стикеры товаров', callback_data: 'gen:kind:product' }], [{ text: '📦 QR возвратных коробок', callback_data: 'gen:kind:box' }], [{ text: 'Отмена', callback_data: 'gen:cancel' }]]);
-}
+const MENU_ROW = [{ text: '☰ Меню', callback_data: 'menu:home' }];
 
-function modeKeyboard() {
-  return choiceKeyboard([[{ text: 'Пачка по количеству', callback_data: 'gen:mode:range' }], [{ text: 'По конкретному номеру', callback_data: 'gen:mode:custom' }], [{ text: 'Отмена', callback_data: 'gen:cancel' }]]);
-}
-
-function quantityKeyboard() {
+function mainMenuKeyboard(signedIn) {
   return choiceKeyboard([
-    [1, 10, 50].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
-    [100, 250, 500].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
-    [{ text: '⌨️ Ввести другое количество', callback_data: 'gen:qty:manual' }],
-    [{ text: 'Отмена', callback_data: 'gen:cancel' }],
+    [{ text: '🏷 Стикеры и QR для коробок', callback_data: 'menu:stickers' }],
+    [{ text: '🔑 Найти код клиента', callback_data: 'menu:code' }],
+    [{ text: '⭐ Отзывы ПВЗ — кто поставил оценку', callback_data: 'menu:reviews' }],
+    [{ text: '🖥 Помощник ПВЗ', callback_data: 'menu:helper' }],
+    [{ text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
+    [{ text: '👥 Пригласить друга — 10%', callback_data: 'menu:ref' }],
+    [signedIn
+      ? { text: '👤 Мой профиль и баланс', callback_data: 'menu:profile' }
+      : { text: '🔐 Войти в кабинет', callback_data: 'menu:login' }],
+    [{ text: '📣 Канал', url: CHANNEL_URL }, { text: '🆘 Поддержка', callback_data: 'menu:support' }, { text: '🌐 Сайт', web_app: { url: publicUrl('/') } }],
   ]);
+}
+
+const dayMonth = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: 'numeric', month: 'long' });
+const shortDate = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+/** «бесплатно до 1 ноября» для бесплатного периода Помощника; пустая строка, если он закончился. */
+function freeUntilText(enabled, until) {
+  if (!enabled) return '';
+  const end = Date.parse(until || '');
+  // В админке дата хранится как последняя секунда дня (23:59:59 МСК) — показываем следующий день: «до 1 ноября».
+  return Number.isFinite(end) ? `бесплатно до ${dayMonth.format(new Date(end + 1000))}` : 'сейчас бесплатно';
+}
+
+async function helperFreeText() {
+  try { return freeUntilText(await appFreeMode(), await appFreeUntil()); }
+  catch { return ''; }
+}
+
+async function showMainMenu(from, chatId, messageId) {
+  const [userId, free] = await Promise.all([findUser(from.id), helperFreeText()]);
+  const lines = ['<b>Главное меню</b>'];
+  if (free) lines.push(`🆕 Помощник ПВЗ — ${free}`);
+  lines.push(`📣 <a href="${CHANNEL_URL}">Наш канал</a> — новости и обновления`);
+  await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
+}
+
+async function showFindCode(chatId, messageId) {
+  const free = await helperFreeText();
+  const text = [
+    '<b>🔑 Код клиента</b>',
+    'Подберёт программа «Помощник ПВЗ» на компьютере пункта — за пару минут.',
+    '',
+    `1. Скачайте: ${PROGRAM_URL}`,
+    '2. Войдите аккаунтом shk-wb.ru',
+    '3. Ячейка клиента → «Найти код»',
+    '',
+    free ? `От ${PLANS.basic.monthlyPrice} ₽/мес · сейчас ${free}` : `От ${PLANS.basic.monthlyPrice} ₽/мес`,
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([[{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }], MENU_ROW]) });
+}
+
+async function showHelperInfo(chatId, messageId) {
+  const free = await helperFreeText();
+  const text = [
+    '<b>🖥 Помощник ПВЗ</b>',
+    'Программа для ПК пункта: код клиента, ячейки, отзывы с авторами, досье клиентов, график и зарплата сотрудников.',
+    '',
+    ...['basic', 'standard', 'pro'].map(id => `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`),
+    ...(free ? [`🎁 Сейчас ${free}`] : []),
+    '',
+    `Скачать: ${PROGRAM_URL}`,
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: '🛒 Оплатить с баланса', callback_data: 'shop:helper' }],
+    [{ text: '🔑 Как найти код клиента', callback_data: 'menu:code' }],
+    MENU_ROW,
+  ]) });
+}
+
+async function showCellPrintInfo(chatId, messageId) {
+  const text = [
+    '<b>🖨 Печать ячеек</b>',
+    'Сканируете товар — номер ячейки сразу печатается на термопринтере. Этикетки без лимита.',
+    '',
+    `От ${CELL_PRINT_PRICES[7]?.[1]} ₽ в неделю · программа бесплатная`,
+    `Скачать: ${CELL_PRINT_URL}`,
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: '🛒 Купить или продлить с баланса', callback_data: 'shop:cp' }],
+    MENU_ROW,
+  ]) });
+}
+
+/**
+ * Показать экран в том же сообщении (кнопки меню и шаги мастера), а если его нельзя
+ * отредактировать (старое, удалено, это фото) — новым сообщением. Возвращает id сообщения.
+ */
+async function showScreen(chatId, messageId, text, options = {}) {
+  if (messageId) {
+    try {
+      await editMessageText(chatId, messageId, text, options);
+      return messageId;
+    } catch (error) {
+      if (/message is not modified/i.test(String(error.message))) return messageId;
+    }
+  }
+  const message = await sendMessage(chatId, text, options);
+  return message?.message_id || null;
+}
+
+// ── Мастер стикеров: одно сообщение, шаги сменяют друг друга, «⬅️ Назад» — на шаг раньше ──
+
+const GEN_BACK = { text: '⬅️ Назад', callback_data: 'gen:back' };
+const GEN_CANCEL = { text: 'Отмена', callback_data: 'gen:cancel' };
+const KIND_TITLES = { product: '🏷 Стикеры товаров', box: '📦 QR возвратных коробок' };
+
+/** Выбранные параметры над вопросом шага — видно, что уже выбрано. */
+function wizardTrail(draft) {
+  const lines = [];
+  if (draft.category) lines.push(`Тип: <b>${KIND_TITLES[draft.category]}</b>`);
+  if (draft.mode) lines.push(`Режим: <b>${draft.mode === 'range' ? 'пачка по количеству' : 'конкретный номер'}</b>`);
+  if (draft.mode === 'range' && draft.quantity) lines.push(`Количество: <b>${draft.quantity}</b>`);
+  if (draft.mode === 'custom' && draft.code) lines.push(`Номер: <code>${escapeHtml(draft.code)}</code>`);
+  return lines.length ? `${lines.join('\n')}\n\n` : '';
+}
+
+function wizardView(state, draft) {
+  const error = draft.error ? `⚠️ ${draft.error}\n\n` : '';
+  const trail = wizardTrail(draft);
+  if (state === 'choose_kind') {
+    return { text: `${error}<b>Что нужно создать?</b>`, rows: [
+      [{ text: KIND_TITLES.product, callback_data: 'gen:kind:product' }],
+      [{ text: KIND_TITLES.box, callback_data: 'gen:kind:box' }],
+      [{ text: '⬅️ Меню', callback_data: 'menu:home' }],
+    ] };
+  }
+  if (state === 'choose_mode') {
+    return { text: `${trail}${error}<b>Выберите режим</b>`, rows: [
+      [{ text: 'Пачка по количеству', callback_data: 'gen:mode:range' }],
+      [{ text: 'По конкретному номеру', callback_data: 'gen:mode:custom' }],
+      [GEN_BACK, GEN_CANCEL],
+    ] };
+  }
+  if (state === 'await_quantity') {
+    return { text: `${trail}${error}<b>Сколько создать?</b>\nВыберите или отправьте число от 1 до 500 сообщением.`, rows: [
+      [1, 10, 50].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
+      [100, 250, 500].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
+      [GEN_BACK, GEN_CANCEL],
+    ] };
+  }
+  if (state === 'await_code') {
+    const length = draft.category === 'box' ? 10 : 11;
+    return { text: `${trail}${error}<b>Отправьте номер сообщением</b>\n${draft.category === 'box' ? 'Номер коробки' : 'ШК'} — ровно ${length} цифр.`, rows: [[GEN_BACK, GEN_CANCEL]] };
+  }
+  // state === 'confirm'
+  if (draft.accessCode) {
+    return { text: `${trail}${error}<b>Проверьте параметры</b>\nГенерации спишутся с вашего кода доступа.`, rows: [
+      [{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }],
+      [GEN_BACK, GEN_CANCEL],
+    ] };
+  }
+  // Генераций на кодах нет — платим с баланса по таблице пакетов.
+  const cost = Number(draft.walletCost || 0), balance = Number(draft.balanceKopecks || 0) / 100;
+  if (balance >= cost) {
+    return { text: `${trail}${error}<b>Проверьте параметры</b>\nСпишется <b>${wallet.formatRub(cost)}</b> с баланса — останется ${wallet.formatRub(balance - cost)}.`, rows: [
+      [{ text: `✅ Подтвердить — ${wallet.formatRub(cost)}`, callback_data: 'gen:confirm' }],
+      [GEN_BACK, GEN_CANCEL],
+    ] };
+  }
+  return { text: `${trail}${error}<b>Не хватает ${wallet.formatRub(cost - balance)}</b>\nЦена ${wallet.formatRub(cost)}, на балансе ${wallet.formatRub(balance)}. После пополнения стикеры создадутся сами.`, rows: [
+    topupAndBuyRow(cost - balance, 'gen'),
+    [{ text: '🔑 У меня есть код', callback_data: 'code:enter' }],
+    [GEN_BACK, GEN_CANCEL],
+  ] };
+}
+
+/** Перерисовать шаг мастера в его сообщении и сохранить состояние. */
+async function renderWizard(from, chatId, state, draft, messageId) {
+  const view = wizardView(state, draft);
+  delete draft.error;
+  draft.msgId = await showScreen(chatId, messageId || draft.msgId, view.text, { reply_markup: choiceKeyboard(view.rows) });
+  await saveSession(from, chatId, state, draft);
+}
+
+/** Шаг назад: куда возвращаться из каждого состояния. */
+async function wizardBack(from, chatId, session, messageId) {
+  const draft = session.draft || {};
+  const state = session.state;
+  if (state === 'choose_mode') { delete draft.category; return renderWizard(from, chatId, 'choose_kind', draft, messageId); }
+  if (state === 'await_quantity' || state === 'await_code') {
+    delete draft.mode; delete draft.quantity; delete draft.code; delete draft.prefix;
+    return renderWizard(from, chatId, 'choose_mode', draft, messageId);
+  }
+  if (state === 'confirm') {
+    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks;
+    if (draft.mode === 'range') { delete draft.quantity; return renderWizard(from, chatId, 'await_quantity', draft, messageId); }
+    delete draft.code;
+    return renderWizard(from, chatId, 'await_code', draft, messageId);
+  }
+  return renderWizard(from, chatId, 'choose_kind', draft, messageId);
 }
 
 function miniAppKeyboard() {
@@ -186,34 +381,45 @@ function miniAppKeyboard() {
   ]);
 }
 
-function accountKeyboard(canConnect) {
-  const rows = [];
-  if (canConnect) rows.push([{ text: 'Подключить основной кабинет', web_app: { url: publicUrl('/telegram-account') } }]);
-  rows.push([{ text: 'Продолжить с текущим', callback_data: 'account:continue' }]);
-  return choiceKeyboard(rows);
-}
-
 async function sendLoginPrompt(from, chatId, text) {
   const message = await sendMessage(chatId, text, { reply_markup: miniAppKeyboard() });
   await saveSession(from, chatId, 'choose_kind', { authPromptMessageId: message.message_id });
 }
 
-function packageKeyboard() {
-  const quantities = Object.keys(PACKAGE_PRICES).map(Number).sort((a, b) => a - b);
-  const rows = [];
-  for (let index = 0; index < quantities.length; index += 2) {
-    rows.push(quantities.slice(index, index + 2).map(quantity => ({ text: `${quantity} шт. — ${PACKAGE_PRICES[quantity]} ₽`, callback_data: `buy:pack:${quantity}` })));
-  }
-  rows.push([{ text: '🔑 У меня есть код', callback_data: 'code:enter' }]);
-  rows.push([{ text: 'Отмена', callback_data: 'gen:cancel' }]);
-  return choiceKeyboard(rows);
+function topupButton(amount) {
+  const bonus = wallet.topupBonus(amount);
+  return { text: `${amount} ₽${bonus ? ` (+${bonus} ₽)` : ''}`, web_app: { url: publicUrl(`/bot-checkout?kind=topup&amount=${amount}`) } };
 }
 
-function balanceKeyboard() {
-  return choiceKeyboard([
-    [{ text: '🔑 Ввести код', callback_data: 'code:enter' }],
-    [{ text: '💳 Купить генерации', callback_data: 'code:buy' }],
-  ]);
+/** Кнопки пополнения (сразу на оплату). missing — сколько не хватает: меньшие суммы не предлагаем. */
+function topupRows(missing = 0) {
+  const amounts = wallet.TOPUP_AMOUNTS.filter(amount => amount + wallet.topupBonus(amount) >= missing);
+  const list = amounts.length ? amounts : [wallet.TOPUP_AMOUNTS[wallet.TOPUP_AMOUNTS.length - 1]];
+  const rows = [];
+  for (let index = 0; index < list.length; index += 2) rows.push(list.slice(index, index + 2).map(topupButton));
+  return rows;
+}
+
+/**
+ * Не хватает денег на покупку — пополнить ровно на недостающее (не меньше минимума) и купить.
+ * then — что сделать после оплаты пополнения (afterWalletTopup): 'gen' | 'rv:<фильтр>:<стр>:<№>' | 'shop:<части>';
+ * messageId — экран покупки, который после оплаты станет «Готово ✅».
+ */
+function topupAndBuyRow(missingRub, then, messageId) {
+  const amount = Math.max(wallet.MIN_TOPUP, Math.ceil(Number(missingRub) - 1e-9));
+  const params = new URLSearchParams({ kind: 'topup', amount: String(amount), then });
+  if (messageId) params.set('m', String(messageId));
+  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, web_app: { url: publicUrl(`/bot-checkout?${params}`) } }];
+}
+
+function profileKeyboard({ technical = false } = {}) {
+  const rows = [
+    [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '🛒 Купить с баланса', callback_data: 'shop:home' }],
+    [{ text: '👥 Пригласить друга', callback_data: 'menu:ref' }, { text: '🔑 Ввести код доступа', callback_data: 'code:enter' }],
+  ];
+  if (technical) rows.push([{ text: 'Подключить основной кабинет', web_app: { url: publicUrl('/telegram-account') } }]);
+  rows.push(MENU_ROW);
+  return choiceKeyboard(rows);
 }
 
 /** Текст ошибки claim_user_asset для человека; null — ошибка не из этих, пусть летит дальше. */
@@ -274,11 +480,12 @@ async function redeemAccessCode(from, chatId, session, text) {
   await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: HOME_KEYBOARD });
   // Пришли из генерации, где не хватило остатка, — продолжаем с тем же черновиком.
   if (draft.mode) {
-    const { pendingPurchase, purchaseQuantity, ...rest } = draft;
+    // Старый экран мастера остался выше в чате — подтверждение показываем новым сообщением под кодом.
+    const { msgId, accessCode, walletCost, balanceKopecks, ...rest } = draft;
     return requestConfirmation(from, chatId, rest);
   }
   await clearSession(from.id);
-  return showBalance(from, chatId);
+  return showProfile(from, chatId);
 }
 
 function requiredUnits(draft) { return draft.mode === 'range' ? Number(draft.quantity) : 1; }
@@ -287,24 +494,38 @@ function telegramRequesterHash(telegramId) {
   return crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(`telegram:${telegramId}`).digest('hex');
 }
 
-function summary(draft) {
-  const type = draft.category === 'box' ? 'QR возвратных коробок' : 'стикеры товаров';
-  const value = draft.mode === 'range' ? `Количество: <b>${draft.quantity}</b>` : `Номер: <code>${escapeHtml(draft.code)}</code>`;
-  return `<b>Проверьте параметры</b>\nТип: ${type}\nРежим: ${draft.mode === 'range' ? 'пачка' : 'конкретный номер'}\n${value}\n\nПосле подтверждения генерации будут списаны из пакета.`;
-}
-
-async function requestConfirmation(from, chatId, draft) {
+/** Подтверждение: сначала генерации на кодах доступа, если их нет — оплата с баланса. */
+async function requestConfirmation(from, chatId, draft, messageId) {
   const units = requiredUnits(draft);
   const accessCode = await selectAccessCode(draft.userId, units);
-  if (!accessCode) {
-    draft.pendingPurchase = true;
-    await saveSession(from, chatId, 'confirm', draft);
-    await sendMessage(chatId, `${units > 1 ? 'Для этой пачки недостаточно генераций.' : 'Оплаченных генераций нет.'}\n\nВыберите пакет — после подтверждения откроется только страница оплаты. Если вам выдали код доступа, нажмите «У меня есть код»:`, { reply_markup: packageKeyboard() });
-    return;
+  if (accessCode) { draft.accessCode = accessCode; delete draft.walletCost; delete draft.balanceKopecks; }
+  else {
+    delete draft.accessCode;
+    draft.walletCost = wallet.generationCost(units);
+    draft.balanceKopecks = await wallet.getBalanceKopecks(draft.userId);
   }
-  draft.accessCode = accessCode;
-  await saveSession(from, chatId, 'confirm', draft);
-  await sendMessage(chatId, summary(draft), { reply_markup: choiceKeyboard([[{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }], [{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
+  await renderWizard(from, chatId, 'confirm', draft, messageId);
+}
+
+/** Свой активный код доступа — на него докупаем генерации с баланса, чтобы не плодить коды. */
+async function ownTopupCode(userId) {
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code&order=created_at.desc&limit=1`);
+  return rows[0]?.code || null;
+}
+
+/** Купить с баланса ровно нужное число генераций; возвращает код, на который они легли. */
+async function buyGenerationsWithWallet(draft) {
+  const units = requiredUnits(draft);
+  const target = await ownTopupCode(draft.userId);
+  const result = await wallet.payWithWallet({
+    userId: draft.userId,
+    productKind: 'stickers',
+    fields: { range_quantity: units, sticker_target: draft.category === 'box' ? 'box' : 'product', ...(target ? { renewal_target_key: target } : {}) },
+    priceRub: wallet.generationCost(units),
+    snapshot: { packs: [], units, total: wallet.generationCost(units), source: 'telegram-wallet' },
+  });
+  if (!result.ok) return result;
+  return { ok: true, accessCode: result.order.access_code, balanceKopecks: result.balanceKopecks };
 }
 
 function absoluteAssetUrl(relative, png = false) {
@@ -320,7 +541,7 @@ function pageKeyboard(requestId, page, totalPages) {
   const row = [];
   if (page > 0) row.push({ text: '⬅️ Назад', callback_data: `gen:page:${requestId}:${page - 1}` });
   if (page + 1 < totalPages) row.push({ text: 'Далее ➡️', callback_data: `gen:page:${requestId}:${page + 1}` });
-  return choiceKeyboard([row, [{ text: '➕ Создать ещё', callback_data: 'gen:start' }]].filter(items => items.length));
+  return choiceKeyboard([row, [{ text: '➕ Создать ещё', callback_data: 'gen:start' }, ...MENU_ROW]].filter(items => items.length));
 }
 
 async function sendPreview(chatId, requestId, result, page = 0) {
@@ -346,79 +567,168 @@ async function loadGenerationRequest(requestId, telegramId) {
 }
 
 async function confirmGeneration(callback, session) {
-  const from = callback.from, chatId = callback.message.chat.id, draft = session.draft || {};
-  const requestId = `${from.id}:${callback.message.message_id}`;
-  if (!await claimGenerationRequest(requestId, from, chatId, draft)) { await answerCallbackQuery(callback.id, 'Этот запрос уже обработан'); return; }
+  return runGeneration(callback.from, callback.message.chat.id, callback.message.message_id, session,
+    () => answerCallbackQuery(callback.id, 'Этот запрос уже обработан'));
+}
+
+/** Генерация по подтверждённому черновику: по кнопке «Подтвердить» или сама после пополнения баланса. */
+async function runGeneration(from, chatId, messageId, session, onDuplicate = async () => {}) {
+  const draft = session.draft || {};
+  // Сообщение мастера переиспользуется между генерациями, поэтому к его id добавлена метка
+  // этого запуска мастера (draft.nonce): двойной клик по «Подтвердить» по-прежнему отсекается.
+  const requestId = `${from.id}:${messageId}${draft.nonce || ''}`;
+  if (!await claimGenerationRequest(requestId, from, chatId, draft)) { await onDuplicate(); return; }
+  let paidLine = '';
+  if (!draft.accessCode) {
+    // Генераций на кодах нет — докупаем ровно нужное с баланса и генерируем этим кодом.
+    const bought = await buyGenerationsWithWallet(draft);
+    if (!bought.ok) {
+      // Деньги не списаны: освобождаем запрос, чтобы после пополнения можно было нажать «Подтвердить» снова.
+      await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
+      draft.balanceKopecks = bought.balanceKopecks;
+      draft.error = 'Денег на балансе не хватает — пополните баланс.';
+      await renderWizard(from, chatId, 'confirm', draft, messageId);
+      return;
+    }
+    draft.accessCode = bought.accessCode;
+    paidLine = ` Списано ${wallet.formatRub(wallet.generationCost(requiredUnits(draft)))}, на балансе ${wallet.formatRub(bought.balanceKopecks / 100)}.`;
+  }
   await saveSession(from, chatId, 'generating', draft);
-  await sendMessage(chatId, 'Генерирую и подготавливаю PDF…');
+  await showScreen(chatId, messageId, `${wizardTrail(draft)}⏳ Генерирую и подготавливаю PDF…`);
   try {
     const requesterHash = telegramRequesterHash(from.id);
     const result = await generateStickers({ ...draft, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
     await completeGenerationRequest(requestId, result);
     await clearSession(from.id);
     await sendPreview(chatId, requestId, result, 0);
-    await sendDocument(chatId, absoluteAssetUrl(result.pdfUrl), { caption: `Готово: ${result.quantity || 1} шт. Осталось генераций: ${result.access?.remaining ?? '—'}` });
+    await sendDocument(chatId, absoluteAssetUrl(result.pdfUrl), { caption: paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}` });
+    // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
+    if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) });
   } catch (error) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     await clearSession(from.id);
-    const noBalance = error.code === 'ACCESS_CODE_LIMIT' || error.code === 'INVALID_ACCESS_CODE';
-    await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}`, { reply_markup: noBalance ? miniAppKeyboard() : HOME_KEYBOARD });
+    // Если генерации уже куплены с баланса, они остались на коде — следующая попытка возьмёт их без оплаты.
+    const kept = paidLine ? '\n\nОплаченные генерации остались на вашем счёте — попробуйте ещё раз, повторно платить не нужно.' : '';
+    await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
   }
 }
 
-async function startGeneration(from, chatId) {
+function wizardNonce() { return String(crypto.randomInt(100000, 1000000)); }
+
+/** messageId — сообщение, которое превращается в мастер (например, главное меню). Без него — новое сообщение. */
+async function startGeneration(from, chatId, messageId) {
   const userId = await findUser(from.id);
   if (!userId) { await sendLoginPrompt(from, chatId, 'Этот Telegram ещё не привязан к аккаунту. Войдите через Mini App — после привязки эта кнопка исчезнет.'); return; }
-  await saveSession(from, chatId, 'choose_kind', { userId });
-  await sendMessage(chatId, '<b>Что нужно создать?</b>', { reply_markup: kindKeyboard() });
+  await renderWizard(from, chatId, 'choose_kind', { userId, nonce: wizardNonce() }, messageId);
 }
 
 async function startForCategory(from, chatId, category) {
   const userId = await findUser(from.id);
   if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App — бот генерирует по вашим пакетам генераций.'); return; }
-  await saveSession(from, chatId, 'choose_mode', { userId, category });
-  await sendMessage(chatId, `<b>${category === 'box' ? 'QR для возвратных коробок' : 'Стикеры для товаров'}</b>\nВыберите режим генерации:`, { reply_markup: modeKeyboard() });
+  await renderWizard(from, chatId, 'choose_mode', { userId, category, nonce: wizardNonce() });
 }
 
-async function showBalance(from, chatId) {
-  const userId = await findUser(from.id);
-  if (!userId) { await sendMessage(chatId, 'Сначала войдите через Mini App.', { reply_markup: miniAppKeyboard() }); return; }
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code,generation_limit,generation_used&order=created_at.asc`);
-  const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
-  const details = rows.map(row => `• код <code>${escapeHtml(row.code)}</code>: ${Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0))}`).join('\n');
-  await sendMessage(chatId, `<b>Ваш остаток</b>\n\n💳 В пакетах: <b>${paidRemaining}</b>${details ? `\n\n${details}` : ''}\n\nЕсть код доступа? Нажмите «Ввести код» — генерации добавятся к остатку.`, { reply_markup: balanceKeyboard() });
+/** Баланс в рублях. */
+async function walletRub(userId) {
+  return (await wallet.getBalanceKopecks(userId)) / 100;
 }
 
-async function showAccount(from, chatId) {
+
+function remainingOf(row) { return Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)); }
+
+/** Короткая строка подписки «Помощника ПВЗ»: «Базовый» до 19.11 · бесплатно до 1 ноября · нет подписки. */
+function helperStatusLine(ent, free) {
+  const plan = ent?.plan && PLANS[ent.plan];
+  if (plan) {
+    const until = ent.paid_until || ent.ends_at;
+    return `«${plan.title}»${until ? ` до ${dayMonthShort(until)}` : ''}`;
+  }
+  return free || 'нет подписки';
+}
+
+function cellPrintStatusLine(keys) {
+  if (!keys.length) return 'нет ключа';
+  const running = keys.filter(key => key.expires_at && Date.parse(key.expires_at) > Date.now())
+    .sort((a, b) => Date.parse(b.expires_at) - Date.parse(a.expires_at));
+  if (running.length) return `до ${dayMonthShort(running[0].expires_at)}`;
+  if (keys.some(key => !key.activated_at)) return 'ключ не активирован';
+  return 'срок закончился';
+}
+
+function dayMonthShort(value) {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' }).format(new Date(value));
+}
+
+/** Профиль: деньги и что куплено — по строке на каждое. */
+async function showProfile(from, chatId, messageId) {
   const userId = await findUser(from.id);
   if (!userId) {
-    await sendMessage(chatId, '<b>Аккаунт не подключён</b>\n\nЕсли вы уже покупали генерации на сайте, войдите в существующий кабинет.', { reply_markup: miniAppKeyboard() });
+    await sendLoginPrompt(from, chatId, '<b>Кабинет не подключён</b>\nВойдите через Telegram — кабинет создастся сам.');
     return;
   }
-  const [rows, hasData, technical] = await Promise.all([
-    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used`),
-    accountHasValuableData(userId),
+  const id = encodeURIComponent(userId);
+  const [codes, balance, ent, cellKeys, free, technical] = await Promise.all([
+    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${id}&active=eq.true&select=generation_limit,generation_used`),
+    walletRub(userId).catch(() => 0),
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
+    supabaseFetch(`cell_print_licenses?owner_user_id=eq.${id}&active=eq.true&select=activated_at,expires_at`).catch(() => []),
+    helperFreeText(),
     isTechnicalTelegramUser(userId),
   ]);
-  const paidRemaining = rows.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0);
-  const guidance = technical
-    ? hasData
-      ? 'Если вы уже пользовались сайтом с другим email, подключите основной кабинет — пакеты и история будут объединены.'
-      : 'Если этот кабинет был создан случайно, подключите основной кабинет.'
-    : 'Сайт и Telegram используют один кабинет.';
-  await sendMessage(chatId, `<b>Аккаунт подключён</b>\n\nДоступно генераций: <b>${paidRemaining}</b>\n\n${guidance}`, { reply_markup: accountKeyboard(technical) });
+  const stickers = codes.reduce((sum, row) => sum + remainingOf(row), 0);
+  const text = [
+    '<b>👤 Профиль</b>',
+    `💰 Баланс: <b>${wallet.formatRub(balance)}</b>`,
+    // Генерации на кодах — только если есть: кто работает в боте, обходится балансом.
+    ...(stickers ? [`🏷 Стикеры: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
+    `🖥 Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
+    `🖨 Печать ячеек: ${cellPrintStatusLine(cellKeys)}`,
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ technical }) });
 }
 
-async function showHelp(chatId) {
-  await sendMessage(chatId, '<b>Как пользоваться ботом</b>\n\n1. Выберите товарные стикеры или QR коробок.\n2. Выберите один номер или пачку до 500 штук.\n3. Проверьте параметры и подтвердите.\n4. Получите предпросмотр и PDF для печати.\n\nЕсли вам выдали код доступа, откройте «Остаток» → «Ввести код» — генерации добавятся без покупки.\n\nЕсли нужна помощь, напишите в поддержку.', { reply_markup: choiceKeyboard([[{ text: 'Написать в поддержку', url: 'https://t.me/roma_denosov' }]]) });
+async function showHelp(chatId, messageId) {
+  await showScreen(chatId, messageId, [
+    '<b>❓ Как пользоваться</b>',
+    '🏷 Стикеры и QR — выберите тип и количество, придёт PDF.',
+    '⭐ Отзывы — войдите в кабинет WB по SMS.',
+    '💰 Оплата — с баланса в «👤 Профиль».',
+  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '🆘 Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]) });
 }
 
 function reviewFilterKeyboard() {
   return choiceKeyboard([
     [1, 2, 3, 4, 5].map(star => ({ text: `${star} ⭐`, callback_data: `rv:filter:${star}` })),
     [{ text: 'Все оценки', callback_data: 'rv:filter:all' }],
+    [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
     [{ text: 'Сменить ПВЗ', callback_data: 'rv:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
+    MENU_ROW,
   ]);
+}
+
+/**
+ * «Кто поставил оценку» — цена и пополнение. reason='empty' — нажали «Кто поставил оценку», а денег не хватило;
+ * then — какой отзыв раскрыть сразу после пополнения ('rv:<фильтр>:<стр>:<№>').
+ */
+async function showReviewPaywall(from, chatId, reason, messageId, then) {
+  const userId = await findUser(from.id);
+  if (!userId) {
+    await sendLoginPrompt(from, chatId, 'Чтобы узнать, кто поставил оценку, войдите через Telegram — кабинет создастся сам.');
+    return;
+  }
+  const [balance, free] = await Promise.all([walletRub(userId), helperFreeText()]);
+  const text = [
+    `<b>👤 Кто поставил оценку — ${wallet.formatRub(REVIEW_PRICE)}</b>`,
+    'Телефон клиента, когда забрал или отказался, ячейка. Повторно — бесплатно.',
+    '',
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b>${reason === 'empty' ? ' — не хватает' : ''}`,
+    ...(then ? ['После пополнения автор откроется сам.'] : []),
+    ...(free ? ['', `💡 В Помощнике ПВЗ — ${free}: ${PROGRAM_URL}`] : []),
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    ...(then ? [topupAndBuyRow(REVIEW_PRICE - balance, then)] : topupRows(REVIEW_PRICE - balance)),
+    [{ text: '⭐ К отзывам', callback_data: 'rv:filters' }, ...MENU_ROW],
+  ]) });
 }
 
 function pointKeyboard(points) {
@@ -521,7 +831,7 @@ async function loadPickupEvents(telegramId, connection, userIds) {
   return findPickupEvents(snapshot.goods, userIds);
 }
 
-async function showReviewFilters(from, chatId) {
+async function showReviewFilters(from, chatId, messageId) {
   const connection = await getWbConnection(from.id);
   if (connection?.session?.token && connection.state === 'await_point') {
     await beginPointSelection(from, chatId, connection);
@@ -530,10 +840,13 @@ async function showReviewFilters(from, chatId) {
   if (!connection?.session?.token || connection.state !== 'ready') {
     const session = { deviceId: crypto.randomUUID() };
     await saveWbConnection(from, chatId, 'await_phone', session);
-    await sendMessage(chatId, '<b>Подключение кабинета WB</b>\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.');
+    await showScreen(chatId, messageId, '<b>Подключение кабинета WB</b>\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.', { reply_markup: choiceKeyboard([MENU_ROW]) });
     return;
   }
-  await sendMessage(chatId, `<b>Отзывы ПВЗ ${connection.session.pointId}</b>\n\nКакие оценки показать?`, { reply_markup: reviewFilterKeyboard() });
+  const userId = await findUser(from.id);
+  const balance = userId ? await walletRub(userId).catch(() => null) : null;
+  const balanceLine = balance == null ? '' : ` · 💰 ${wallet.formatRub(balance)}`;
+  await showScreen(chatId, messageId, `<b>⭐ Отзывы ПВЗ ${connection.session.pointId}</b>\nКто поставил оценку — ${wallet.formatRub(REVIEW_PRICE)}${balanceLine}\n\nКакие оценки показать?`, { reply_markup: reviewFilterKeyboard() });
 }
 
 async function sendReviewPage(from, chatId, filterKey, page) {
@@ -564,7 +877,7 @@ async function sendReviewPage(from, chatId, filterKey, page) {
   for (let index = 0; index < result.data.length; index += 1) {
     const review = result.data[index];
     const callbackData = `rv:who2:${filterKey}:${safePage}:${index}`;
-    const keyboard = choiceKeyboard([[{ text: '👤 Кто оставил', callback_data: callbackData }]]);
+    const keyboard = choiceKeyboard([[{ text: '👤 Кто поставил оценку', callback_data: callbackData }]]);
     await sendMessage(chatId, reviewText(review, safePage * 5 + index + 1, result.total), { reply_markup: keyboard });
   }
   const navigation = [];
@@ -575,12 +888,16 @@ async function sendReviewPage(from, chatId, filterKey, page) {
   });
 }
 
-async function showReviewAuthor(from, chatId, reviewOrUserId, userSid) {
-  const connection = await getWbConnection(from.id);
-  if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+function authorIdentifiers(reviewOrUserId, userSid) {
   const review = reviewOrUserId && typeof reviewOrUserId === 'object' ? reviewOrUserId : null;
-  const identifiers = review ? reviewAuthorIds(review) : [...new Set([reviewOrUserId, userSid]
+  return review ? reviewAuthorIds(review) : [...new Set([reviewOrUserId, userSid]
     .map(Number).filter(value => Number.isSafeInteger(value) && value > 0))];
+}
+
+/** Данные автора отзыва. found=false — WB ничего не отдал, проверку не списываем. */
+async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
+  const review = reviewOrUserId && typeof reviewOrUserId === 'object' ? reviewOrUserId : null;
+  const identifiers = authorIdentifiers(reviewOrUserId, userSid);
   const reviewEvents = (Array.isArray(review?.goods) ? review.goods : [])
     .filter(item => item?.status_updated)
     .sort((left, right) => new Date(right.status_updated || 0) - new Date(left.status_updated || 0));
@@ -628,9 +945,44 @@ async function showReviewAuthor(from, chatId, reviewOrUserId, userSid) {
     pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}`;
   }
   const phone = maskWbPhone(user?.phone ?? user?.mobile);
-  await sendMessage(chatId,
-    `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>\n\n${pickupText}`,
-  );
+  const found = phone !== '—' || Boolean(!pickupResult.error && pickupResult.events.length);
+  return {
+    found,
+    text: `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>\n\n${pickupText}`,
+  };
+}
+
+/**
+ * «👤 Кто поставил оценку» — платно: 1 проверка за клиента в этом ПВЗ. Баланс проверяем до запроса
+ * к WB, а списываем после — и только если WB что-то отдал. Повтор того же автора бесплатный.
+ */
+async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
+  const connection = await getWbConnection(from.id);
+  if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+  const userId = await findUser(from.id);
+  if (!userId) return showReviewPaywall(from, chatId);
+  const clientId = authorIdentifiers(reviewOrUserId, userSid)[0] || null;
+  const pointId = Number(connection.session.pointId) || 0;
+  let revealed = false;
+  if (clientId) {
+    const [rows, balance] = await Promise.all([
+      supabaseFetch(`bot_review_reveals?user_id=eq.${encodeURIComponent(userId)}&point_id=eq.${pointId}&client_id=eq.${clientId}&select=client_id&limit=1`),
+      walletRub(userId),
+    ]);
+    revealed = rows.length > 0;
+    if (!revealed && balance < REVIEW_PRICE) return showReviewPaywall(from, chatId, 'empty', undefined, then);
+  }
+  const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
+  let footer;
+  if (!clientId || !info.found) footer = 'Данных об авторе нет — деньги не списаны.';
+  else if (revealed) footer = 'Этого автора вы уже смотрели — бесплатно.';
+  else {
+    // bot_review_spend списывает 25 ₽ с баланса (миграция 20261023_wallet.sql), balance — в копейках.
+    const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId }) });
+    if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then);
+    footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(REVIEW_PRICE)} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
+  }
+  await sendMessage(chatId, `${info.text}\n\n<i>${footer}</i>`);
 }
 
 async function showReviewAuthorByPosition(from, chatId, filterKey, page, index) {
@@ -641,7 +993,7 @@ async function showReviewAuthorByPosition(from, chatId, filterKey, page, index) 
   const result = await wbPvz.loadReviews(connection.session, stars, page, 5);
   const review = result.data[index];
   if (!review) return sendMessage(chatId, 'Отзыв больше не найден в этой позиции. Обновите список отзывов.');
-  return showReviewAuthor(from, chatId, review);
+  return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${page}:${index}`);
 }
 
 async function beginPointSelection(from, chatId, connection) {
@@ -678,13 +1030,461 @@ async function showIndividualOrders(from, chatId) {
 }
 
 async function notifyMiniAppAuthorized(telegramId) {
+  // Пришёл по приглашению и только что создал кабинет — привязываем к пригласившему.
+  await bindTelegramReferral(telegramId).catch(error => console.warn('Telegram referral bind failed', error.message));
   const session = await getSession(telegramId);
   if (session?.draft?.authPromptMessageId) await deleteMessage(session.chat_id, session.draft.authPromptMessageId);
   await clearSession(telegramId);
   await sendMessage(telegramId,
-    '<b>Готово — вход выполнен.</b>\n\nВернитесь к генератору в боте.',
+    '<b>Готово — вход выполнен.</b>\n\nКабинет подключён: стикеры, авторы отзывов и продление программ доступны в меню.',
     { reply_markup: HOME_KEYBOARD },
   );
+  await showMainMenu({ id: telegramId }, telegramId);
+}
+
+// ── Баланс: пополнение и покупки с баланса (server/_wallet.js) ──
+
+const LOGIN_FOR_WALLET = 'Баланс хранится в кабинете shk-wb.ru. Войдите через Telegram — это пара секунд, кабинет создастся сам.';
+
+async function showTopup(from, chatId, messageId) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const balance = await walletRub(userId);
+  const text = [
+    '<b>💰 Пополнение</b>',
+    `На балансе: <b>${wallet.formatRub(balance)}</b>`,
+    '🎁 +5% от 500 ₽, +10% от 1000 ₽',
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    ...topupRows(0),
+    [{ text: '✏️ Своя сумма', callback_data: 'topup:custom' }],
+    [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
+  ]) });
+}
+
+async function askTopupAmount(from, chatId, messageId, error) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const id = await showScreen(chatId, messageId, `${error ? `⚠️ ${error}\n\n` : ''}<b>Своя сумма</b>\nОтправьте сумму сообщением: от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`, { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'topup:home' }]]) });
+  await saveSession(from, chatId, 'await_topup_amount', { userId, msgId: id });
+}
+
+async function acceptTopupAmount(from, chatId, session, message, text) {
+  await deleteMessage(chatId, message.message_id).catch(() => {});
+  const amount = Number(String(text).replace(/[\s₽р.]/gi, ''));
+  const msgId = session.draft?.msgId;
+  if (!wallet.validTopup(amount)) return askTopupAmount(from, chatId, msgId, `«${escapeHtml(String(text).slice(0, 20))}» — нужна сумма от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`);
+  await clearSession(from.id);
+  const bonus = wallet.topupBonus(amount);
+  await showScreen(chatId, msgId, `<b>Пополнение на ${wallet.formatRub(amount)}</b>${bonus ? `\nЗачислим ${wallet.formatRub(amount + bonus)} с бонусом` : ''}`, { reply_markup: choiceKeyboard([
+    [{ text: `💳 Оплатить ${wallet.formatRub(amount)}`, web_app: { url: publicUrl(`/bot-checkout?kind=topup&amount=${amount}`) } }],
+    [{ text: '⬅️ Назад', callback_data: 'topup:home' }],
+  ]) });
+}
+
+const CP_DAYS = [7, 30, 90, 180, 365];
+const CP_NEW_DEVICES = [1, 2, 3, 5];
+const CP_SCOPES = { wb: 'Wildberries', ozon: 'Ozon', both: 'WB + Ozon' };
+
+function monthsLabel(months) { return months === 1 ? '1 месяц' : months < 5 ? `${months} месяца` : `${months} месяцев`; }
+function devicesLabel(count) { return count === 1 ? '1 компьютер' : count < 5 ? `${count} компьютера` : `${count} компьютеров`; }
+function cellPrintPrice(days, devices, scope) {
+  const base = CELL_PRINT_PRICES[days]?.[devices];
+  return base == null ? null : Math.round(base * (scope === 'both' ? 1.8 : 1));
+}
+
+async function ownCellKeys(userId) {
+  return supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,duration_days,device_limit,marketplace_scope,activated_at,expires_at&order=created_at.desc&limit=5`);
+}
+
+function cellKeyStatus(key) {
+  if (!key.activated_at) return `не активирован, ${key.duration_days} дн.`;
+  const ends = Date.parse(key.expires_at || '');
+  return Number.isFinite(ends) && ends > Date.now() ? `до ${shortDate.format(new Date(ends))}` : 'срок закончился';
+}
+
+async function ownLicenseKey(userId) {
+  const rows = await supabaseFetch(`license_keys?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=key,usage_limit,used&order=created_at.desc&limit=1`);
+  return rows[0] || null;
+}
+
+/**
+ * Что покупаем — по частям callback_data. Цену и поля заказа считаем здесь, на сервере, и при
+ * показе, и при оплате: кнопке с ценой не доверяем. { error } — товар недоступен.
+ */
+async function resolveShopItem(userId, parts) {
+  const [kind, a, b, c, d] = parts;
+  if (kind === 'helper') {
+    const months = Number(b), snap = orderSnapshot(a, months);
+    if (!snap) return { error: 'Такого тарифа нет.' };
+    return {
+      title: `<b>🖥 «${PLANS[a].title}» на ${monthsLabel(months)}</b>`,
+      priceRub: snap.total, productKind: 'app_subscription', back: `shop:helper:${a}`,
+      fields: { app_plan: a, app_term_months: months }, snapshot: snap,
+    };
+  }
+  if (kind === 'cp' && a === 'r') {
+    const days = Number(c);
+    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,duration_days,device_limit,marketplace_scope&limit=1`);
+    const key = rows[0];
+    if (!key) return { error: 'Ключ не найден или отключён.' };
+    if (!CP_DAYS.includes(days)) return { error: 'Такого срока нет.' };
+    if (Number(key.duration_days) + days > 4000) return { error: 'Суммарный срок ключа не может быть больше 4000 дней.' };
+    // У старых ключей площадка не задана — продлеваем как WB и не передаём площадку в заказ.
+    const legacy = !CP_SCOPES[key.marketplace_scope];
+    const price = cellPrintPrice(days, key.device_limit, legacy ? 'wb' : key.marketplace_scope);
+    if (price == null) return { error: 'Для этого ключа цена не найдена — продлите на сайте.' };
+    return {
+      title: `<b>🔄 Продление ключа на ${days} дней</b>\n<code>${escapeHtml(key.key)}</code>`,
+      priceRub: price, productKind: 'cell_print_license', back: `shop:cp:r:${key.id}`, renewal: true,
+      fields: { cell_print_duration_days: days, cell_print_device_limit: key.device_limit, cell_print_marketplace_scope: legacy ? null : key.marketplace_scope, renewal_target_key: key.key },
+      snapshot: { cellPrint: { durationDays: days, deviceLimit: key.device_limit, program: false, bonusDays: 0 }, total: price },
+    };
+  }
+  if (kind === 'cp' && a === 'n') {
+    const days = Number(b), devices = Number(c), scope = d;
+    const price = CP_SCOPES[scope] ? cellPrintPrice(days, devices, scope) : null;
+    if (!CP_DAYS.includes(days) || price == null) return { error: 'Такого варианта нет.' };
+    return {
+      title: `<b>🖨 Ключ: ${days} дней, ${devicesLabel(devices)}, ${CP_SCOPES[scope]}</b>`,
+      priceRub: price, productKind: 'cell_print_license', back: `shop:cp:n:${days}:${devices}`,
+      fields: { cell_print_duration_days: days, cell_print_device_limit: devices, cell_print_marketplace_scope: scope },
+      snapshot: { cellPrint: { durationDays: days, deviceLimit: devices, program: false, bonusDays: 0 }, total: price },
+    };
+  }
+  if (kind === 'wbpk') {
+    const count = Number(a), price = LICENSE_PRICES[count];
+    if (!price) return { error: 'Такого пакета нет.' };
+    const target = await ownLicenseKey(userId);
+    return {
+      title: `<b>🔑 ${count} подборов кода</b>`,
+      priceRub: price, productKind: 'program_license', back: 'shop:wbpk',
+      fields: { license_iterations: count, ...(target ? { renewal_target_key: target.key } : {}) },
+      snapshot: { license: { iterations: count, total: price }, total: price },
+    };
+  }
+  return { error: 'Такого товара нет.' };
+}
+
+/** Экран магазина по callback_data `shop:…`. */
+async function showShop(from, chatId, messageId, parts) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const balance = await walletRub(userId);
+  const balanceLine = `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`;
+  const back = data => [{ text: '⬅️ Назад', callback_data: data }];
+  const [kind, a, b, c, d] = parts;
+
+  if (!kind || kind === 'home') {
+    return showScreen(chatId, messageId, `<b>🛒 Купить с баланса</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
+      [{ text: '🖥 Подписка «Помощник ПВЗ»', callback_data: 'shop:helper' }],
+      [{ text: '🖨 Ключ «Печать ячеек»', callback_data: 'shop:cp' }],
+      [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
+      [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
+      [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
+    ]) });
+  }
+  if (kind === 'helper' && !a) {
+    const [ent, free] = await Promise.all([
+      supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
+      helperFreeText(),
+    ]);
+    const freeNote = free ? '\nОплата начнёт действовать после бесплатного периода.' : '';
+    return showScreen(chatId, messageId, `<b>🖥 Подписка «Помощник ПВЗ»</b>\nСейчас: ${helperStatusLine(ent, free)}${freeNote}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+      ...['basic', 'standard', 'pro'].map(id => [{ text: `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`, callback_data: `shop:helper:${id}` }]),
+      back('shop:home'),
+    ]) });
+  }
+  if (kind === 'helper' && a && !b) {
+    if (!PLANS[a]) return showShop(from, chatId, messageId, ['helper']);
+    return showScreen(chatId, messageId, `<b>🖥 «${PLANS[a].title}»</b> — ${PLANS[a].summary.toLowerCase()}\n${balanceLine}\n\nНа какой срок?`, { reply_markup: choiceKeyboard([
+      ...Object.keys(TERMS).map(Number).map(months => [{ text: `${monthsLabel(months)} — ${planPrice(a, months)} ₽${TERMS[months] ? ` (−${TERMS[months]}%)` : ''}`, callback_data: `shop:helper:${a}:${months}` }]),
+      back('shop:helper'),
+    ]) });
+  }
+  if (kind === 'cp' && !a) {
+    const keys = await ownCellKeys(userId);
+    return showScreen(chatId, messageId, `<b>🖨 Ключ «Печать ячеек»</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
+      ...keys.map(key => [{ text: `🔄 Продлить ${key.key} (${cellKeyStatus(key)})`, callback_data: `shop:cp:r:${key.id}` }]),
+      [{ text: '➕ Новый ключ', callback_data: 'shop:cp:n' }],
+      back('shop:home'),
+    ]) });
+  }
+  if (kind === 'cp' && a === 'r' && b && !c) {
+    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,device_limit,marketplace_scope,activated_at,expires_at,duration_days&limit=1`);
+    const key = rows[0];
+    if (!key) return showShop(from, chatId, messageId, ['cp']);
+    const scope = CP_SCOPES[key.marketplace_scope] ? key.marketplace_scope : 'wb';
+    return showScreen(chatId, messageId, `<b>🔄 Продление ключа</b> <code>${escapeHtml(key.key)}</code>\n${cellKeyStatus(key)} · ${devicesLabel(key.device_limit)} · ${CP_SCOPES[scope]}\n\n${balanceLine}\n\nНа сколько продлить?`, { reply_markup: choiceKeyboard([
+      ...CP_DAYS.map(days => ({ days, price: cellPrintPrice(days, key.device_limit, scope) })).filter(item => item.price != null)
+        .map(item => [{ text: `${item.days} дней — ${item.price} ₽`, callback_data: `shop:cp:r:${key.id}:${item.days}` }]),
+      back('shop:cp'),
+    ]) });
+  }
+  if (kind === 'cp' && a === 'n' && !b) {
+    return showScreen(chatId, messageId, `<b>➕ Новый ключ</b>\nНа какой срок? Цена за 1 ПК.`, { reply_markup: choiceKeyboard([
+      ...CP_DAYS.map(days => [{ text: `${days} дней — от ${cellPrintPrice(days, 1, 'wb')} ₽`, callback_data: `shop:cp:n:${days}` }]),
+      back('shop:cp'),
+    ]) });
+  }
+  if (kind === 'cp' && a === 'n' && b && !c) {
+    const days = Number(b);
+    if (!CP_DAYS.includes(days)) return showShop(from, chatId, messageId, ['cp', 'n']);
+    return showScreen(chatId, messageId, `<b>➕ Новый ключ на ${days} дней</b>\n\nНа скольких компьютерах будет работать?`, { reply_markup: choiceKeyboard([
+      ...CP_NEW_DEVICES.map(devices => [{ text: `${devicesLabel(devices)} — ${cellPrintPrice(days, devices, 'wb')} ₽`, callback_data: `shop:cp:n:${days}:${devices}` }]),
+      back('shop:cp:n'),
+    ]) });
+  }
+  if (kind === 'cp' && a === 'n' && b && c && !d) {
+    const days = Number(b), devices = Number(c);
+    if (cellPrintPrice(days, devices, 'wb') == null) return showShop(from, chatId, messageId, ['cp', 'n']);
+    return showScreen(chatId, messageId, `<b>➕ Новый ключ: ${days} дней, ${devicesLabel(devices)}</b>\n\nДля какой площадки?`, { reply_markup: choiceKeyboard([
+      ...Object.keys(CP_SCOPES).map(scope => [{ text: `${CP_SCOPES[scope]} — ${cellPrintPrice(days, devices, scope)} ₽`, callback_data: `shop:cp:n:${days}:${devices}:${scope}` }]),
+      back(`shop:cp:n:${days}`),
+    ]) });
+  }
+  if (kind === 'wbpk' && !a) {
+    const key = await ownLicenseKey(userId);
+    const keyLine = key ? `Ваш ключ: осталось ${Math.max(0, Number(key.usage_limit) - Number(key.used))} — пакет добавится к нему.` : '';
+    return showScreen(chatId, messageId, `<b>🔑 Пакет подборов кода</b>\nДля «Помощника ПВЗ» сверх тарифа.${keyLine ? `\n${keyLine}` : ''}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+      ...Object.keys(LICENSE_PRICES).map(Number).map(count => [{ text: `${count} шт. — ${LICENSE_PRICES[count]} ₽`, callback_data: `shop:wbpk:${count}` }]),
+      back('shop:home'),
+    ]) });
+  }
+  // Последний шаг любой ветки — подтверждение оплаты.
+  return showShopConfirm(from, chatId, messageId, userId, parts);
+}
+
+async function showShopConfirm(from, chatId, messageId, userId, parts, error) {
+  const item = await resolveShopItem(userId, parts);
+  if (item.error) return showScreen(chatId, messageId, `⚠️ ${item.error}`, { reply_markup: choiceKeyboard([[{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
+  const balance = await walletRub(userId);
+  const lines = [`${error ? `⚠️ ${error}\n` : ''}${item.title}`, `Цена: <b>${wallet.formatRub(item.priceRub)}</b> · 💰 ${wallet.formatRub(balance)}`];
+  if (balance >= item.priceRub) {
+    // Метка на кнопке оплаты: повторное нажатие той же кнопки не спишет деньги второй раз.
+    const nonce = crypto.randomInt(100000, 1000000);
+    return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
+      [{ text: `✅ Оплатить ${wallet.formatRub(item.priceRub)} с баланса`, callback_data: `shop:pay:${nonce}:${parts.join(':')}` }],
+      [{ text: '⬅️ Назад', callback_data: item.back }],
+    ]) });
+  }
+  lines.push(`Не хватает <b>${wallet.formatRub(item.priceRub - balance)}</b> — после пополнения покупка пройдёт сама.`);
+  return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
+    topupAndBuyRow(item.priceRub - balance, `shop:${parts.join(':')}`, messageId),
+    [{ text: '⬅️ Назад', callback_data: item.back }],
+  ]) });
+}
+
+async function payShopItem(from, chatId, messageId, nonce, parts) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const item = await resolveShopItem(userId, parts);
+  if (item.error) return showShopConfirm(from, chatId, messageId, userId, parts);
+  const requestId = `shop:${from.id}:${messageId}:${nonce}`;
+  if (!await claimGenerationRequest(requestId, from, chatId, { userId, shop: parts })) return;
+  await showScreen(chatId, messageId, `${item.title}\n\n⏳ Оплачиваю с баланса…`);
+  let result;
+  try {
+    result = await wallet.payWithWallet({ userId, productKind: item.productKind, fields: item.fields, priceRub: item.priceRub, snapshot: item.snapshot });
+  } catch (error) {
+    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
+    return showScreen(chatId, messageId, `⚠️ Не удалось оформить покупку: ${escapeHtml(error.message)}\n\nДеньги вернулись на баланс. Если повторится — напишите в поддержку.`, { reply_markup: choiceKeyboard([[{ text: '🆘 Поддержка', callback_data: 'menu:support' }], [{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
+  }
+  if (!result.ok) {
+    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
+    return showShopConfirm(from, chatId, messageId, userId, parts, 'Денег на балансе не хватает.');
+  }
+  await completeGenerationRequest(requestId, { orderId: result.order.id });
+  const order = result.order;
+  let done;
+  if (item.productKind === 'app_subscription') {
+    const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
+    const until = ent?.paid_until || ent?.ends_at;
+    done = `Подписка оплачена${until ? ` до <b>${dayMonthShort(until)}</b>` : ''}.`;
+  } else if (item.productKind === 'cell_print_license') {
+    done = item.renewal
+      ? `Ключ <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней.`
+      : `Ваш ключ: <code>${escapeHtml(order.cell_print_license_key)}</code>\nСрок пойдёт с первой активации.`;
+  } else {
+    done = `+${item.fields.license_iterations} подборов — уже в «Помощнике ПВЗ».`;
+  }
+  await showScreen(chatId, messageId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard([
+    [{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }],
+    MENU_ROW,
+  ]) });
+}
+
+// ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──
+
+const REFERRAL_PERCENT = 10; // = award_referral_order (0.10) в SQL — менять вместе
+const REFERRAL_PAYLOAD = /^r_([A-Za-z0-9]{6,16})$/;
+let cachedBotUsername = null;
+
+/** Имя бота для ссылки t.me/<бот>?start=… — у тестового и боевого бота разное, поэтому спрашиваем getMe. */
+async function botUsername() {
+  if (cachedBotUsername) return cachedBotUsername;
+  const me = await telegramRequest('getMe', {}).catch(() => null);
+  cachedBotUsername = me?.username || process.env.TELEGRAM_BOT_USERNAME || process.env.VITE_TELEGRAM_BOT_USERNAME || null;
+  return cachedBotUsername;
+}
+
+async function referralLinks(code) {
+  const username = await botUsername();
+  return {
+    telegram: username ? `https://t.me/${username}?start=r_${code}` : null,
+    site: publicUrl(`/r/${code}`),
+  };
+}
+
+/**
+ * /start r_<КОД>: запомнить, кто пригласил. Первый переход побеждает; если кабинет уже есть,
+ * привязать нельзя (приглашение считается только для новых) — ничего не сохраняем.
+ */
+async function captureReferral(from, rawCode) {
+  const code = String(rawCode).toUpperCase();
+  if (await findUser(from.id)) return false;
+  const [owners, aliases] = await Promise.all([
+    supabaseFetch(`referral_accounts?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
+    supabaseFetch(`referral_code_aliases?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
+  ]);
+  if (!owners.length && !aliases.length) return false;
+  const rows = await supabaseFetch('telegram_referral_captures?on_conflict=telegram_user_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+    body: JSON.stringify({ telegram_user_id: Number(from.id), referral_code: code }),
+  });
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+/**
+ * Кабинет для этого Telegram только что создан — привязываем к пригласившему (bind_referral проверит,
+ * что переход был до регистрации и не раньше 30 дней) и сообщаем пригласившему в бот.
+ */
+async function bindTelegramReferral(telegramId, userId) {
+  const uid = userId || await findUser(telegramId);
+  if (!uid) return false;
+  const rows = await supabaseFetch(`telegram_referral_captures?telegram_user_id=eq.${Number(telegramId)}&bound_user_id=is.null&select=referral_code,captured_at&limit=1`);
+  const capture = rows[0];
+  if (!capture) return false;
+  const bound = await supabaseFetch('rpc/bind_referral', {
+    method: 'POST',
+    body: JSON.stringify({ p_user_id: uid, p_code: capture.referral_code, p_captured_at: capture.captured_at }),
+  }).catch(() => false);
+  await supabaseFetch(`telegram_referral_captures?telegram_user_id=eq.${Number(telegramId)}`, {
+    method: 'PATCH', body: JSON.stringify({ bound_user_id: bound === true ? uid : null, bound_at: new Date().toISOString() }),
+  }).catch(() => {});
+  if (bound !== true) return false;
+  const attribution = await supabaseFetch(`referral_attributions?invited_user_id=eq.${encodeURIComponent(uid)}&select=referrer_user_id&limit=1`).catch(() => []);
+  const referrer = attribution[0]?.referrer_user_id;
+  const tg = referrer ? await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(referrer)}&select=telegram_user_id&limit=1`).catch(() => []) : [];
+  if (tg[0]?.telegram_user_id) {
+    await sendMessage(tg[0].telegram_user_id, `<b>🎉 По вашей ссылке пришёл новый пользователь</b>\n\nС каждой его оплаты вам начисляется ${REFERRAL_PERCENT}% — деньги можно перевести на баланс бота или вывести на карту.`, {
+      reply_markup: choiceKeyboard([[{ text: '👥 Мои приглашения', callback_data: 'menu:ref' }]]),
+    }).catch(() => {});
+  }
+  return true;
+}
+
+async function showReferrals(from, chatId, messageId, notice) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, `<b>👥 Пригласить друга — ${REFERRAL_PERCENT}%</b>\nВойдите через Telegram — бот покажет вашу ссылку.`);
+  const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
+  const [invited, links] = await Promise.all([
+    supabaseFetch(`referral_attributions?referrer_user_id=eq.${encodeURIComponent(userId)}&select=invited_user_id`).catch(() => []),
+    referralLinks(account.referral_code),
+  ]);
+  const available = Number(account.available_kopecks || 0) / 100;
+  const earned = Number(account.earned_kopecks || 0) / 100;
+  const text = [
+    ...(notice ? [notice, ''] : []),
+    `<b>👥 Приглашайте коллег — ${REFERRAL_PERCENT}% с их оплат</b>`,
+    '',
+    'Ваша ссылка:',
+    links.telegram || links.site,
+    '',
+    `Приглашено: <b>${invited.length}</b> · заработано: <b>${wallet.formatRub(earned)}</b>`,
+    `Доступно: <b>${wallet.formatRub(available)}</b>`,
+  ].join('\n');
+  const share = links.telegram || links.site;
+  const shareText = 'Стикеры и QR для возвратов WB, код клиента и отзывы ПВЗ — бот shk-wb.ru';
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: '📤 Поделиться ссылкой', url: `https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent(shareText)}` }],
+    ...(available > 0 ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
+    [{ text: '🏦 Вывести на карту (от 500 ₽)', web_app: { url: publicUrl('/cabinet/referrals') } }],
+    MENU_ROW,
+  ]) });
+}
+
+async function referralToWallet(from, chatId, messageId) {
+  const userId = await findUser(from.id);
+  if (!userId) return showReferrals(from, chatId, messageId);
+  const result = await supabaseFetch('rpc/referral_to_wallet', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: null }) });
+  const notice = result?.ok
+    ? `✅ Переведено ${wallet.formatRub(Number(result.moved) / 100)} на баланс. На балансе: ${wallet.formatRub(Number(result.wallet_balance) / 100)}.`
+    : '⚠️ Переводить нечего — доступных реферальных денег нет.';
+  return showReferrals(from, chatId, messageId, notice);
+}
+
+/**
+ * После оплаты пополнения «💳 Пополнить на X ₽ и купить» — сразу провести покупку, ради которой
+ * пополняли (pricing_snapshot.wallet.then). Вызывается из notifyCompleted один раз на заказ.
+ * Возвращает true, если покупка запущена; false — пусть пользователь вернётся к ней сам.
+ */
+async function afterWalletTopup(order) {
+  const then = String(order?.pricing_snapshot?.wallet?.then || '');
+  if (!then || !order.user_id) return false;
+  const tg = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`);
+  const telegramId = Number(tg[0]?.telegram_user_id);
+  if (!telegramId) return false;
+  const from = { id: telegramId }, chatId = telegramId;
+  const messageId = Number(order.pricing_snapshot.wallet.message) || null;
+  if (then === 'gen') {
+    const session = await getSession(telegramId);
+    if (session?.state !== 'confirm' || !session.draft?.mode || session.draft.accessCode) return false;
+    await runGeneration(from, chatId, session.draft.msgId, session);
+    return true;
+  }
+  const review = /^rv:(all|[1-5]):(\d+):(\d)$/.exec(then);
+  if (review) {
+    await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]));
+    return true;
+  }
+  if (then.startsWith('shop:')) {
+    // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
+    const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
+    await payShopItem(from, chatId, messageId, nonce, then.slice('shop:'.length).split(':'));
+    return true;
+  }
+  return false;
+}
+
+async function showSupport(chatId, messageId) {
+  const text = [
+    '<b>🆘 Поддержка</b>',
+    'Есть вопрос или что-то не работает — напишите нам. Скриншот ускорит ответ.',
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+    [{ text: '❓ Как пользоваться ботом', callback_data: 'menu:help' }],
+    MENU_ROW,
+  ]) });
+}
+
+/** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
+async function handleMenu(from, chatId, item, messageId) {
+  // Ушли из мастера кнопкой меню — его черновик больше не нужен.
+  if (item !== 'stickers') await clearSession(from.id).catch(() => {});
+  if (item === 'stickers') return startGeneration(from, chatId, messageId);
+  if (item === 'code') return showFindCode(chatId, messageId);
+  if (item === 'reviews') return showReviewFilters(from, chatId, messageId);
+  if (item === 'helper') return showHelperInfo(chatId, messageId);
+  if (item === 'cellprint') return showCellPrintInfo(chatId, messageId);
+  if (item === 'profile') return showProfile(from, chatId, messageId);
+  if (item === 'support') return showSupport(chatId, messageId);
+  if (item === 'ref') return showReferrals(from, chatId, messageId);
+  if (item === 'help') return showHelp(chatId, messageId);
+  if (item === 'login') return sendLoginPrompt(from, chatId, '<b>Вход в кабинет</b>\n\nВойдите через Telegram — кабинет shk-wb.ru создастся сам. Если вы уже покупали на сайте, выберите «У меня уже есть кабинет».');
+  return showMainMenu(from, chatId, messageId);
 }
 
 async function handleCallback(callback) {
@@ -692,7 +1492,17 @@ async function handleCallback(callback) {
   if (!chatId) return;
   await touchSubscriber(from, chatId);
   const data = String(callback.data || '');
-  if (data === 'rv:start' || data === 'rv:filters') { await answerCallbackQuery(callback.id); await showReviewFilters(from, chatId); return; }
+  const messageId = callback.message?.message_id;
+  if (data.startsWith('menu:')) { await answerCallbackQuery(callback.id); await handleMenu(from, chatId, data.slice('menu:'.length), messageId); return; }
+  if (data === 'rvbuy:list') { await answerCallbackQuery(callback.id); await showReviewPaywall(from, chatId, undefined, messageId); return; }
+  // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
+  if (data === 'topup:home' || data === 'code:buy') { await answerCallbackQuery(callback.id); await showTopup(from, chatId, messageId); return; }
+  if (data === 'ref:towallet') { await answerCallbackQuery(callback.id); await referralToWallet(from, chatId, messageId); return; }
+  if (data === 'topup:custom') { await answerCallbackQuery(callback.id); await askTopupAmount(from, chatId, messageId); return; }
+  const shopPay = data.match(/^shop:pay:(\d+):(.+)$/);
+  if (shopPay) { await answerCallbackQuery(callback.id); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
+  if (data.startsWith('shop:')) { await answerCallbackQuery(callback.id); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
+  if (data === 'rv:start' || data === 'rv:filters') { await answerCallbackQuery(callback.id); await showReviewFilters(from, chatId, messageId); return; }
   if (data === 'rv:disconnect') { await answerCallbackQuery(callback.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: HOME_KEYBOARD }); return; }
   if (data === 'rv:cancel') { await answerCallbackQuery(callback.id); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: HOME_KEYBOARD }); return; }
   if (data === 'rv:points') {
@@ -719,61 +1529,58 @@ async function handleCallback(callback) {
   const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)$/);
   if (authorPositionMatch) { await answerCallbackQuery(callback.id); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3])); return; }
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
-  if (authorMatch) { await answerCallbackQuery(callback.id); await showReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
+  if (authorMatch) { await answerCallbackQuery(callback.id); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
   if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
-  if (data === 'gen:cancel') { await answerCallbackQuery(callback.id); await clearSession(from.id); await sendMessage(chatId, 'Генерация отменена.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'gen:cancel') {
+    await answerCallbackQuery(callback.id); await clearSession(from.id);
+    await showScreen(chatId, messageId, 'Генерация отменена.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    return;
+  }
   if (data === 'code:enter') {
     await answerCallbackQuery(callback.id);
     const current = await getSession(from.id);
-    // Из окна покупки сохраняем черновик генерации, из «Остатка» начинаем с чистого.
-    await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.pendingPurchase ? current.draft : {});
+    // Из подтверждения генерации сохраняем черновик (после кода — сразу к подтверждению), из профиля начинаем с чистого.
+    await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.mode ? current.draft : {});
     return;
   }
-  if (data === 'code:buy') {
-    await answerCallbackQuery(callback.id);
-    const userId = await findUser(from.id);
-    if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App.'); return; }
-    await saveSession(from, chatId, 'confirm', { userId, pendingPurchase: true });
-    await sendMessage(chatId, 'Выберите пакет генераций:', { reply_markup: packageKeyboard() });
-    return;
-  }
-  if (data === 'account:continue') { await answerCallbackQuery(callback.id); await sendMessage(chatId, 'Продолжайте работу с текущим кабинетом.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'account:continue') { await answerCallbackQuery(callback.id); await showMainMenu(from, chatId); return; }
   const pageMatch = data.match(/^gen:page:([^:]+:\d+):(\d+)$/);
   if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[1], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[1], result, Number(pageMatch[2])); return; }
   const session = await getSession(from.id);
-  if (!session) { await answerCallbackQuery(callback.id, 'Сессия истекла'); await sendMessage(chatId, 'Сессия истекла. Начните генерацию заново.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (!session) {
+    await answerCallbackQuery(callback.id, 'Сессия истекла');
+    await showScreen(chatId, messageId, 'Сессия истекла — начните заново.', { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    return;
+  }
   const draft = session.draft || {};
-  const packMatch = data.match(/^buy:pack:(\d+)$/);
-  if (packMatch && session.state === 'confirm' && draft.pendingPurchase) {
-    const quantity = Number(packMatch[1]), total = PACKAGE_PRICES[quantity];
+  // Кнопки мастера работают только в его текущем сообщении: старые экраны выше в чате не трогают черновик.
+  if (data.startsWith('gen:') && draft.msgId && messageId !== draft.msgId) {
+    await answerCallbackQuery(callback.id, 'Этот шаг устарел — используйте последнее сообщение');
+    return;
+  }
+  if (data === 'gen:back') { await answerCallbackQuery(callback.id); await wizardBack(from, chatId, session, messageId); return; }
+  // «🔄 Я пополнил» — перечитать баланс и коды и показать подтверждение заново.
+  if (data === 'gen:recheck' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await requestConfirmation(from, chatId, draft, messageId); return; }
+  if (data.startsWith('gen:kind:') && session.state === 'choose_kind') {
     await answerCallbackQuery(callback.id);
-    if (!total) return;
-    draft.purchaseQuantity = quantity;
-    await saveSession(from, chatId, 'confirm', draft);
-    await sendMessage(chatId, `<b>Покупка пакета</b>\n\n${quantity} ${quantity === 1 ? 'генерация' : 'генераций'} — <b>${total} ₽</b>\n\nНажимая «Подтвердить», вы принимаете <a href="${publicUrl('/offer')}">оферту</a> и <a href="${publicUrl('/privacy')}">политику конфиденциальности</a>.`, { reply_markup: choiceKeyboard([[{ text: '✅ Подтвердить покупку', callback_data: 'buy:confirm' }], [{ text: 'Выбрать другой пакет', callback_data: 'buy:change' }], [{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
+    draft.category = data.endsWith(':box') ? 'box' : 'product';
+    await renderWizard(from, chatId, 'choose_mode', draft, messageId);
     return;
   }
-  if (data === 'buy:change' && session.state === 'confirm' && draft.pendingPurchase) { await answerCallbackQuery(callback.id); await sendMessage(chatId, 'Выберите пакет:', { reply_markup: packageKeyboard() }); return; }
-  if (data === 'buy:confirm' && session.state === 'confirm' && draft.pendingPurchase && PACKAGE_PRICES[draft.purchaseQuantity]) {
-    await answerCallbackQuery(callback.id); await clearSession(from.id);
-    await sendMessage(chatId, `Пакет: ${draft.purchaseQuantity} шт. за ${PACKAGE_PRICES[draft.purchaseQuantity]} ₽. Откройте защищённую оплату:`, { reply_markup: choiceKeyboard([[{ text: '💳 Оплатить', web_app: { url: publicUrl(`/bot-checkout?quantity=${draft.purchaseQuantity}`) } }], [{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
-    return;
-  }
-  if (data.startsWith('gen:kind:') && session.state === 'choose_kind') { draft.category = data.endsWith(':box') ? 'box' : 'product'; await saveSession(from, chatId, 'choose_mode', draft); await answerCallbackQuery(callback.id); await sendMessage(chatId, '<b>Выберите режим</b>', { reply_markup: modeKeyboard() }); return; }
   if (data.startsWith('gen:mode:') && session.state === 'choose_mode') {
+    await answerCallbackQuery(callback.id);
     draft.mode = data.endsWith(':custom') ? 'custom' : 'range';
     if (draft.category === 'box') draft.prefix = 'TRBX';
-    const state = draft.mode === 'range' ? 'await_quantity' : 'await_code';
-    await saveSession(from, chatId, state, draft); await answerCallbackQuery(callback.id);
-    await sendMessage(chatId, state === 'await_quantity' ? '<b>Сколько стикеров создать?</b>\nВыберите быстрый вариант или введите любое целое число от 1 до 500.' : `Введите номер ${draft.category === 'box' ? 'коробки: ровно 10 цифр.' : 'ШК: ровно 11 цифр.'}`, state === 'await_quantity' ? { reply_markup: quantityKeyboard() } : undefined); return;
+    await renderWizard(from, chatId, draft.mode === 'range' ? 'await_quantity' : 'await_code', draft, messageId);
+    return;
   }
   if (data.startsWith('gen:qty:') && session.state === 'await_quantity') {
-    await answerCallbackQuery(callback.id);
-    if (data === 'gen:qty:manual') { await sendMessage(chatId, 'Введите любое целое число от 1 до 500.'); return; }
     const quantity = Number(data.slice('gen:qty:'.length));
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) return;
-    draft.quantity = quantity; await requestConfirmation(from, chatId, draft); return;
+    // gen:qty:manual — кнопка «Ввести другое количество» из старых сообщений.
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { await answerCallbackQuery(callback.id, 'Отправьте число от 1 до 500 сообщением'); return; }
+    await answerCallbackQuery(callback.id);
+    draft.quantity = quantity; await requestConfirmation(from, chatId, draft, messageId); return;
   }
   if (data === 'gen:confirm' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await confirmGeneration(callback, session); return; }
   await answerCallbackQuery(callback.id, 'Кнопка больше неактуальна');
@@ -783,25 +1590,36 @@ async function handleMessage(message) {
   const from = message.from, chatId = message.chat.id, text = String(message.text || '').trim();
   if (message.chat.type !== 'private') return sendMessage(chatId, 'Используйте личный чат с ботом.');
   await touchSubscriber(from, chatId);
-  if (/^\/(start|help)(?:@\w+)?(?:\s+[A-Za-z0-9_-]+)?$/i.test(text)) {
+  const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
+  if (startMatch) {
     await clearSession(from.id);
-    const userId = await findUser(from.id);
-    const intro = `<b>Генератор ШК для Wildberries</b>\n\nБот создаёт:\n• возвратные стикеры для товаров;\n• QR-коды возвратных коробок;\n• одиночные ШК и пачки до 500 штук;\n• готовый PDF для печати.\n\n${userId ? 'Ваш Telegram уже связан с кабинетом.' : 'Чтобы пользоваться пакетами генераций, откройте Mini App и войдите через Telegram.'}`;
-    if (userId) await sendMessage(chatId, intro, { reply_markup: HOME_KEYBOARD });
-    else await sendLoginPrompt(from, chatId, intro);
-    return;
+    // t.me/<бот>?start=r_<КОД> — переход по приглашению.
+    const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
+    const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;
+    const intro = [
+      '<b>👋 Бот shk-wb.ru для ПВЗ Wildberries</b>',
+      'Стикеры и QR, код клиента, отзывы, печать ячеек.',
+      ...(invited ? ['', 'Вас пригласил коллега — нажмите «🔐 Войти в кабинет» в меню.'] : []),
+    ].join('\n');
+    // Первое сообщение заменяет старую большую клавиатуру на короткую, второе — само меню.
+    await sendMessage(chatId, intro, { reply_markup: HOME_KEYBOARD });
+    return showMainMenu(from, chatId);
   }
+  if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(chatId);
+  if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: HOME_KEYBOARD }); return; }
-  if (/^\/generate(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
+  if (/^\/(generate|stickers)(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
+  if (/^\/code(?:@\w+)?$/i.test(text)) return showFindCode(chatId);
+  if (/^\/profile(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
+  if (/^\/invite(?:@\w+)?$/i.test(text)) return showReferrals(from, chatId);
   if (/^\/reviews(?:@\w+)?$/i.test(text)) return showReviewFilters(from, chatId);
-  if (/^\/account(?:@\w+)?$/i.test(text)) return showAccount(from, chatId);
+  if (/^\/account(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
   if (/^\/orders(?:@\w+)?$/i.test(text) || text === '📦 Мои индивидуальные заказы') return showIndividualOrders(from, chatId);
-  if (text === '➕ Создать ШК') return startGeneration(from, chatId);
+  // Старые кнопки большой клавиатуры ещё висят у людей — принимаем их.
+  if (text === '➕ Создать ШК' || text === '🏷 Стикеры и QR') return startGeneration(from, chatId);
   if (text === '🏷 Стикеры для товаров') return startForCategory(from, chatId, 'product');
   if (text === '📦 QR для коробок') return startForCategory(from, chatId, 'box');
-  if (text === '💳 Остаток') return showBalance(from, chatId);
-  if (text === '👤 Аккаунт') return showAccount(from, chatId);
-  if (text === '🆘 Помощь') return showHelp(chatId);
+  if (text === '💳 Остаток' || text === '👤 Аккаунт') return showProfile(from, chatId);
   if (text === '⭐ Отзывы ПВЗ') return showReviewFilters(from, chatId);
   const wbConnection = await getWbConnection(from.id);
   if (wbConnection?.state === 'await_phone') {
@@ -839,15 +1657,21 @@ async function handleMessage(message) {
     return;
   }
   const session = await getSession(from.id);
-  if (!session) return sendMessage(chatId, 'Нажмите «Создать ШК».', { reply_markup: HOME_KEYBOARD });
+  if (!session) return showMainMenu(from, chatId);
   const draft = session.draft || {};
   if (session.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
+  if (session.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
+  // Ввод в мастер: сообщение пользователя убираем, ответ — в том же экране мастера (ошибка — строкой сверху).
   if (session.state === 'await_quantity') {
-    const quantity = Number(text); if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) return sendMessage(chatId, 'Количество должно быть целым числом от 1 до 500.');
+    await deleteMessage(chatId, message.message_id).catch(() => {});
+    const quantity = Number(text);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — нужно целое число от 1 до 500.`; return renderWizard(from, chatId, 'await_quantity', draft); }
     draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
   }
   if (session.state === 'await_code') {
-    const length = draft.category === 'box' ? 10 : 11; if (!new RegExp(`^\\d{${length}}$`).test(text)) return sendMessage(chatId, `Номер должен содержать ровно ${length} цифр.`);
+    await deleteMessage(chatId, message.message_id).catch(() => {});
+    const length = draft.category === 'box' ? 10 : 11;
+    if (!new RegExp(`^\\d{${length}}$`).test(text)) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — номер должен содержать ровно ${length} цифр.`; return renderWizard(from, chatId, 'await_code', draft); }
     draft.code = text; return requestConfirmation(from, chatId, draft);
   }
   return sendMessage(chatId, 'Завершите текущее действие или отправьте /cancel.');
@@ -868,11 +1692,11 @@ async function handleTelegramUpdate(req, res) {
     if (update.callback_query) await handleCallback(update.callback_query);
     else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
   } catch (error) {
-    console.error('Telegram generator bot failed', error.message);
+    console.error('Telegram generator bot failed', error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
     if (chatId) await sendMessage(chatId, 'Произошла внутренняя ошибка. Попробуйте позже.', { reply_markup: HOME_KEYBOARD }).catch(() => {});
   }
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { HOME_KEYBOARD, balanceKeyboard, claimErrorText, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, packageKeyboard, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };

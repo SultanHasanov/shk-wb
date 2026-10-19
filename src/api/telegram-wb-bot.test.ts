@@ -7,8 +7,10 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   publicUrl: (path: string) => string;
   validWebhookSecret: (req: {headers: Record<string, string>}) => boolean;
   HOME_KEYBOARD: {keyboard: Array<Array<Record<string, any>>>};
-  packageKeyboard: () => {inline_keyboard: Array<Array<Record<string, any>>>};
-  balanceKeyboard: () => {inline_keyboard: Array<Array<Record<string, any>>>};
+  mainMenuKeyboard: (signedIn: boolean) => {inline_keyboard: Array<Array<Record<string, any>>>};
+  profileKeyboard: (options?: Record<string, boolean>) => {inline_keyboard: Array<Array<Record<string, any>>>};
+  topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
+  freeUntilText: (enabled: boolean, until: string | null) => string;
   claimErrorText: (error: unknown) => string | null;
   formatPhone: (value: unknown) => string;
   maskWbPhone: (value: unknown) => string;
@@ -31,9 +33,9 @@ describe('Telegram sticker generator bot', () => {
     delete process.env.TELEGRAM_WEBHOOK_SECRET;
   });
 
-  it('предлагает ввести код при покупке и в остатке', () => {
-    expect(bot.packageKeyboard().inline_keyboard.flat().some(button => button.callback_data === 'code:enter')).toBe(true);
-    expect(bot.balanceKeyboard().inline_keyboard.flat().map(button => button.callback_data)).toEqual(['code:enter', 'code:buy']);
+  it('предлагает ввести код при покупке и в профиле', () => {
+    const profile = bot.profileKeyboard().inline_keyboard.flat().map(button => button.callback_data);
+    expect(profile).toEqual(expect.arrayContaining(['topup:home', 'shop:home', 'code:enter', 'menu:home']));
   });
 
   it('переводит ошибки привязки кода на понятный язык', () => {
@@ -51,8 +53,13 @@ describe('Telegram sticker generator bot', () => {
   it('строит абсолютные Mini App URL', () => {
     process.env.PUBLIC_APP_URL = 'https://example.test/';
     expect(bot.publicUrl('/login')).toBe('https://example.test/login');
-    expect(bot.HOME_KEYBOARD.keyboard.flat().find(button => button.web_app)?.web_app.url).toMatch(/^https:\/\//);
-    expect(bot.HOME_KEYBOARD.keyboard.flat().some(button => button.text === '👤 Аккаунт')).toBe(true);
+    const menu = bot.mainMenuKeyboard(true).inline_keyboard.flat();
+    expect(menu.find(button => button.web_app)?.web_app.url).toMatch(/^https:\/\//);
+    expect(menu.some(button => button.callback_data === 'menu:profile')).toBe(true);
+    expect(menu.some(button => button.callback_data === 'menu:ref')).toBe(true);
+    expect(bot.mainMenuKeyboard(false).inline_keyboard.flat().some(button => button.callback_data === 'menu:login')).toBe(true);
+    // Постоянная клавиатура — только быстрый возврат, всё остальное в инлайн-меню.
+    expect(bot.HOME_KEYBOARD.keyboard.flat().map(button => button.text)).toEqual(['☰ Меню', '🏷 Стикеры и QR']);
   });
 
   it('валидирует префикс коробки и экранирует HTML', () => {
@@ -69,7 +76,21 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.maskWbPhone(79600003574)).toBe('+7 960 ***-35-74');
     expect(bot.maskWbPhone(79201112233)).toBe('+7 920 111-22-33');
     expect(bot.reviewText({ stars: 1, comment: '<плохо>', rate_dt: '2026-10-06T10:00:00+03:00' }, 1, 6)).toContain('&lt;плохо&gt;');
-    expect(bot.HOME_KEYBOARD.keyboard.flat().some(button => button.text === '⭐ Отзывы ПВЗ')).toBe(true);
+    expect(bot.mainMenuKeyboard(true).inline_keyboard.flat().some(button => button.callback_data === 'menu:reviews')).toBe(true);
+  });
+
+  it('пополняет баланс через оплату в Mini App и не предлагает суммы меньше нехватки', () => {
+    const urls = bot.topupRows(0).flat().map(button => button.web_app.url);
+    expect(urls).toHaveLength(4);
+    expect(urls[0]).toMatch(/\/bot-checkout\?kind=topup&amount=100$/);
+    // Не хватает 400 ₽: 100 и 300 не помогут, 500 (+25 бонус) и 1000 — да.
+    expect(bot.topupRows(400).flat().map(button => button.web_app.url.split('amount=')[1])).toEqual(['500', '1000']);
+  });
+
+  it('пишет конец бесплатного периода как «до следующего дня»', () => {
+    expect(bot.freeUntilText(true, '2026-10-31T20:59:59Z')).toBe('бесплатно до 1 ноября');
+    expect(bot.freeUntilText(true, null)).toBe('сейчас бесплатно');
+    expect(bot.freeUntilText(false, '2026-10-31T20:59:59Z')).toBe('');
   });
 
   it('находит выдачи автора отзыва и сортирует новые первыми', () => {

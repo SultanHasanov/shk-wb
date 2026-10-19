@@ -1,5 +1,5 @@
 const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
-const { handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
+const { bindTelegramReferral, handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
 const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
 const { referralCookie } = require('../server/_user-auth');
 const crypto = require('crypto');
@@ -265,6 +265,9 @@ module.exports = async function handler(req, res) {
       await saveIdentity(user.id, telegram);
     } else {
       account = await createTelegramUser(telegram);
+      // Новый кабинет по приглашению из бота (t.me/<бот>?start=r_<КОД>). Mini App привяжет и в
+      // notifyMiniAppAuthorized, а вход виджетом Telegram на сайте — только здесь. Повтор безопасен.
+      if (!webAppUser) await bindTelegramReferral(telegram.id, account.id).catch(error => console.warn('Telegram referral bind failed', error.message));
     }
     const tokenHash = await magicLink(account.email);
     if (webAppUser) await notifyMiniAppAuthorized(telegram.id).catch(error => console.warn('Unable to notify Telegram Mini App user', error.message));
