@@ -18,24 +18,37 @@ const bootstrap = {
 };
 
 let paymentBody: Record<string, unknown> | null;
+let claimBody: Record<string, unknown> | null;
+let claimed: boolean;
 function json(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }));
 }
 
 beforeEach(() => {
   paymentBody = null;
+  claimBody = null;
+  claimed = false;
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/api/cabinet/assets/claim')) {
+      claimBody = JSON.parse(String(init?.body));
+      claimed = true;
+      return json({ ok: true }, 201);
+    }
     if (String(input).includes('/api/payments/create')) {
       paymentBody = JSON.parse(String(init?.body));
       return json({ error: 'Тестовая остановка перед переходом в ЮKassa' }, 400);
+    }
+    if (claimed) {
+      const extra = { ...bootstrap.assets[1], id: 3, key: 'CP-GGGG-HHHH-JJJJ', devices: [] };
+      return json({ ...bootstrap, assets: [...bootstrap.assets, extra] });
     }
     return json(bootstrap);
   }));
 });
 
-function renderPage() {
+function renderPage(path = '/cabinet/keys') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter><ToastProvider><KeysPage /></ToastProvider></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><ToastProvider><KeysPage /></ToastProvider></MemoryRouter></QueryClientProvider>);
 }
 
 describe('покупка и продление ключей в кабинете', () => {
@@ -92,5 +105,25 @@ describe('покупка и продление ключей в кабинете'
     expect(options.find(option => option.value === '1')).toBeDisabled();
     expect(options.find(option => option.value === '2')).toBeDisabled();
     expect(options.find(option => option.value === '3')).not.toBeDisabled();
+  });
+
+  it('ссылка из программы ?renew= сразу открывает продление своего ключа', async () => {
+    const user = userEvent.setup();
+    renderPage('/cabinet/keys?renew=cp-dddd-eeee-ffff');
+    await user.click(await screen.findByRole('checkbox', { name: /Принимаю/ }));
+    await user.click(screen.getByRole('button', { name: 'Перейти к оплате' }));
+    await waitFor(() => expect(paymentBody).not.toBeNull());
+    expect(paymentBody).toMatchObject({ productKind: 'cell_print_license', renewalTargetKey: 'CP-DDDD-EEEE-FFFF' });
+    expect(claimBody).toBeNull();
+  });
+
+  it('ключ, купленный без аккаунта, сначала добавляется, потом открывается продление', async () => {
+    const user = userEvent.setup();
+    renderPage('/cabinet/keys?renew=CP-GGGG-HHHH-JJJJ');
+    await waitFor(() => expect(claimBody).toEqual({ kind: 'cell_print', value: 'CP-GGGG-HHHH-JJJJ' }));
+    await user.click(await screen.findByRole('checkbox', { name: /Принимаю/ }));
+    await user.click(screen.getByRole('button', { name: 'Перейти к оплате' }));
+    await waitFor(() => expect(paymentBody).not.toBeNull());
+    expect(paymentBody).toMatchObject({ productKind: 'cell_print_license', renewalTargetKey: 'CP-GGGG-HHHH-JJJJ' });
   });
 });

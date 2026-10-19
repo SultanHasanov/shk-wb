@@ -549,6 +549,18 @@ module.exports = async function handler(req, res) {
       return fs.createReadStream(installer).pipe(res);
     }
     if (action === 'download-cell-print' && req.method === 'GET') {
+      // Как у «Помощника ПВЗ»: установщик лежит на сервере вне сайта (/dl/), ссылку на
+      // последнюю версию даёт строка cell_print_releases — новая версия выкладывается без деплоя.
+      try {
+        const [release] = await supabaseFetch('cell_print_releases?select=download_url&id=eq.true&limit=1');
+        const url = String(release?.download_url || '');
+        if (/^https:\/\/shk-wb\.ru\/dl\/[\w.-]+\.exe$/.test(url)) {
+          res.statusCode = 302;
+          res.setHeader('Location', url);
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end();
+        }
+      } catch {}
       const installer = path.join(__dirname, '_private', 'cell-print-installer.exe');
       const stat = fs.statSync(installer);
       res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');

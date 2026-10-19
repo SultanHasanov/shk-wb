@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Copy, Download, KeyRound, RefreshCw, Unlink } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, Progress, Table, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
@@ -38,6 +39,29 @@ export function KeysPage() {
   const [claim, setClaim] = useState('');
   const [checkout, setCheckout] = useState<LicenseCheckout | null>(null);
   const claimMutation = useCabinetMutation<{ kind: 'program' | 'cell_print'; value: string }>('/api/cabinet/assets/claim');
+  // Кнопка «Продлить» в программе «Печать ячеек» открывает /cabinet/keys?renew=CP-…:
+  // ключ своего аккаунта сразу открывает оплату продления, чужой-непривязанный сначала добавляется.
+  const [params, setParams] = useSearchParams();
+  const renewKey = (params.get('renew') || '').trim().toUpperCase();
+  const renewClaimed = useRef('');
+  const renewCellPrint = (asset: CellPrintAsset) => setCheckout({ kind: 'cell_print_license', targetKey: asset.key, deviceLimit: asset.deviceLimit, activeDevices: asset.devices.length, marketplaceScope: asset.marketplaceScope === 'ozon' || asset.marketplaceScope === 'both' ? asset.marketplaceScope : 'wb' });
+  const assetsData = query.data?.assets;
+  useEffect(() => {
+    if (!renewKey || !assetsData) return;
+    const dropParam = () => setParams(next => { next.delete('renew'); return next; }, { replace: true });
+    const own = assetsData.find((asset): asset is CellPrintAsset => asset.type === 'cell_print' && asset.key === renewKey);
+    if (own) {
+      if (own.active) renewCellPrint(own);
+      else toast(t('Ключ отключён — продлить его нельзя', 'Кілт өшірілген — оны ұзарту мүмкін емес'), 'error');
+      dropParam();
+      return;
+    }
+    if (!renewKey.startsWith('CP-') || renewClaimed.current === renewKey) { dropParam(); return; }
+    renewClaimed.current = renewKey;
+    claimMutation.mutate({ kind: 'cell_print', value: renewKey }, {
+      onError: error => { toast(error.message || t('Не удалось добавить ключ', 'Кілтті қосу мүмкін болмады'), 'error'); dropParam(); },
+    });
+  }, [renewKey, assetsData]);
 
   if (query.isPending) return <div className="page"><CabinetLoading /></div>;
   if (query.isError) return <div className="page"><CabinetError error={query.error} retry={() => query.refetch()} /></div>;
@@ -87,7 +111,7 @@ export function KeysPage() {
         <div className="row">
           {asset.type === 'cell_print' && <Button variant="secondary" onClick={() => setDevices(asset)}>{t('Устройства', 'Құрылғылар')}</Button>}
           {asset.active && asset.type === 'program' && <Button onClick={() => setCheckout({ kind: 'program_license', targetKey: asset.key })}><RefreshCw size={16} />{t('Пополнить итерации', 'Итерацияларды толықтыру')}</Button>}
-          {asset.active && asset.type === 'cell_print' && <Button onClick={() => setCheckout({ kind: 'cell_print_license', targetKey: asset.key, deviceLimit: asset.deviceLimit, activeDevices: asset.devices.length, marketplaceScope: asset.marketplaceScope === 'ozon' || asset.marketplaceScope === 'both' ? asset.marketplaceScope : 'wb' })}><RefreshCw size={16} />{t('Продлить', 'Ұзарту')}</Button>}
+          {asset.active && asset.type === 'cell_print' && <Button onClick={() => renewCellPrint(asset)}><RefreshCw size={16} />{t('Продлить', 'Ұзарту')}</Button>}
         </div>
       </Card>;
     }) : <Card><EmptyState icon={<KeyRound />} title={t('Ключей пока нет', 'Әзірге кілттер жоқ')} text={t('Купите новый ключ или добавьте ранее приобретённый.', 'Жаңа кілт сатып алыңыз немесе бұрын алынғанын қосыңыз.')} /></Card>}</div>
