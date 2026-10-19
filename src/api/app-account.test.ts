@@ -208,3 +208,18 @@ describe('сдвиг подписок и услуг за бесплатный п
     expect(patches[0].patch.starts_at).toBe('2026-11-01T00:00:00.000Z');
   });
 });
+
+describe('оплата из программы по QR-коду СБП', () => {
+  const app = readFileSync(resolve(root, 'api/app.js'), 'utf8');
+  const payments = readFileSync(resolve(root, 'api/payments.js'), 'utf8');
+  it('программа создаёт тот же заказ подписки, но со способом sbp_qr', () => {
+    expect(app).toContain("paymentMethod: 'sbp_qr'");
+    expect(app).toContain("req.query.action = 'create'");
+    expect(app).toContain("req.query.action = 'status'");
+  });
+  it('QR берётся из confirmation_data ЮKassa и только для подписки программы', () => {
+    expect(payments).toContain("payment_method_data: { type: 'sbp' }, confirmation: { type: 'qr' }");
+    expect(payments).toContain('qr: payment.confirmation?.confirmation_data');
+    expect(payments).toContain('Оплата по QR доступна только для подписки программы');
+  });
+});

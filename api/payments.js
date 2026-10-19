@@ -157,6 +157,11 @@ module.exports = async function handler(req, res) {
         if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы оформить подписку' });
         if (!appSnapshot) return res.status(400).json({ error: 'Выберите тариф и срок' });
       }
+      // QR-код СБП показывает сама программа «Помощник ПВЗ» (api/app.js action=pay):
+      // платёж без перехода на сайт, оплата с телефона по QR.
+      const sbpQr = req.body?.paymentMethod === 'sbp_qr';
+      if (sbpQr && productKind !== 'app_subscription' && productKind !== 'app_addon')
+        return res.status(400).json({ error: 'Оплата по QR доступна только для подписки программы' });
       const appAddon = String(req.body?.appAddon || '');
       const appAddonMonths = Number(req.body?.appAddonMonths || 0);
       const addonSnap = productKind === 'app_addon' ? addonSnapshot(appAddon, appAddonMonths) : null;
@@ -406,6 +411,7 @@ module.exports = async function handler(req, res) {
       calculated.total = Number(order.amount);
       if (calculated.total === 0) {
         await completeOrder(order, { status: 'succeeded', paid: true });
+        if (sbpQr) return res.status(201).json({ token, paid: true, amount: 0 });
         return res
           .status(201)
           .json({ confirmationUrl: `${resultPath}?token=${encodeURIComponent(token)}`, token });
@@ -433,7 +439,9 @@ module.exports = async function handler(req, res) {
           body: JSON.stringify({
             amount: { value: calculated.total.toFixed(2), currency: 'RUB' },
             capture: true,
-            confirmation: { type: 'redirect', return_url: returnUrl },
+            ...(sbpQr
+              ? { payment_method_data: { type: 'sbp' }, confirmation: { type: 'qr' } }
+              : { confirmation: { type: 'redirect', return_url: returnUrl } }),
             description,
             metadata: { order_id: order.id, product_kind: productKind },
           }),
@@ -444,10 +452,18 @@ module.exports = async function handler(req, res) {
             yookassa_payment_id: payment.id,
             status: payment.status,
             provider_status: payment.status,
-            confirmation_url: payment.confirmation?.confirmation_url,
+            confirmation_url: payment.confirmation?.confirmation_url || payment.confirmation?.confirmation_data || null,
             updated_at: new Date().toISOString(),
           }),
         });
+        if (sbpQr)
+          return res.status(201).json({
+            token,
+            amount: calculated.total,
+            // ссылка НСПК (https://qr.nspk.ru/…) — программа рисует из неё QR-код
+            qr: payment.confirmation?.confirmation_data || null,
+            expiresAt: payment.expires_at || null,
+          });
         return res
           .status(201)
           .json({ confirmationUrl: payment.confirmation?.confirmation_url, token });
@@ -456,6 +472,11 @@ module.exports = async function handler(req, res) {
           method: 'PATCH',
           body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }),
         });
+        // СБП может быть не подключена в магазине ЮKassa — программа предложит оплату на сайте.
+        if (sbpQr) {
+          console.error('SBP QR payment failed', error.message, error.details || '');
+          return res.status(502).json({ error: 'Не удалось создать платёж по СБП. Оплатите на сайте.', code: 'SBP_UNAVAILABLE' });
+        }
         throw error;
       }
     }

@@ -7,6 +7,7 @@ const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
 const { appFreeMode } = require('../server/_app-free');
 const appUpdate = require('../server/_app-update');
+const payments = require('./payments');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
 // Отдельный файл не заводим: на Vercel 12 функций — это лимит тарифа, поэтому
@@ -177,6 +178,27 @@ module.exports = async function handler(req, res) {
       if (!SITE_LINK_TARGETS.test(next)) return res.status(400).json({ error: 'Некорректная страница', code: 'VALIDATION_ERROR' });
       const tokenHash = await account.magicTokenHash(user.id);
       return res.status(200).json({ url: `${publicOrigin(req)}/app-login?th=${encodeURIComponent(tokenHash)}&next=${encodeURIComponent(next)}` });
+    }
+    // Оплата из программы по QR-коду СБП: тот же заказ, что на сайте (api/payments.js),
+    // только ЮKassa отдаёт ссылку для QR вместо страницы оплаты.
+    if (action === 'pay' && req.method === 'POST') {
+      const b = body(req);
+      const kind = b.kind === 'addon' ? 'app_addon' : 'app_subscription';
+      req.query.action = 'create';
+      req.body = {
+        productKind: kind,
+        ...(kind === 'app_addon'
+          ? { appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
+          : { appPlan: String(b.plan || ''), appTermMonths: Number(b.months || 0) }),
+        accepted: b.accepted === true,
+        paymentMethod: 'sbp_qr',
+        returnTo: 'cabinet',
+      };
+      return payments(req, res);
+    }
+    if (action === 'pay-status' && req.method === 'GET') {
+      req.query.action = 'status';
+      return payments(req, res);
     }
     if (action === 'logout' && req.method === 'POST') {
       await account.revokeDevice(user.id, device.id).catch(() => {});
