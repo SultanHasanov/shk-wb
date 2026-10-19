@@ -17,6 +17,24 @@ const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
+const appUpdate = require('../server/_app-update');
+
+// Скачивание «Помощника ПВЗ» для статистики: вместо IP — хеш с секретом сервера,
+// источник — ?from=… из ссылки (например, tg) или сайт, с которого перешли.
+async function recordProgramDownload(req, version) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  const secret = process.env.REFERRAL_COOKIE_SECRET || process.env.STICKER_CLIENT_SECRET || 'pvz';
+  const visitor = crypto.createHmac('sha256', secret).update(`${ip}|${req.headers['user-agent'] || ''}`).digest('hex').slice(0, 24);
+  const source = String(req.query.from || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+  let refererHost = '';
+  try { refererHost = new URL(String(req.headers.referer || '')).host.slice(0, 120); } catch {}
+  if (refererHost === 'shk-wb.ru') refererHost = 'сайт shk-wb.ru';
+  await supabaseFetch('app_download_events', {
+    method: 'POST',
+    body: JSON.stringify({ visitor, version: String(version).slice(0, 32), source, referer_host: refererHost }),
+  });
+}
+
 function publicOrder(row) {
   const program = row.product_kind === 'program',
     cellProgram = String(row.product_kind || '').startsWith('cell_print_');
@@ -572,8 +590,17 @@ module.exports = async function handler(req, res) {
     // без которых программа всё равно не ищет. Токеновый action=download выше
     // не трогаем — по нему качают ранее оплаченные заказы и промокоды.
     if (action === 'download-program' && req.method === 'GET') {
-      // «Помощник ПВЗ» лежит на GitHub Releases: ссылку берём из манифеста версии,
-      // чтобы при выпуске обновления менять её в одном месте (downloads/version.json).
+      // Последняя выложенная версия «Помощника ПВЗ» (latest.json на сервере); каждое
+      // скачивание записываем для статистики в админке (без IP — только хеш).
+      const latest = appUpdate.readLatest();
+      await recordProgramDownload(req, latest?.version || '').catch(() => {});
+      if (latest?.version && fs.existsSync(path.join(appUpdate.updatesDir(), 'public', `pvz-helper-${latest.version}-setup.exe`))) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.statusCode = 302;
+        res.setHeader('Location', `/dl/pvz-helper-${latest.version}-setup.exe`);
+        return res.end();
+      }
+      // Запасной путь — ссылка из манифеста downloads/version.json.
       for (const manifest of [
         path.join(__dirname, '..', 'dist', 'downloads', 'version.json'),
         path.join(__dirname, '..', 'downloads', 'version.json'),

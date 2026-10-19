@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { type AdminProgramKey, useAdminAppFreeMode, useAdminResource, useAdminResourceMutation, useSetAdminAppFreeMode } from '../../api/admin';
+import { type AdminProgramKey, useAdminAppFreeMode, useAdminAppStats, useAdminResource, useAdminResourceMutation, useSetAdminAppFreeMode } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
 import { shortDate } from '../../lib/admin-users';
-import { Alert, Badge, Button, Card, Field, Input, Skeleton, Switch, Table, useToast } from '../../ui';
+import { Alert, Badge, Button, Card, Field, Input, Segmented, Skeleton, Stat, Switch, Table, useToast } from '../../ui';
 import s from '../../layout/AdminShell.module.css';
 
 type Promo = { id: number; code: string; limit: number; used: number; active: boolean; note: string | null };
@@ -21,6 +21,7 @@ export function AdminProgramPage() {
 
   return (
     <div className="page stack-lg">
+      <AppStatsCard />
       <Card>
         <h3>Бесплатный режим программы</h3>
         {freeMode.isPending ? (
@@ -241,3 +242,76 @@ function FreeUntil({ current }: { current: string | null }) {
     </div>
   );
 }
+
+const rub = (v: number) => `${Math.round(v).toLocaleString('ru-RU')} ₽`;
+
+/**
+ * Статистика «Помощника ПВЗ»: скачали (кнопка «Скачать» на сайте, уникальные — по хешу IP),
+ * вошли в программу (новые компьютеры), пользуются (были в сети), оплатили.
+ */
+function AppStatsCard() {
+  const [days, setDays] = useState(14);
+  const stats = useAdminAppStats(days);
+  const t = stats.data?.totals;
+  return (
+    <Card>
+      <div className={s.toolbar} style={{ justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0 }}>Помощник ПВЗ — скачивания и установки</h3>
+        <Segmented
+          label="Период"
+          value={String(days)}
+          onChange={v => setDays(Number(v))}
+          options={[{ value: '7', label: '7 дней' }, { value: '14', label: '14 дней' }, { value: '30', label: '30 дней' }, { value: '90', label: '90 дней' }]}
+        />
+      </div>
+      {stats.isPending ? (
+        <Skeleton height={140} />
+      ) : stats.isError ? (
+        <Alert tone="error">Не удалось загрузить статистику: {stats.error.message}</Alert>
+      ) : t ? (
+        <>
+          <div className={s.tiles} style={{ marginTop: 12 }}>
+            <Stat value={t.downloadVisitors} label="скачали (уникальные)" hint={`всего скачиваний: ${t.downloads}`} />
+            <Stat value={t.devices} label="компьютеров вошли в программу" hint={`аккаунтов: ${t.accounts}`} />
+            <Stat value={t.active24h} label="пользуются сегодня" hint={`за 7 дней: ${t.active7d}`} />
+            <Stat value={t.paidUsers} label="с оплаченным тарифом" hint={`выручка: ${rub(t.revenue)}`} />
+          </div>
+          <p className={s.mutedNote}>
+            Скачивания считаются с кнопки «Скачать» на сайте{t.since ? ` с ${new Date(t.since).toLocaleDateString('ru-RU')}` : ''}.
+            Для поста добавьте к ссылке метку: <code>shk-wb.ru/api/payments/download-program?from=tg</code> — она появится в «Откуда».
+          </p>
+          <Table>
+            <thead>
+              <tr><th>День</th><th>Скачали</th><th>Вошли (новые ПК)</th><th>Оплаты</th><th>Сумма</th></tr>
+            </thead>
+            <tbody>
+              {stats.data!.days.map(d => (
+                <tr key={d.day}>
+                  <td>{new Date(`${d.day}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' })}</td>
+                  <td>{d.visitors ? <b>{d.visitors}</b> : '—'}{d.downloads > d.visitors ? <span className={s.mutedNote}> ({d.downloads})</span> : null}</td>
+                  <td>{d.devices || '—'}</td>
+                  <td>{d.payments || '—'}</td>
+                  <td>{d.revenue ? rub(d.revenue) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {stats.data!.sources.length > 0 && (
+            <>
+              <h4 style={{ marginTop: 16 }}>Откуда скачивали</h4>
+              <Table>
+                <thead><tr><th>Источник</th><th>Скачали</th></tr></thead>
+                <tbody>
+                  {stats.data!.sources.map(x => (
+                    <tr key={x.source}><td>{x.source}</td><td>{x.visitors}{x.downloads > x.visitors ? ` (${x.downloads})` : ''}</td></tr>
+                  ))}
+                </tbody>
+              </Table>
+            </>
+          )}
+        </>
+      ) : null}
+    </Card>
+  );
+}
+

@@ -131,4 +131,4 @@ function leaseResponse(req, res, deviceHash, rights) {
   return res.status(200).json({ payload, signature });
 }
 
-module.exports = { APP_NAME, policy, updateResponse, downloadResponse, leaseResponse, readLatest };
+module.exports = { APP_NAME, policy, updateResponse, downloadResponse, leaseResponse, readLatest, updatesDir };

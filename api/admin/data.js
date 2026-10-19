@@ -30,6 +30,7 @@ module.exports = async function handler(req, res) {
   if (req.query.resource === 'stats') return handleStats(req, res);
   if (req.query.resource === 'freeGenerations') return handleFreeGenerations(req, res);
   if (req.query.resource === 'appFreeMode') return handleAppFreeMode(req, res);
+  if (req.query.resource === 'appStats') return handleAppStats(req, res);
   const config = RESOURCES[req.query.resource];
   const id = req.query.id;
   if (!config || (id && !/^\d+$/.test(String(id)) && !(req.query.resource === 'cellRelease' && id === 'true'))) {
@@ -167,6 +168,17 @@ async function handleAppFreeMode(req, res) {
     }
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
+  } catch (error) { return sendApiError(res, error); }
+}
+
+// Статистика «Помощника ПВЗ»: скачивания, новые ПК, активные, оплаты (supabase admin_app_stats).
+async function handleAppStats(req, res) {
+  if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); return res.status(405).json({ error: 'Method not allowed' }); }
+  try {
+    const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    const data = await supabaseFetch('rpc/admin_app_stats', { method: 'POST', body: JSON.stringify({ p_days: days }) });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(data);
   } catch (error) { return sendApiError(res, error); }
 }
 

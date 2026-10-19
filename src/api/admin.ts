@@ -480,6 +480,31 @@ export function useSetAdminAppFreeMode() {
   });
 }
 
+/** Статистика «Помощника ПВЗ»: скачивания установщика, новые компьютеры, активные, оплаты. */
+export type AdminAppStats = {
+  totals: {
+    downloads: number;
+    downloadVisitors: number;
+    devices: number;
+    accounts: number;
+    active24h: number;
+    active7d: number;
+    paidUsers: number;
+    revenue: number;
+    since: string | null;
+  };
+  days: { day: string; downloads: number; visitors: number; devices: number; payments: number; revenue: number }[];
+  sources: { source: string; downloads: number; visitors: number }[];
+};
+
+export function useAdminAppStats(days = 30) {
+  return useQuery({
+    queryKey: ['admin', 'app-stats', days] as const,
+    queryFn: () => adminApi<AdminAppStats>(`${RESOURCE}appStats&days=${days}`),
+    refetchInterval: 60_000,
+  });
+}
+
 export function useAdminFreeGenerations() {
   return useQuery({
     queryKey: adminKeys.freeGenerations,
