@@ -8,9 +8,9 @@
 // получает DEVICE_REVOKED и выходит, даже если его токены ещё живы.
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
-const { authConfig, getAuthUser } = require('./_user-auth');
-const { PLANS, isPlan } = require('./_app-plans');
-const { appFreeMode } = require('./_app-free');
+const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
+const { ADDONS, PLANS, addonAllowed, effectiveFeatures, isPlan } = require('./_app-plans');
+const { appFreeMode, appFreeUntil } = require('./_app-free');
 
 const DEVICE_RE = /^[a-f0-9]{64}$/;
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -185,7 +185,7 @@ function technicalEmail(email) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -193,11 +193,13 @@ async function accountSummary(user, currentHash) {
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${uid}&active=eq.true&app_subscription_id=is.null&select=generation_limit,generation_used`),
     listDevices(user.id, currentHash),
     appFreeMode(),
+    appFreeUntil(),
   ]);
   const profile = profiles[0] || {};
   const tg = telegram[0] || null;
   const plan = isPlan(ent.plan) ? ent.plan : null;
   const packsLeft = Number(ent.packs_left || 0);
+  const rawAddons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
   return {
     user: {
       id: user.id,
@@ -208,7 +210,21 @@ async function accountSummary(user, currentHash) {
     },
     // Бесплатный режим (админка): всем вошедшим — Про. Программа читает поле plan первым.
     freeMode: free,
+    freeUntil: free ? freeUntil : null,
     ...(free ? { plan: 'pro' } : {}),
+    // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
+    features: effectiveFeatures(plan, rawAddons, free),
+    // Услуги: куплена до endsAt; active = действует сейчас (на тарифе ниже нужного — false).
+    addons: Object.values(ADDONS).map(a => {
+      const endsAt = rawAddons[a.id]?.ends_at || null;
+      return {
+        id: a.id,
+        title: a.title,
+        endsAt,
+        active: free || Boolean(endsAt && addonAllowed(a.id, plan)),
+        needsPlan: !free && Boolean(endsAt) && !addonAllowed(a.id, plan) ? a.minPlan : null,
+      };
+    }),
     // Без подписки, но с пакетами подбор кода всё равно работает — как «Базовый» без квоты.
     effectivePlan: free ? 'pro' : plan || (packsLeft > 0 ? 'basic' : null),
     subscription: plan ? {
@@ -231,6 +247,34 @@ async function accountSummary(user, currentHash) {
     deviceLimit: free ? 99 : Number(ent.device_limit || 1),
     devices,
   };
+}
+
+/**
+ * Права для подписанной аренды (POST /api/app/lease). Программа открывает разделы
+ * только по ним, а не по кэшу account.json, — поэтому правка файлов ничего не даёт.
+ * Без входа или с отключённым ПК — пустой список: подбор кода по пакетам и ключу
+ * всё равно проверяет сервер при списании.
+ */
+async function leaseRights(req) {
+  const user = await optionalUser(req).catch(() => null);
+  if (!user) return { user: null, plan: null, features: [], archive_until: null, free: false };
+  try {
+    await requireDevice(req, user.id);
+  } catch (error) {
+    if (error.code === 'DEVICE_REVOKED' || error.code === 'DEVICE_REQUIRED') {
+      return { user: user.id, plan: null, features: [], archive_until: null, free: false };
+    }
+    throw error;
+  }
+  const [ent, free] = await Promise.all([
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
+    appFreeMode(),
+  ]);
+  const plan = isPlan(ent.plan) ? ent.plan : null;
+  const addons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
+  const features = effectiveFeatures(plan, addons, free);
+  const archiveUntil = free ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
+  return { user: user.id, plan: free ? 'pro' : plan, features, archive_until: archiveUntil, free };
 }
 
 async function consumeCode(userId, deviceId, meta) {
@@ -350,6 +394,7 @@ async function pollBrowserLogin(code, secret) {
 }
 
 module.exports = {
+  leaseRights,
   accountSummary,
   appError,
   approveBrowserLogin,

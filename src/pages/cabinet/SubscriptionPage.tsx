@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Check, Download, Laptop, Minus, Unlink } from 'lucide-react';
+import { Archive, Check, Download, Laptop, Minus, Unlink } from 'lucide-react';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Modal, Progress, Segmented, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { api } from '../../api/client';
 import { useCabinet } from '../../api/cabinet';
-import { type AppAccount, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRevokeAppDevice } from '../../api/app';
+import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRevokeAppDevice } from '../../api/app';
 import { PROGRAM_DOWNLOAD_URL } from '../../lib/downloads';
 import { useMoney } from '../../lib/currency';
 import { formatTotal as formatRub } from '../../lib/pricing';
@@ -26,7 +27,7 @@ function monthsWord(n: number, t: T) {
   return t(`${n} месяцев`, `${n} ай`);
 }
 
-type Checkout = { plan: AppPlan; months: number };
+type Checkout = { plan: AppPlan; months: number; addon?: undefined } | { addon: AppAddon; months: number; plan?: undefined };
 
 function CheckoutModal({ checkout, account, availableKopecks, onClose }: { checkout: Checkout; account: AppAccount; availableKopecks: number; onClose: () => void }) {
   const t = useT();
@@ -35,20 +36,23 @@ function CheckoutModal({ checkout, account, availableKopecks, onClose }: { check
   const date = useDate();
   const [accepted, setAccepted] = useState(false);
   const [useBalance, setUseBalance] = useState(false);
-  const total = checkout.plan.prices[String(checkout.months)];
+  const plan = checkout.plan;
+  const addon = checkout.addon;
+  const total = (plan ?? addon)!.prices[String(checkout.months)];
   const totalKopecks = Math.round(total * 100);
   const appliedKopecks = useBalance ? Math.min(totalKopecks, availableKopecks) : 0;
   const payable = (totalKopecks - appliedKopecks) / 100;
   const current = account.subscription;
-  const mode = !current ? 'new' : current.plan === checkout.plan.id ? 'extend' : RANK[checkout.plan.id] > RANK[current.plan] ? 'upgrade' : 'downgrade';
+  const mode = !plan ? 'addon' : !current ? 'new' : current.plan === plan.id ? 'extend' : RANK[plan.id] > RANK[current.plan] ? 'upgrade' : 'downgrade';
+  const addonEnds = addon ? account.addons?.find(a => a.id === addon.id)?.endsAt ?? null : null;
 
   const payment = useMutation({
     mutationFn: () => api<{ confirmationUrl: string }>('/api/payments/create', {
       method: 'POST',
       body: JSON.stringify({
-        productKind: 'app_subscription',
-        appPlan: checkout.plan.id,
-        appTermMonths: checkout.months,
+        ...(plan
+          ? { productKind: 'app_subscription', appPlan: plan.id, appTermMonths: checkout.months }
+          : { productKind: 'app_addon', appAddon: addon?.id, appAddonMonths: checkout.months }),
         accepted,
         returnTo: 'cabinet',
         referralCreditKopecks: useBalance ? Number.MAX_SAFE_INTEGER : 0,
@@ -58,11 +62,20 @@ function CheckoutModal({ checkout, account, availableKopecks, onClose }: { check
   });
 
   return (
-    <Modal open onOpenChange={open => !open && onClose()} title={t(`Тариф «${checkout.plan.title}» на ${monthsWord(checkout.months, t)}`, `«${checkout.plan.title}» тарифі, ${monthsWord(checkout.months, t)}`)} description={t('После подтверждения откроется защищённая страница оплаты ЮKassa.', 'Растағаннан кейін ЮKassa-ның қорғалған төлем беті ашылады.')}>
+    <Modal open onOpenChange={open => !open && onClose()} title={plan
+      ? t(`Тариф «${plan.title}» на ${monthsWord(checkout.months, t)}`, `«${plan.title}» тарифі, ${monthsWord(checkout.months, t)}`)
+      : t(`«${addon?.title}» на ${monthsWord(checkout.months, t)}`, `«${addon?.title}», ${monthsWord(checkout.months, t)}`)} description={t('После подтверждения откроется защищённая страница оплаты ЮKassa.', 'Растағаннан кейін ЮKassa-ның қорғалған төлем беті ашылады.')}>
       <div className="stack">
         {mode === 'extend' && current && <Alert tone="info">{t(`Срок добавится к текущему: подписка будет действовать на ${monthsWord(checkout.months, t)} дольше ${date(current.paidUntil)}.`, `Мерзім ағымдағыға қосылады: жазылым ${date(current.paidUntil)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ жұмыс істейді.`)}</Alert>}
         {mode === 'upgrade' && <Alert tone="info">{t('Новый тариф начнёт работать сразу. Неиспользованные дни текущего тарифа не сгорят: мы пересчитаем их по стоимости и добавим к новому сроку.', 'Жаңа тариф бірден іске қосылады. Ағымдағы тарифтің пайдаланылмаған күндері жанбайды: оларды құны бойынша қайта есептеп, жаңа мерзімге қосамыз.')}</Alert>}
-        {mode === 'downgrade' && current && <Alert tone="warning">{t(`Тариф «${checkout.plan.title}» начнёт действовать после окончания оплаченного срока — ${date(current.paidUntil)}.`, `«${checkout.plan.title}» тарифі төленген мерзім аяқталғаннан кейін — ${date(current.paidUntil)} күні күшіне енеді.`)}</Alert>}
+        {mode === 'downgrade' && current && plan && <Alert tone="warning">{t(`Тариф «${plan.title}» начнёт действовать после окончания оплаченного срока — ${date(current.paidUntil)}.`, `«${plan.title}» тарифі төленген мерзім аяқталғаннан кейін — ${date(current.paidUntil)} күні күшіне енеді.`)}</Alert>}
+        {mode === 'addon' && (
+          <Alert tone="info">
+            {addonEnds
+              ? t(`Срок добавится к текущему: архив будет открыт на ${monthsWord(checkout.months, t)} дольше ${date(addonEnds)}.`, `Мерзім ағымдағыға қосылады: мұрағат ${date(addonEnds)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ ашық болады.`)
+              : t('Архив откроется в программе сразу после оплаты — вместе со всей историей, которую программа уже собрала на компьютере.', 'Мұрағат төлемнен кейін бағдарламада бірден ашылады — бағдарлама компьютерде жинаған бүкіл тарихпен бірге.')}
+          </Alert>
+        )}
         <div className="row">
           <span className="muted">{t('К оплате', 'Төлеуге')}</span>
           <strong style={{ fontSize: 'var(--fs-24)' }}>{formatTotal(payable)}</strong>
@@ -186,6 +199,48 @@ function Devices({ account }: { account: AppAccount }) {
   );
 }
 
+function ArchiveCard({ addon, account, onChoose }: { addon: AppAddon; account: AppAccount; onChoose: (c: Checkout) => void }) {
+  const t = useT();
+  const date = useDate();
+  const { formatTotal } = useMoney();
+  const state = account.addons?.find(a => a.id === addon.id);
+  const planOk = Boolean(account.subscription && RANK[account.subscription.plan] >= RANK[addon.minPlan]);
+  const minTitle = addon.minPlan === 'pro' ? 'Про' : 'Стандарт';
+  const terms = Object.keys(addon.prices).map(Number).sort((a, b) => a - b);
+  return (
+    <Card>
+      <div className="stack">
+        <div className={s.planHead}>
+          <div className="row"><Archive size={20} /><h2 style={{ margin: 0 }}>{addon.title}</h2></div>
+          {account.freeMode
+            ? <Badge tone="success">{t('Открыт в бесплатный период', 'Тегін кезеңде ашық')}</Badge>
+            : state?.active && state.endsAt
+              ? <Badge tone="success">{t(`Открыт до ${date(state.endsAt)}`, `${date(state.endsAt)} дейін ашық`)}</Badge>
+              : <Badge>{t('Не подключён', 'Қосылмаған')}</Badge>}
+        </div>
+        <p style={{ margin: 0 }}>{addon.summary}.</p>
+        <p className="muted" style={{ margin: 0 }}>
+          {t(
+            'База WB хранит выданные товары около двух недель, а отказы — пару месяцев. Программа копирует их в архив на компьютере и ничего из него не удаляет. С услугой досье, поиск по телефону и окно примерки показывают клиента целиком, даже если он не приходил полгода. Когда услуга закончится, архив закроется, но продолжит собираться — после продления вся история снова доступна.',
+            'WB базасы берілген тауарларды шамамен екі апта, бас тартуларды бірнеше ай сақтайды. Бағдарлама оларды компьютердегі мұрағатқа көшіреді және ештеңе өшірмейді. Қызметпен досье, телефон бойынша іздеу және киіп көру терезесі клиентті толық көрсетеді. Қызмет аяқталғанда мұрағат жабылады, бірақ жинала береді — ұзартқаннан кейін бүкіл тарих қайта қолжетімді.',
+          )}
+        </p>
+        {state?.needsPlan && state.endsAt && (
+          <Alert tone="warning">{t(`Архив оплачен до ${date(state.endsAt)}, но открывается только с тарифом «${minTitle}» или выше.`, `Мұрағат ${date(state.endsAt)} дейін төленген, бірақ тек «${minTitle}» немесе жоғары тарифпен ашылады.`)}</Alert>
+        )}
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {terms.map((months, i) => (
+            <Button key={months} variant={i === 0 ? 'primary' : 'secondary'} disabled={!planOk} onClick={() => onChoose({ addon, months })}>
+              {monthsWord(months, t)} — {formatTotal(addon.prices[String(months)])}
+            </Button>
+          ))}
+        </div>
+        {!planOk && <p className="muted" style={{ margin: 0 }}>{t(`Подключается к тарифу «${minTitle}» или выше. Сначала оформите тариф.`, `«${minTitle}» немесе жоғары тарифке қосылады. Алдымен тарифті рәсімдеңіз.`)}</p>}
+      </div>
+    </Card>
+  );
+}
+
 function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: AppAccount; onChoose: (c: Checkout) => void }) {
   const t = useT();
   const { formatTotal } = useMoney();
@@ -247,6 +302,21 @@ export function SubscriptionPage() {
   const plans = useAppPlans();
   const cabinet = useCabinet();
   const [checkout, setCheckout] = useState<Checkout | null>(null);
+  const [params, setParams] = useSearchParams();
+  const date = useDate();
+
+  // Из программы приходят ссылкой ?plan=pro или ?addon=archive — сразу открываем оплату.
+  useEffect(() => {
+    if (!plans.data || !account.data) return;
+    const planId = params.get('plan');
+    const addonId = params.get('addon');
+    if (!planId && !addonId) return;
+    const plan = plans.data.plans.find(p => p.id === planId);
+    const addon = plans.data.addons?.find(a => a.id === addonId);
+    if (plan) setCheckout({ plan, months: 1 });
+    else if (addon) setCheckout({ addon, months: Math.min(...Object.keys(addon.prices).map(Number)) });
+    setParams({}, { replace: true });
+  }, [plans.data, account.data, params, setParams]);
 
   if (account.isPending || plans.isPending) return <div className="page"><CabinetLoading /></div>;
   if (account.isError) return <div className="page"><CabinetError error={account.error} retry={() => account.refetch()} /></div>;
@@ -263,6 +333,14 @@ export function SubscriptionPage() {
         <h1>{t('Подписка «Помощник ПВЗ»', '«ПВЗ көмекшісі» жазылымы')}</h1>
         <p>{t('Тариф, лимиты и компьютеры программы. Войти в программу можно тем же логином и паролем, что на сайте.', 'Бағдарламаның тарифі, лимиттері және компьютерлері. Бағдарламаға сайттағы логин мен құпиясөзбен кіруге болады.')}</p>
       </header>
+      {account.data.freeMode && account.data.freeUntil && (
+        <Alert tone="warning">
+          {t(
+            `Бесплатный период закончится ${date(account.data.freeUntil)}. После этого разделы программы будут работать по тарифу. Оформите тариф заранее — оплаченный срок начнётся после бесплатного периода, ни один день не пропадёт.`,
+            `Тегін кезең ${date(account.data.freeUntil)} аяқталады. Одан кейін бағдарлама бөлімдері тариф бойынша жұмыс істейді. Тарифті алдын ала рәсімдеңіз — төленген мерзім тегін кезеңнен кейін басталады.`,
+          )}
+        </Alert>
+      )}
       {account.data.freeMode && (
         <Alert tone="success">
           {t(
@@ -277,6 +355,7 @@ export function SubscriptionPage() {
       </div>
       <Devices account={account.data} />
       <PlanCards plans={plans.data} account={account.data} onChoose={setCheckout} />
+      {plans.data.addons?.map(addon => <ArchiveCard key={addon.id} addon={addon} account={account.data} onChoose={setCheckout} />)}
       <div className="row">
         <a href={PROGRAM_DOWNLOAD_URL}><Button variant="secondary"><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
       </div>

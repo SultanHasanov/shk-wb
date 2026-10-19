@@ -1,6 +1,8 @@
 const { z } = require('zod');
-const { sendApiError, supabaseFetch } = require('../server/_supabase');
-const { appFreeMode } = require('../server/_app-free');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+
+const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
+const { sendMessage } = require('../server/_telegram-api');
 const {
   deleteAuthUser,
   getAuthUser,
@@ -711,6 +713,50 @@ async function deleteAccount(req, res, user) {
   return res.status(204).end();
 }
 
+// Предупреждение о конце бесплатного периода «Помощника ПВЗ»: за 7 и за 1 день.
+// Адресаты — владельцы активных ПК программы без подписки, идущей дальше даты окончания.
+async function notifyFreePeriodEnd() {
+  const state = await freeModeState();
+  if (!state.enabled || !state.until) return 0;
+  const left = Date.parse(state.until) - Date.now();
+  if (!(left > 0) || left > 7 * 86400000) return 0;
+  const stage = left <= 36 * 3600000 ? '1d' : '7d';
+  const day = new Date(state.until).toLocaleDateString('ru-RU');
+  const devices = await supabaseFetch('app_devices?revoked_at=is.null&select=user_id');
+  const users = [...new Set(devices.map(d => d.user_id))];
+  let sent = 0;
+  for (const userId of users) {
+    const paid = await supabaseFetch(
+      `app_subscriptions?user_id=eq.${encodeURIComponent(userId)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(state.until)}&select=id&limit=1`,
+    );
+    if (paid.length) continue;
+    const title = stage === '1d' ? 'Бесплатный период «Помощника ПВЗ» заканчивается завтра' : `Бесплатный период «Помощника ПВЗ» до ${day}`;
+    const body = `С ${day} разделы программы работают по тарифу. Выберите тариф в кабинете — оплаченный срок начнётся после бесплатного периода. Архив клиентов на компьютере сохранится.`;
+    const notification = await createNotification({
+      userId,
+      kind: 'key_expiry',
+      title,
+      body,
+      link: '/cabinet/subscription',
+      dedupeKey: `app-free-end-${stage}:${String(state.until).slice(0, 10)}`,
+      email: await getAuthUser(userId).then(u => (u?.email?.endsWith('@users.invalid') ? null : u?.email)).catch(() => null),
+      emailEnabled: true,
+    });
+    // createNotification возвращает null, если такое уже отправляли (дедуп) — тогда и в Telegram не пишем.
+    if (!notification) continue;
+    sent++;
+    const tg = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(userId)}&select=telegram_user_id&limit=1`).catch(() => []);
+    if (tg[0]?.telegram_user_id) {
+      await sendMessage(tg[0].telegram_user_id, `<b>${title}</b>
+
+${body}`, {
+        reply_markup: { inline_keyboard: [[{ text: 'Выбрать тариф', url: 'https://shk-wb.ru/cabinet/subscription' }]] },
+      }).catch(() => {});
+    }
+  }
+  return sent;
+}
+
 async function cronNotifications(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
   const expected = process.env.CRON_SECRET;
@@ -728,6 +774,10 @@ async function cronNotifications(req, res) {
       `cell_print_licenses?owner_user_id=not.is.null&active=eq.true&expires_at=gte.${encodeURIComponent(start)}&expires_at=lt.${encodeURIComponent(end)}&select=id,key,owner_user_id,expires_at`,
     );
     let sent = 0;
+    // Бесплатный период «Помощника ПВЗ»: в дату окончания выключаем (со сдвигом подписок),
+    // за 7 и за 1 день предупреждаем всех, кто пользуется программой и не оплатил дальше.
+    const freeEnded = await expireAppFreeMode().catch(error => { console.error(error); return null; });
+    sent += await notifyFreePeriodEnd().catch(error => { console.error(error); return 0; });
     for (const license of licenses) {
       const prefs = await supabaseFetch(
         `user_preferences?user_id=eq.${encodeURIComponent(license.owner_user_id)}&select=notify_key_expiry&limit=1`,
@@ -773,7 +823,29 @@ async function cronNotifications(req, res) {
       });
       sent++;
     }
-    return res.json({ checked: licenses.length + subscriptions.length, created: sent, releasedReservations });
+    // Услуга «Архив клиентов»: напоминание за 3 дня, если не продлена.
+    const addons = await appFreeMode() ? [] : await supabaseFetch(
+      `app_addons?canceled=eq.false&ends_at=gte.${encodeURIComponent(start)}&ends_at=lt.${encodeURIComponent(end)}&select=id,user_id,addon,ends_at`,
+    ).catch(() => []);
+    for (const addon of addons) {
+      const later = await supabaseFetch(
+        `app_addons?user_id=eq.${encodeURIComponent(addon.user_id)}&addon=eq.${addon.addon}&canceled=eq.false&ends_at=gt.${encodeURIComponent(addon.ends_at)}&select=id&limit=1`,
+      );
+      if (later.length) continue;
+      const user = await getAuthUser(addon.user_id);
+      await createNotification({
+        userId: addon.user_id,
+        kind: 'key_expiry',
+        title: 'Услуга «Архив клиентов» скоро закончится',
+        body: `Архив открыт до ${new Date(addon.ends_at).toLocaleDateString('ru-RU')}. Данные не удалятся: программа продолжит собирать архив, а доступ откроется снова после продления.`,
+        link: '/cabinet/subscription',
+        dedupeKey: `app-addon-expiry-3d:${addon.id}:${String(addon.ends_at).slice(0, 10)}`,
+        email: user?.email?.endsWith('@users.invalid') ? null : user?.email,
+        emailEnabled: true,
+      });
+      sent++;
+    }
+    return res.json({ checked: licenses.length + subscriptions.length + addons.length, created: sent, releasedReservations, freeEnded: Boolean(freeEnded) });
   } catch (error) {
     console.error(error);
     return res.status(502).json({ error: 'Notification job failed' });

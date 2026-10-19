@@ -97,7 +97,10 @@ module.exports = async function handler(req, res) {
       if (!await enforceRateLimit(req, res, { scope: 'app-lease', limit: 120, windowSeconds: 3600 })) return;
       const deviceHash = account.deviceHashFrom(req);
       if (!deviceHash) return res.status(400).json({ error: 'Обновите программу', code: 'DEVICE_REQUIRED' });
-      return appUpdate.leaseResponse(req, res, deviceHash);
+      // Права считаем, только если ключ аренды настроен (иначе ответ всё равно 503).
+      // Сбой базы не должен ронять аренду: rights=null — «неизвестно», программа держит прошлые права.
+      const rights = process.env.PVZ_LEASE_PRIVATE_KEY ? await account.leaseRights(req).catch(() => null) : null;
+      return appUpdate.leaseResponse(req, res, deviceHash, rights);
     }
 
     // Дальше — только программа.

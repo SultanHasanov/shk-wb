@@ -105,8 +105,10 @@ function leaseKey() {
 /**
  * POST /api/app/lease — подписанное подтверждение «сервер на связи».
  * Подписываются ровно байты поля payload (JSON-строка): программа проверяет их как есть.
+ * С токеном сессии в payload кладутся права (тариф, разделы, срок архива) — программа
+ * открывает разделы только по подписанным правам.
  */
-function leaseResponse(req, res, deviceHash) {
+function leaseResponse(req, res, deviceHash, rights) {
   const key = leaseKey();
   if (!key) return res.status(503).json({ error: 'Аренда не настроена', code: 'LEASE_DISABLED' });
   const version = String(req.headers['x-app-version'] || '').trim();
@@ -121,6 +123,8 @@ function leaseResponse(req, res, deviceHash) {
     min_version: minVersion,
     mandatory,
     latest: latest ? latest.version : null,
+    // Права аккаунта на этом ПК (server/_app-account.js leaseRights). Старые программы поле не читают.
+    rights: rights || null,
   });
   const signature = crypto.sign(null, Buffer.from(payload, 'utf8'), key).toString('base64');
   res.setHeader('Cache-Control', 'no-store');

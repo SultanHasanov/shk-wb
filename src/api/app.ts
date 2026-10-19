@@ -14,17 +14,33 @@ export type AppPlan = {
   features: string[];
   prices: Record<string, number>;
 };
+/** Доп. услуга (сейчас одна — архив клиентов). prices — цена за весь срок по числу месяцев. */
+export type AppAddonId = 'archive';
+export type AppAddon = {
+  id: AppAddonId;
+  title: string;
+  summary: string;
+  minPlan: AppPlanId;
+  prices: Record<string, number>;
+  features: string[];
+};
 export type AppPlans = {
   order: AppPlanId[];
   terms: Array<{ months: number; discountPercent: number }>;
   features: Record<string, string>;
   plans: AppPlan[];
+  addons?: AppAddon[];
   /** Бесплатный режим из админки: всем вошедшим — Про без лимитов. */
   freeMode?: boolean;
 };
 export type AppDevice = { id: string; name: string; appVersion: string; lastSeenAt: string; createdAt: string; current: boolean };
 export type AppAccount = {
   freeMode?: boolean;
+  /** дата окончания бесплатного периода (ISO), если задана в админке */
+  freeUntil?: string | null;
+  /** итоговые разделы программы: тариф + активные услуги */
+  features?: string[];
+  addons?: Array<{ id: AppAddonId; title: string; endsAt: string | null; active: boolean; needsPlan: AppPlanId | null }>;
   user: { id: string; email: string | null; name: string | null; phone: string | null; telegram: { username: string | null } | null };
   effectivePlan: AppPlanId | null;
   subscription: { plan: AppPlanId; title: string; startsAt: string; endsAt: string; paidUntil: string; nextPlan: AppPlanId | null } | null;

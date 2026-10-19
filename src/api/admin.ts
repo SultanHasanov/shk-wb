@@ -284,6 +284,10 @@ export type AdminUserDetail = {
       createdAt: string; revokedAt: string | null;
     }>;
     usage: Array<{ id: number; kind: string; amount: number; source: string; createdAt: string }>;
+    addons?: Array<{
+      id: string; addon: string; title: string; startsAt: string; endsAt: string;
+      canceled: boolean; source: string; price: number; createdAt: string;
+    }>;
   };
 };
 
@@ -446,7 +450,13 @@ export type AdminFreeGenerations = {
 };
 
 /** Бесплатный режим «Помощника ПВЗ»: всем вошедшим — Про без лимитов. */
-export type AdminAppFreeMode = { enabled: boolean; since: string | null; extended?: { users: number; segments: number } | null };
+export type AdminAppFreeMode = {
+  enabled: boolean;
+  since: string | null;
+  /** дата окончания (ISO) — в неё крон сам выключит режим */
+  until: string | null;
+  extended?: { users: number; segments: number; addons?: number } | null;
+};
 
 export function useAdminAppFreeMode() {
   return useQuery({
@@ -458,8 +468,11 @@ export function useAdminAppFreeMode() {
 export function useSetAdminAppFreeMode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (enabled: boolean) =>
-      adminApi<AdminAppFreeMode>(`${RESOURCE}appFreeMode`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    mutationFn: (input: boolean | { enabled: boolean; until?: string | null }) =>
+      adminApi<AdminAppFreeMode>(`${RESOURCE}appFreeMode`, {
+        method: 'POST',
+        body: JSON.stringify(typeof input === 'boolean' ? { enabled: input } : input),
+      }),
     onSuccess: data => {
       queryClient.setQueryData(['admin', 'app-free-mode'], data);
       queryClient.invalidateQueries({ queryKey: ['app-plans'] });

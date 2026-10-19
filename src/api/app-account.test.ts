@@ -149,3 +149,62 @@ describe('подписка в базе и оплате', () => {
     expect(vercel.rewrites).toContainEqual({ source: '/api/trial', destination: '/api/app?action=trial' });
   });
 });
+
+describe('разделы по тарифам и услуга «Архив»', () => {
+  type Full = {
+    effectiveFeatures: (plan: string | null, addons: Record<string, { ends_at: string }>, free: boolean) => string[];
+    addonAllowed: (addon: string, plan: string | null) => boolean;
+    addonSnapshot: (addon: string, months: number) => { addon: { price: number }; total: number } | null;
+    publicPlans: () => { addons: Array<{ id: string; prices: Record<string, number> }>; features: Record<string, string> };
+  };
+  const p = require('../../server/_app-plans.js') as Full;
+  const future = { archive: { ends_at: new Date(Date.now() + 86400000).toISOString() } };
+  const past = { archive: { ends_at: new Date(Date.now() - 1000).toISOString() } };
+
+  it('без подписки — ни одного раздела, с пакетами подбор проверяет сервер', () => {
+    expect(p.effectiveFeatures(null, {}, false)).toEqual([]);
+  });
+  it('Базовый — только подбор кода, архив к нему не подключается', () => {
+    expect(p.effectiveFeatures('basic', future, false)).toEqual(['code']);
+    expect(p.addonAllowed('archive', 'basic')).toBe(false);
+  });
+  it('Стандарт открывает ячейки, коробки, ШК и примерку, но не досье и сотрудников', () => {
+    const f = p.effectiveFeatures('standard', {}, false);
+    expect(f).toEqual(expect.arrayContaining(['cells', 'boxes', 'goods', 'tryon', 'notes', 'reviews']));
+    expect(f).not.toContain('dossier');
+    expect(f).not.toContain('staff');
+    expect(f).not.toContain('archive');
+  });
+  it('архив открыт только пока услуга не истекла', () => {
+    expect(p.effectiveFeatures('standard', future, false)).toContain('archive');
+    expect(p.effectiveFeatures('pro', past, false)).not.toContain('archive');
+  });
+  it('бесплатный режим — Про со всеми услугами', () => {
+    expect(p.effectiveFeatures(null, {}, true)).toEqual(expect.arrayContaining(['dossier', 'staff', 'stickers', 'archive']));
+  });
+  it('цена архива берётся с сервера, «синхронизации» в тарифах нет', () => {
+    expect(p.addonSnapshot('archive', 6)?.total).toBe(590);
+    expect(p.addonSnapshot('archive', 12)?.total).toBe(990);
+    expect(p.addonSnapshot('archive', 1)).toBeNull();
+    expect(p.publicPlans().addons.map(a => a.id)).toEqual(['archive']);
+    expect(p.publicPlans().features).not.toHaveProperty('sync');
+  });
+  it('оплата услуги проверяет тариф, заказ исполняется один раз', () => {
+    const payments = readFileSync(resolve(root, 'api/payments.js'), 'utf8');
+    const migration = readFileSync(resolve(root, 'supabase/migrations/20261020_app_addons.sql'), 'utf8');
+    expect(payments).toContain("addonSnapshot(appAddon, appAddonMonths)");
+    expect(payments).toContain("code: 'PLAN_REQUIRED'");
+    expect(migration).toContain('if order_row.app_fulfilled_at is not null then');
+    expect(migration).toContain("'addons', addons");
+  });
+});
+
+describe('сдвиг подписок и услуг за бесплатный период', () => {
+  type Free = { planShift: (rows: Array<{ id: number; user_id: string; starts_at: string; ends_at: string }>, from: number, to: number) => { patches: Array<{ id: number; patch: Record<string, string> }> } };
+  const free = require('../../server/_app-free.js') as Free;
+  it('купленное внутри периода начинается после него', () => {
+    const from = Date.parse('2026-10-01T00:00:00Z'), to = Date.parse('2026-11-01T00:00:00Z');
+    const { patches } = free.planShift([{ id: 1, user_id: 'u:archive', starts_at: '2026-10-10T00:00:00Z', ends_at: '2027-04-10T00:00:00Z' }], from, to);
+    expect(patches[0].patch.starts_at).toBe('2026-11-01T00:00:00.000Z');
+  });
+});

@@ -7,6 +7,14 @@
 
 const PLAN_ORDER = Object.freeze(['basic', 'standard', 'pro']);
 
+// Разделы программы по тарифам. Программа открывает раздел, только если его фича
+// есть в списке (список приходит в подписанной аренде, см. _app-update.js).
+const BASIC_FEATURES = Object.freeze(['code']);
+const STANDARD_FEATURES = Object.freeze([
+  ...BASIC_FEATURES, 'cells', 'expensive', 'way', 'boxes', 'goods', 'search', 'reviews', 'telegram', 'tryon', 'notes',
+]);
+const PRO_FEATURES = Object.freeze([...STANDARD_FEATURES, 'dossier', 'risky', 'staff', 'stickers']);
+
 const PLANS = Object.freeze({
   basic: Object.freeze({
     id: 'basic',
@@ -16,7 +24,7 @@ const PLANS = Object.freeze({
     stickers: 0,
     devices: 1,
     summary: 'Подбор кода выдачи для клиента без кода',
-    features: ['code'],
+    features: BASIC_FEATURES,
   }),
   standard: Object.freeze({
     id: 'standard',
@@ -26,7 +34,7 @@ const PLANS = Object.freeze({
     stickers: 0,
     devices: 1,
     summary: 'Вся работа с ячейками, товарами и отзывами',
-    features: ['code', 'cells', 'way', 'search', 'reviews', 'expensive', 'telegram'],
+    features: STANDARD_FEATURES,
   }),
   pro: Object.freeze({
     id: 'pro',
@@ -36,7 +44,7 @@ const PLANS = Object.freeze({
     stickers: 300,
     devices: 2,
     summary: 'Досье клиентов, стикеры, сотрудники и зарплата',
-    features: ['code', 'cells', 'way', 'search', 'reviews', 'expensive', 'telegram', 'dossier', 'stickers', 'staff', 'sync'],
+    features: PRO_FEATURES,
   }),
 });
 
@@ -51,10 +59,29 @@ const FEATURE_TITLES = Object.freeze({
   reviews: 'Отзывы WB',
   expensive: 'Дорогие товары',
   telegram: 'Уведомления в Telegram',
+  boxes: 'Коробки возвратов на склад',
+  goods: 'Товар по ШК: история статусов',
+  tryon: 'Окно примерки поверх всех окон',
+  notes: 'Заметки о клиентах',
   dossier: 'Досье клиента: отказы и возвраты',
+  risky: 'Предупреждение о клиентах с частыми отказами',
   stickers: 'Печать стикеров товаров и коробок',
-  staff: 'Сотрудники, смены и зарплата',
-  sync: 'Настройки в облаке на всех ПК',
+  staff: 'Сотрудники: график, зарплата, аванс, удержания WB',
+  archive: 'Архив клиентов старше окна WB',
+});
+
+// Доп. услуги — покупаются отдельно от тарифа на свой срок. Цена за весь срок.
+// Архив программа собирает на ПК всегда; услуга только открывает его чтение,
+// поэтому после окончания ничего не теряется.
+const ADDONS = Object.freeze({
+  archive: Object.freeze({
+    id: 'archive',
+    title: 'Архив клиентов',
+    summary: 'История клиента, телефоны и отказы старше того, что хранит база WB',
+    minPlan: 'standard',
+    prices: Object.freeze({ 6: 590, 12: 990 }),
+    features: Object.freeze(['archive']),
+  }),
 });
 
 function isPlan(value) {
@@ -67,6 +94,40 @@ function isTerm(value) {
 
 function planRank(plan) {
   return PLAN_ORDER.indexOf(plan);
+}
+
+function isAddon(value) {
+  return Object.prototype.hasOwnProperty.call(ADDONS, value);
+}
+
+function addonPrice(addon, months) {
+  if (!isAddon(addon)) return null;
+  const price = ADDONS[addon].prices[months];
+  return price == null ? null : price;
+}
+
+// Услуга доступна только на тарифе не ниже minPlan (архиву нечего показывать без ячеек и поиска).
+function addonAllowed(addon, plan) {
+  return isAddon(addon) && isPlan(plan) && planRank(plan) >= planRank(ADDONS[addon].minPlan);
+}
+
+function addonSnapshot(addon, months) {
+  const total = addonPrice(addon, months);
+  if (total == null) return null;
+  return { addon: { addon, months, price: total }, total };
+}
+
+/**
+ * Итоговый список фич: тариф + активные услуги. Бесплатный режим = Про со всеми услугами.
+ * addons — { archive: { ends_at } } из app_entitlements.
+ */
+function effectiveFeatures(plan, addons, free) {
+  if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features)])];
+  const base = isPlan(plan) ? [...PLANS[plan].features] : [];
+  for (const [id, info] of Object.entries(addons || {})) {
+    if (addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) base.push(...ADDONS[id].features);
+  }
+  return [...new Set(base)];
 }
 
 // Цена в рублях без копеек: людям проще 1710 ₽, чем 1710,00.
@@ -113,7 +174,19 @@ function publicPlans() {
         prices: Object.fromEntries(Object.keys(TERMS).map(months => [months, planPrice(id, Number(months))])),
       };
     }),
+    addons: Object.values(ADDONS).map(a => ({
+      id: a.id,
+      title: a.title,
+      summary: a.summary,
+      minPlan: a.minPlan,
+      prices: { ...a.prices },
+      features: [...a.features],
+    })),
   };
 }
 
-module.exports = { FEATURE_TITLES, PLAN_ORDER, PLANS, TERMS, isPlan, isTerm, orderSnapshot, planPrice, planRank, publicPlans };
+module.exports = {
+  ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, TERMS,
+  addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm,
+  orderSnapshot, planPrice, planRank, publicPlans,
+};

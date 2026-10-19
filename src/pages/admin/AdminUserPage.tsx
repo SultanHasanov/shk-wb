@@ -90,6 +90,9 @@ export function AdminUserPage() {
   const grantApp = useAdminUserAction<{ userId: string; plan: string; months: number }>('grantAppSubscription');
   const revokeApp = useAdminUserAction<{ userId: string; id: string }>('revokeAppSubscription');
   const revokeDevice = useAdminUserAction<{ userId: string; id: string }>('revokeAppDevice');
+  const grantAddon = useAdminUserAction<{ userId: string; addon: string; months: number }>('grantAppAddon');
+  const revokeAddon = useAdminUserAction<{ userId: string; id: string }>('revokeAppAddon');
+  const [addonMonths, setAddonMonths] = useState(6);
   const [appPlan, setAppPlan] = useState('standard');
   const [appMonths, setAppMonths] = useState(1);
 
@@ -394,6 +397,54 @@ export function AdminUserPage() {
         ) : (
           <p className={s.mutedNote}>Подписок нет.</p>
         )}
+
+        <h4 style={{ marginTop: 16 }}>Услуга «Архив клиентов»</h4>
+        <div className={s.toolbar}>
+          <Field label="Срок">
+            <Select value={String(addonMonths)} onChange={e => setAddonMonths(Number(e.target.value))}>
+              <option value="6">6 месяцев</option>
+              <option value="12">12 месяцев</option>
+            </Select>
+          </Field>
+          <Button
+            loading={grantAddon.isPending}
+            onClick={() => run(grantAddon, { userId, addon: 'archive', months: addonMonths }, 'Архив подключён')}
+          >
+            <Plus size={16} />
+            Подключить архив
+          </Button>
+        </div>
+        <p className={s.mutedNote}>
+          Работает вместе с тарифом Стандарт или Про. Отзыв закрывает доступ в программе, сам архив на ПК клиента не удаляется.
+        </p>
+        {user.app?.addons?.length ? (
+          <Table>
+            <thead>
+              <tr><th>Услуга</th><th>Период</th><th>Откуда</th><th>Статус</th><th /></tr>
+            </thead>
+            <tbody>
+              {user.app.addons.map(a => {
+                const active = !a.canceled && Date.parse(a.endsAt) > Date.now() && Date.parse(a.startsAt) <= Date.now();
+                const future = !a.canceled && Date.parse(a.startsAt) > Date.now();
+                return (
+                  <tr key={a.id}>
+                    <td>{a.title}</td>
+                    <td>{shortDate(a.startsAt)} — {shortDate(a.endsAt)}</td>
+                    <td><Badge tone={a.source === 'admin' ? 'warning' : 'default'}>{a.source === 'admin' ? 'админ' : a.source === 'partner' ? 'партнёр' : 'оплата'}</Badge></td>
+                    <td><Badge tone={active ? 'success' : future ? 'default' : 'error'}>{active ? 'активна' : future ? 'в очереди' : a.canceled ? 'отозвана' : 'истекла'}</Badge></td>
+                    <td>
+                      {(active || future) && (
+                        <Button variant="ghost" size="sm" onClick={() => run(revokeAddon, { userId, id: a.id }, 'Услуга отозвана')}>
+                          <Trash2 size={16} />
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        ) : null}
 
         <h4 style={{ marginTop: 16 }}>Компьютеры ({user.app?.devices?.filter(d => !d.revokedAt).length ?? 0})</h4>
         {user.app?.devices?.length ? (

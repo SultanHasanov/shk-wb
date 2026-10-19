@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { type AdminProgramKey, useAdminAppFreeMode, useAdminResource, useAdminResourceMutation, useSetAdminAppFreeMode } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
@@ -46,6 +47,7 @@ export function AdminProgramPage() {
         {freeMode.data?.since && (
           <p className={s.mutedNote}>Включён с {new Date(freeMode.data.since).toLocaleString('ru-RU')}.</p>
         )}
+        {freeMode.data?.enabled && <FreeUntil current={freeMode.data.until} />}
       </Card>
       <Card>
         <h3>Подписки «Помощник ПВЗ»</h3>
@@ -193,6 +195,49 @@ export function AdminProgramPage() {
           </Table>
         ) : null}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Дата окончания бесплатного периода: программа за 14 дней показывает плашку, крон за 7 и за 1 день
+ * пишет пользователям, а в саму дату (около 9:00 МСК) выключает режим со сдвигом подписок.
+ */
+function FreeUntil({ current }: { current: string | null }) {
+  const toast = useToast();
+  const setFreeMode = useSetAdminAppFreeMode();
+  const [date, setDate] = useState(current ? current.slice(0, 10) : '');
+  const save = (until: string | null) =>
+    setFreeMode.mutate(
+      { enabled: true, until },
+      {
+        onSuccess: d => toast(d.until ? `Бесплатный период до ${new Date(d.until).toLocaleDateString('ru-RU')}` : 'Дата окончания снята', 'success'),
+        onError: error => toast(error.message, 'error'),
+      },
+    );
+  return (
+    <div className={s.toolbar} style={{ marginTop: 12 }}>
+      <Field label="Бесплатно до (включительно)">
+        <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+      </Field>
+      <Button
+        loading={setFreeMode.isPending}
+        disabled={!date}
+        // Конец дня по Москве: «до 01.12 включительно» = до 02.12 00:00 МСК.
+        onClick={() => save(new Date(`${date}T23:59:59+03:00`).toISOString())}
+      >
+        Сохранить дату
+      </Button>
+      {current && (
+        <Button variant="ghost" loading={setFreeMode.isPending} onClick={() => { setDate(''); save(null); }}>
+          Без даты
+        </Button>
+      )}
+      <p className={s.mutedNote}>
+        {current
+          ? `Сейчас: до ${new Date(current).toLocaleString('ru-RU')}. За 14 дней — плашка в программе, за 7 и 1 день — письмо и Telegram, в эту дату режим выключится сам.`
+          : 'Без даты режим работает, пока его не выключат вручную.'}
+      </p>
     </div>
   );
 }

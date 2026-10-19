@@ -151,13 +151,18 @@ async function handleStats(req, res) {
 }
 
 /** Бесплатные первые генерации: партии с access_code is null. */
-// Бесплатный режим «Помощника ПВЗ»: GET — состояние, POST {enabled} — переключить.
+// Бесплатный режим «Помощника ПВЗ»: GET — состояние, POST {enabled, until?} — переключить
+// и/или задать дату окончания (until: ISO или null — без даты; поле не прислали — не менять).
 async function handleAppFreeMode(req, res) {
   try {
     if (req.method === 'GET') return res.json(await freeModeState());
     if (req.method === 'POST') {
-      const state = await setAppFreeMode(req.body?.enabled === true);
-      await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, extended: state.extended }).catch(() => {});
+      const hasUntil = Object.prototype.hasOwnProperty.call(req.body || {}, 'until');
+      const until = hasUntil ? (req.body.until ? String(req.body.until) : null) : undefined;
+      if (until && !(Date.parse(until) > Date.now()))
+        return res.status(400).json({ error: 'Дата окончания должна быть в будущем' });
+      const state = await setAppFreeMode(req.body?.enabled === true, until);
+      await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, until: state.until, extended: state.extended }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');

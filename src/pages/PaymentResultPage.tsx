@@ -38,6 +38,7 @@ const PRODUCT_NAMES: Record<string, Text> = {
   cell_print_program: { ru: 'Пробный доступ «Печати ячеек»', kk: '«Ұяшық басып шығару» сынақ қолжетімділігі' },
   cell_print_bundle: { ru: 'Программа и ключ «Печати ячеек»', kk: '«Ұяшық басып шығару» бағдарламасы мен кілті' },
   app_subscription: { ru: 'Подписка «Помощник ПВЗ»', kk: '«ПВЗ көмекшісі» жазылымы' },
+  app_addon: { ru: 'Услуга «Архив клиентов»', kk: '«Клиенттер мұрағаты» қызметі' },
 };
 
 /** Строка с кодом или ключом и кнопкой копирования. */
@@ -256,7 +257,7 @@ export const PaymentResultPage = observer(() => {
                       <SecretRow label={t('Ключ активации', 'Белсендіру кілті')} value={data.licenseKey} />
                     )}
 
-                    {data.productKind === 'app_subscription' ? (
+                    {data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? (
                       <Alert tone="success">
                         {t(
                           'Тариф уже действует. Войдите в программу тем же логином и паролем, что на сайте, — или нажмите «Обновить» в профиле программы, если уже вошли.',
@@ -292,10 +293,10 @@ export const PaymentResultPage = observer(() => {
                           </Button>
                         </a>
                       )}
-                      <Link to={data.productKind === 'app_subscription' ? '/cabinet/subscription' : '/cabinet/keys'}>
+                      <Link to={data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? '/cabinet/subscription' : '/cabinet/keys'}>
                         <Button variant="secondary">
                           <KeyRound size={18} />
-                          {data.productKind === 'app_subscription' ? t('Подписка', 'Жазылым') : t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
+                          {data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? t('Подписка', 'Жазылым') : t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
                         </Button>
                       </Link>
                       {/* Из кабинета логично идти сразу генерировать, а не на главную */}
