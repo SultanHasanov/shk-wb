@@ -1,5 +1,8 @@
 const { supabaseFetch } = require('../server/_supabase');
 const { enforceRateLimit } = require('../server/_rate-limit');
+const { requireUser } = require('../server/_user-auth');
+const { publicOrigin } = require('../server/_origin');
+const account = require('../server/_app-account');
 
 // error.details — это распарсенный ответ PostgREST ({code,message,...}), а не строка.
 // String() от объекта давал «[object Object]», поэтому проверки ниже не срабатывали
@@ -16,11 +19,81 @@ function activationFailure(res,error){
   if(msg.includes('Device limit'))return res.status(409).json({error:'Достигнут лимит устройств'});
   return res.status(403).json({error:'Ключ недействителен или отозван'});
 }
+// Вход в «Печать ячеек» 2.x аккаунтом сайта. Те же сессии Supabase и та же страница
+// подтверждения /app-login, что у «Помощника ПВЗ», но без регистрации ПК в подписке
+// Помощника: у ключей «Печати ячеек» свой учёт компьютеров (cell_print_activations).
+const HEX64=/^[0-9a-f]{64}$/;
+function accountError(res,error){
+  if(error.code&&error.status)return res.status(error.status).json({error:error.message,code:error.code});
+  console.error(error);return res.status(502).json({error:'Сервис временно недоступен'});
+}
+async function accountAction(action,req,res){
+  const body=req.body&&typeof req.body==='object'?req.body:{};
+  if(action==='login'&&req.method==='POST'){
+    const login=String(body.email||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login)||!body.password)return res.status(400).json({error:'Введите почту и пароль',code:'VALIDATION_ERROR'});
+    if(!await enforceRateLimit(req,res,{scope:'cell-login',limit:10,windowSeconds:600}))return;
+    if(!await enforceRateLimit(req,res,{scope:'cell-login-email',limit:10,windowSeconds:600,key:login}))return;
+    return res.json({session:account.sessionPayload(await account.passwordLogin(login,String(body.password)))});
+  }
+  if(action==='login-start'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-login-start',limit:10,windowSeconds:600}))return;
+    const deviceHash=String(body.deviceHash||'').toLowerCase();
+    if(!HEX64.test(deviceHash))return res.status(400).json({error:'Обновите программу',code:'DEVICE_REQUIRED'});
+    // Метка программы в app_version — по ней страница /app-login пишет «Печать ячеек».
+    const {code,secret}=await account.startBrowserLogin(deviceHash,body.deviceName,`cell-print/${String(body.appVersion||'').slice(0,16)}`);
+    return res.status(201).json({code,secret,url:`${publicOrigin(req)}/app-login?code=${code}`,expiresIn:600});
+  }
+  if(action==='login-poll'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-login-poll',limit:200,windowSeconds:600}))return;
+    const code=account.normalizeLoginCode(body.code);
+    if(!code||!body.secret)return res.status(400).json({error:'Некорректный запрос',code:'VALIDATION_ERROR'});
+    const result=await account.pollBrowserLogin(code,String(body.secret));
+    if(result.status==='pending')return res.status(202).json({status:'pending'});
+    return res.json({session:account.sessionPayload(result.session)});
+  }
+  if(action==='refresh'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-refresh',limit:60,windowSeconds:600}))return;
+    if(!body.refreshToken)return res.status(400).json({error:'Нет сессии',code:'VALIDATION_ERROR'});
+    return res.json({session:account.sessionPayload(await account.refreshSession(String(body.refreshToken)))});
+  }
+  const user=await requireUser(req,res);
+  if(!user)return;
+  if(action==='keys'&&req.method==='GET'){
+    const device=String(req.query.device||'').toLowerCase();
+    const rows=await supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(user.id)}&select=key,marketplace_scope,expires_at,duration_days,device_limit,active,activated_at,created_at,cell_print_activations(device_hash)&order=created_at.desc`);
+    const email=String(user.email||'');
+    return res.json({
+      email:email.endsWith('@users.invalid')?'Вход через Telegram':email,
+      items:rows.map(r=>({
+        key:r.key,scope:r.marketplace_scope||'legacy_unassigned',expiresAt:r.expires_at,durationDays:r.duration_days,
+        deviceLimit:r.device_limit,devicesUsed:(r.cell_print_activations||[]).length,active:r.active!==false,
+        thisDevice:HEX64.test(device)&&(r.cell_print_activations||[]).some(a=>a.device_hash===device),
+      })),
+    });
+  }
+  if(action==='claim'&&req.method==='POST'){
+    const key=String(body.key||'').trim().toUpperCase();
+    if(!/^CP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key))return res.status(400).json({error:'Проверьте ключ',code:'VALIDATION_ERROR'});
+    try{await supabaseFetch('rpc/claim_user_asset',{method:'POST',body:JSON.stringify({p_user_id:user.id,p_kind:'cell_print',p_value:key})});}
+    catch(error){return res.status(409).json({error:'Ключ уже привязан к другому аккаунту',code:'KEY_TAKEN'});}
+    return res.json({ok:true});
+  }
+  if(action==='logout'&&req.method==='POST'){
+    await account.logout(user._accessToken);
+    return res.status(204).end();
+  }
+  return res.status(404).json({error:'Not found',code:'NOT_FOUND'});
+}
+
 function versionTuple(value){return String(value||'0').split('.').map(x=>Number(x)||0);}
 function versionAtLeast(value,minimum){const a=versionTuple(value),b=versionTuple(minimum);for(let i=0;i<Math.max(a.length,b.length);i++){if((a[i]||0)!==(b[i]||0))return(a[i]||0)>(b[i]||0);}return true;}
 
 module.exports = async function handler(req,res){
   const action=String(req.query.action||'');
+  if(['login','login-start','login-poll','refresh','keys','claim','logout'].includes(action)){
+    try{return await accountAction(action,req,res);}catch(error){return accountError(res,error);}
+  }
   try{
     if(action==='activate'&&req.method==='POST'){
       if(!await enforceRateLimit(req,res,{scope:'cell-activate',limit:20,windowSeconds:300}))return;

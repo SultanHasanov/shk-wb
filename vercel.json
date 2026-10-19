@@ -59,6 +59,9 @@
     ,{ "source": "/api/sticker-stats", "destination": "/api/visits?action=stickerStats" }
     ,{ "source": "/api/cell-print/activate", "destination": "/api/cell-print?action=activate" }
     ,{ "source": "/api/cell-print/feed", "destination": "/api/cell-print?action=feed" }
+    ,{ "source": "/api/cell-print/login/start", "destination": "/api/cell-print?action=login-start" }
+    ,{ "source": "/api/cell-print/login/poll", "destination": "/api/cell-print?action=login-poll" }
+    ,{ "source": "/api/cell-print/:action(login|refresh|keys|claim|logout)", "destination": "/api/cell-print?action=:action" }
     ,{ "source": "/cell-print", "destination": "/cell-print.html" }
     ,{ "source": "/program", "destination": "/program.html" }
     ,{ "source": "/vozvratnye-stikery-wb", "destination": "/vozvratnye-stikery-wb.html" }

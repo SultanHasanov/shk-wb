@@ -65,7 +65,8 @@ module.exports = async function handler(req, res) {
       const code = account.normalizeLoginCode(req.query.code);
       if (!code) return res.status(400).json({ error: 'Некорректный код', code: 'VALIDATION_ERROR' });
       const row = await account.loginRequest(code);
-      return res.status(200).json({ deviceName: row.device_name, status: row.status });
+      const program = String(row.app_version || '').startsWith('cell-print') ? 'Печать ячеек' : 'Помощник ПВЗ';
+      return res.status(200).json({ deviceName: row.device_name, status: row.status, program });
     }
     if (action === 'login-approve' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-login-approve', limit: 20, windowSeconds: 600 })) return;

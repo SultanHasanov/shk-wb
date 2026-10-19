@@ -39,7 +39,7 @@ const ApproveProgramLogin = observer(({ code }: { code: string }) => {
   const location = useLocation();
   const request = useQuery({
     queryKey: ['app-login-request', code],
-    queryFn: () => api<{ deviceName: string; status: string }>(`/api/app/login/request?code=${encodeURIComponent(code)}`),
+    queryFn: () => api<{ deviceName: string; status: string; program?: string }>(`/api/app/login/request?code=${encodeURIComponent(code)}`),
     retry: false,
   });
   const approve = useMutation({
@@ -59,7 +59,7 @@ const ApproveProgramLogin = observer(({ code }: { code: string }) => {
   else if (request.data.status !== 'pending') body = <Alert tone="warning">Этот код уже использован. Если вы не входили в программу, смените пароль в профиле.</Alert>;
   else if (!auth.user) body = (
     <>
-      <h1 style={{ margin: 0 }}>Вход в «Помощник ПВЗ»</h1>
+      <h1 style={{ margin: 0 }}>Вход в «{request.data.program || 'Помощник ПВЗ'}»</h1>
       <p className="muted" style={{ margin: 0 }}>Чтобы подключить программу на компьютере «{request.data.deviceName}», войдите в аккаунт сайта.</p>
       <Link to="/login" state={{ from: `${location.pathname}${location.search}` }}><Button block>Войти в аккаунт</Button></Link>
     </>
@@ -67,7 +67,7 @@ const ApproveProgramLogin = observer(({ code }: { code: string }) => {
   else body = (
     <>
       <Laptop size={40} color="var(--accent)" style={{ margin: '0 auto' }} />
-      <h1 style={{ margin: 0 }}>Войти в программу?</h1>
+      <h1 style={{ margin: 0 }}>Войти в «{request.data.program || 'Помощник ПВЗ'}»?</h1>
       <p style={{ margin: 0 }}>Компьютер: <strong>{request.data.deviceName}</strong></p>
       <p className="muted" style={{ margin: 0 }}>Аккаунт: {auth.user.email?.endsWith('@users.invalid') ? 'вход через Telegram' : auth.user.email}. Подтверждайте, только если сами нажали «Войти через сайт» в программе.</p>
       <p className="muted mono" style={{ margin: 0 }}>Код: {code.slice(0, 4)}-{code.slice(4)}</p>
