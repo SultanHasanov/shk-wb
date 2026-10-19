@@ -66,9 +66,9 @@ function CheckoutModal({ checkout, account, availableKopecks, onClose }: { check
       ? t(`Тариф «${plan.title}» на ${monthsWord(checkout.months, t)}`, `«${plan.title}» тарифі, ${monthsWord(checkout.months, t)}`)
       : t(`«${addon?.title}» на ${monthsWord(checkout.months, t)}`, `«${addon?.title}», ${monthsWord(checkout.months, t)}`)} description={t('После подтверждения откроется защищённая страница оплаты ЮKassa.', 'Растағаннан кейін ЮKassa-ның қорғалған төлем беті ашылады.')}>
       <div className="stack">
-        {mode === 'extend' && current && <Alert tone="info">{t(`Срок добавится к текущему: подписка будет действовать на ${monthsWord(checkout.months, t)} дольше ${date(current.paidUntil)}.`, `Мерзім ағымдағыға қосылады: жазылым ${date(current.paidUntil)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ жұмыс істейді.`)}</Alert>}
+        {mode === 'extend' && current && <Alert tone="info">{t(`Срок добавится к текущему: подписка будет действовать на ${monthsWord(checkout.months, t)} дольше ${date(current.effective?.paidUntil ?? current.paidUntil)}.`, `Мерзім ағымдағыға қосылады: жазылым ${date(current.effective?.paidUntil ?? current.paidUntil)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ жұмыс істейді.`)}</Alert>}
         {mode === 'upgrade' && <Alert tone="info">{t('Новый тариф начнёт работать сразу. Неиспользованные дни текущего тарифа не сгорят: мы пересчитаем их по стоимости и добавим к новому сроку.', 'Жаңа тариф бірден іске қосылады. Ағымдағы тарифтің пайдаланылмаған күндері жанбайды: оларды құны бойынша қайта есептеп, жаңа мерзімге қосамыз.')}</Alert>}
-        {mode === 'downgrade' && current && plan && <Alert tone="warning">{t(`Тариф «${plan.title}» начнёт действовать после окончания оплаченного срока — ${date(current.paidUntil)}.`, `«${plan.title}» тарифі төленген мерзім аяқталғаннан кейін — ${date(current.paidUntil)} күні күшіне енеді.`)}</Alert>}
+        {mode === 'downgrade' && current && plan && <Alert tone="warning">{t(`Тариф «${plan.title}» начнёт действовать после окончания оплаченного срока — ${date(current.effective?.paidUntil ?? current.paidUntil)}.`, `«${plan.title}» тарифі төленген мерзім аяқталғаннан кейін — ${date(current.effective?.paidUntil ?? current.paidUntil)} күні күшіне енеді.`)}</Alert>}
         {mode === 'addon' && (
           <Alert tone="info">
             {addonEnds
@@ -122,9 +122,15 @@ function CurrentPlan({ account, onExtend }: { account: AppAccount; onExtend: () 
       </Card>
     );
   }
-  const total = new Date(sub.endsAt).getTime() - new Date(sub.startsAt).getTime();
-  const passed = Date.now() - new Date(sub.startsAt).getTime();
-  const left = daysLeft(sub.paidUntil);
+  // В бесплатный период подписка ещё не расходуется: показываем, когда она начнётся и до какого числа оплачена.
+  const eff = sub.effective ?? null;
+  // конец бесплатного периода — 23:59:59 последнего дня; подписка идёт со следующей секунды (с 1-го числа)
+  const startsAt = eff ? new Date(Date.parse(eff.startsAt) + 1000).toISOString() : sub.startsAt;
+  const paidUntil = eff?.paidUntil ?? sub.paidUntil;
+  const waiting = Boolean(eff && Date.parse(eff.startsAt) > Date.now());
+  const total = new Date(eff?.endsAt ?? sub.endsAt).getTime() - new Date(startsAt).getTime();
+  const passed = waiting ? 0 : Date.now() - new Date(startsAt).getTime();
+  const left = daysLeft(paidUntil);
   return (
     <Card accent>
       <div className="stack">
@@ -133,11 +139,13 @@ function CurrentPlan({ account, onExtend }: { account: AppAccount; onExtend: () 
             <span className="muted">{t('Ваш тариф', 'Сіздің тарифіңіз')}</span>
             <h2 className={s.planName}>{sub.title}</h2>
           </div>
-          <Badge tone={left <= 3 ? 'warning' : 'success'}>{left <= 3 ? t('Скоро закончится', 'Жақында аяқталады') : t('Активна', 'Белсенді')}</Badge>
+          <Badge tone={waiting ? 'default' : left <= 3 ? 'warning' : 'success'}>{waiting ? t('Начнётся после бесплатного периода', 'Тегін кезеңнен кейін басталады') : left <= 3 ? t('Скоро закончится', 'Жақында аяқталады') : t('Активна', 'Белсенді')}</Badge>
         </div>
         <div className={s.term}><div className={s.termFill} style={{ width: `${Math.min(100, Math.max(2, (passed / total) * 100))}%` }} /></div>
         <p style={{ margin: 0 }}>
-          {t(`Оплачено до ${date(sub.paidUntil)} · осталось ${left} дн.`, `${date(sub.paidUntil)} дейін төленген · ${left} күн қалды`)}
+          {waiting
+            ? t(`Начнётся ${date(startsAt)} · оплачено до ${date(paidUntil)} · ${daysLeft(paidUntil, Date.parse(startsAt))} дн.`, `${date(startsAt)} басталады · ${date(paidUntil)} дейін төленген`)
+            : t(`Оплачено до ${date(paidUntil)} · осталось ${left} дн.`, `${date(paidUntil)} дейін төленген · ${left} күн қалды`)}
         </p>
         {sub.nextPlan && <p className="muted" style={{ margin: 0 }}>{t(`С ${date(sub.endsAt)} — тариф «${sub.nextPlan === 'basic' ? 'Базовый' : sub.nextPlan === 'standard' ? 'Стандарт' : 'Про'}».`, `${date(sub.endsAt)} бастап — «${sub.nextPlan}» тарифі.`)}</p>}
         <div className="row">

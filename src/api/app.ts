@@ -43,7 +43,11 @@ export type AppAccount = {
   addons?: Array<{ id: AppAddonId; title: string; endsAt: string | null; active: boolean; needsPlan: AppPlanId | null }>;
   user: { id: string; email: string | null; name: string | null; phone: string | null; telegram: { username: string | null } | null };
   effectivePlan: AppPlanId | null;
-  subscription: { plan: AppPlanId; title: string; startsAt: string; endsAt: string; paidUntil: string; nextPlan: AppPlanId | null } | null;
+  subscription: {
+    plan: AppPlanId; title: string; startsAt: string; endsAt: string; paidUntil: string; nextPlan: AppPlanId | null;
+    /** в бесплатный период — фактические даты: подписка начнётся после него */
+    effective?: { startsAt: string; endsAt: string | null; paidUntil: string | null } | null;
+  } | null;
   quota: {
     windowStart: string;
     resetAt: string;

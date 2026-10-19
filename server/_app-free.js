@@ -16,7 +16,7 @@ const KEY = 'app_free_mode';
 const SINCE_KEY = 'app_free_since';
 const UNTIL_KEY = 'app_free_until';
 const TTL_MS = 30 * 1000;
-let cache = { at: 0, value: false, until: null };
+let cache = { at: 0, value: false, until: null, since: null };
 
 async function readSetting(key) {
   const rows = await supabaseFetch(`site_settings?key=eq.${key}&select=value&limit=1`);
@@ -38,8 +38,9 @@ function validDate(value) {
 async function refreshCache() {
   if (Date.now() - cache.at < TTL_MS) return cache;
   try {
-    const [enabled, until] = await Promise.all([readSetting(KEY), readSetting(UNTIL_KEY)]);
-    cache = { at: Date.now(), value: enabled === true, until: enabled === true ? validDate(until) : null };
+    const [enabled, until, since] = await Promise.all([readSetting(KEY), readSetting(UNTIL_KEY), readSetting(SINCE_KEY)]);
+    const on = enabled === true;
+    cache = { at: Date.now(), value: on, until: on ? validDate(until) : null, since: on ? validDate(since) : null };
   } catch {
     // База недоступна — оставляем прошлое значение и пробуем снова через TTL.
     cache = { ...cache, at: Date.now() };
@@ -56,6 +57,12 @@ async function appFreeMode() {
 // Дата окончания бесплатного периода (ISO) или null — для плашки в программе и кабинете.
 async function appFreeUntil() {
   return (await refreshCache()).until;
+}
+
+// Начало и конец бесплатного периода (ISO) — чтобы показать, когда начнётся купленная подписка.
+async function appFreeWindow() {
+  const { since, until } = await refreshCache();
+  return { since, until };
 }
 
 async function freeModeState() {
@@ -135,7 +142,7 @@ async function setAppFreeMode(enabled, until) {
     await writeSetting(UNTIL_KEY, until === null ? null : validDate(until));
   }
   if (value !== current.enabled) await writeSetting(KEY, value);
-  cache = { at: 0, value, until: null };
+  cache = { at: 0, value, until: null, since: null };
   return { ...(await freeModeState()), extended };
 }
 
@@ -146,4 +153,4 @@ async function expireAppFreeMode() {
   return setAppFreeMode(false);
 }
 
-module.exports = { appFreeMode, appFreeUntil, freeModeState, setAppFreeMode, expireAppFreeMode, extendSubscriptions, planShift };
+module.exports = { appFreeMode, appFreeUntil, appFreeWindow, freeModeState, setAppFreeMode, expireAppFreeMode, extendSubscriptions, planShift };

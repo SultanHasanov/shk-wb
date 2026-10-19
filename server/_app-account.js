@@ -10,7 +10,28 @@ const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
 const { ADDONS, PLANS, addonAllowed, effectiveFeatures, isPlan } = require('./_app-plans');
-const { appFreeMode, appFreeUntil } = require('./_app-free');
+const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
+
+/**
+ * Фактические даты подписки с учётом бесплатного периода. При его окончании подписки
+ * сдвигаются (_app-free.js planShift): сдвиг = конец периода − max(начало периода, начало
+ * подписки). Здесь та же формула заранее — чтобы человек видел, с какого числа и до какого
+ * действует то, что он оплатил. Вне бесплатного периода — null.
+ */
+function effectiveDates(ent, win) {
+  if (!win || !win.until || !ent?.starts_at) return null;
+  const untilMs = Date.parse(win.until);
+  const startMs = Date.parse(ent.starts_at);
+  const sinceMs = win.since ? Date.parse(win.since) : startMs;
+  const shift = untilMs - Math.max(sinceMs, startMs);
+  if (!(shift > 0)) return null;
+  const move = iso => (iso ? new Date(Date.parse(iso) + shift).toISOString() : null);
+  return {
+    startsAt: startMs >= sinceMs ? new Date(untilMs).toISOString() : ent.starts_at,
+    endsAt: move(ent.ends_at),
+    paidUntil: move(ent.paid_until),
+  };
+}
 
 const DEVICE_RE = /^[a-f0-9]{64}$/;
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -185,7 +206,7 @@ function technicalEmail(email) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -194,6 +215,7 @@ async function accountSummary(user, currentHash) {
     listDevices(user.id, currentHash),
     appFreeMode(),
     appFreeUntil(),
+    appFreeWindow(),
   ]);
   const profile = profiles[0] || {};
   const tg = telegram[0] || null;
@@ -234,6 +256,8 @@ async function accountSummary(user, currentHash) {
       endsAt: ent.ends_at,
       paidUntil: ent.paid_until,
       nextPlan: ent.next_plan || null,
+      // в бесплатный период: когда подписка фактически начнётся и до какого числа оплачена
+      effective: free ? effectiveDates(ent, freeWin) : null,
     } : null,
     quota: plan ? {
       windowStart: ent.window_start,
