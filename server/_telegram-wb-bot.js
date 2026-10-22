@@ -902,7 +902,11 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
     .filter(item => item?.status_updated)
     .sort((left, right) => new Date(right.status_updated || 0) - new Date(left.status_updated || 0));
   const [users, pickupResult] = await Promise.all([
-    identifiers.length ? wbPvz.loadUsers(connection.session, identifiers) : [],
+    // users-data отвечает 403 «недостаточно прав» аккаунтам без роли руководителя — телефон тогда берём из продаж.
+    identifiers.length ? wbPvz.loadUsers(connection.session, identifiers).catch(error => {
+      console.warn('WB users-data failed', error.status, error.message);
+      return [];
+    }) : [],
     reviewEvents.length
       ? { events: reviewEvents }
       : identifiers.length
