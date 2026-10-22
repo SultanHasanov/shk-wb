@@ -960,9 +960,18 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
  * «👤 Кто поставил оценку» — платно: 1 проверка за клиента в этом ПВЗ. Баланс проверяем до запроса
  * к WB, а списываем после — и только если WB что-то отдал. Повтор того же автора бесплатный.
  */
+/** Telegram ID через запятую в REVIEW_FREE_TELEGRAM_IDS — «Кто поставил оценку» без оплаты (владелец сервиса). */
+function reviewFreeFor(telegramId) {
+  return String(process.env.REVIEW_FREE_TELEGRAM_IDS || '').split(',').map(value => value.trim()).includes(String(telegramId));
+}
+
 async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+  if (reviewFreeFor(from.id)) {
+    const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
+    return sendMessage(chatId, `${info.text}\n\n<i>Бесплатный доступ.</i>`);
+  }
   const userId = await findUser(from.id);
   if (!userId) return showReviewPaywall(from, chatId);
   const clientId = authorIdentifiers(reviewOrUserId, userSid)[0] || null;
