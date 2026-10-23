@@ -229,17 +229,18 @@ async function showClientCode(chatId, messageId) {
   const free = await helperFreeText();
   const text = [
     '<b>🔑 Код клиента</b>',
-    `Чтобы получить QR клиента, отправьте: <code>Код ID</code>. За QR спишется <b>${wallet.formatRub(CLIENT_CODE_PRICE)}</b> с баланса бота.`,
+    `Отправьте <code>Код ID</code> — пришлю QR. За QR спишется <b>${wallet.formatRub(CLIENT_CODE_PRICE)}</b> с баланса бота.`,
     '',
-    '<b>Где взять ID (SID) клиента</b> — в программе «Помощник ПВЗ» на ПК пункта:',
-    '• откройте ячейку клиента — рядом с ID будет кнопка копирования;',
-    '• или найдите клиента по номеру телефона.',
-    `Для доступа к ячейкам и поиску нужен тариф «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
+    '<b>Где взять ID (SID) клиента:</b>',
+    '• 🔎 прямо здесь в боте — по номеру телефона или ячейке;',
+    '• 🖥 в программе «Помощник ПВЗ» — в ячейке клиента или поиском по телефону.',
     '',
-    'Пример команды:',
-    '<code>Код 191607973</code>',
+    `Для доступа к ячейкам в программе нужен тариф «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
+    '',
+    'Пример: <code>Код 191607973</code>',
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: '🔎 Найти ID в боте', callback_data: 'code:find' }],
     [{ text: `🛒 Купить «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:basic' }],
     [{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }],
     MENU_ROW,
@@ -259,8 +260,18 @@ async function showClientCodePaywall(from, chatId, sid, balance) {
   ]) });
 }
 
+/** Telegram ID через запятую в CLIENT_CODE_FREE_TELEGRAM_IDS — QR без оплаты (владелец сервиса). */
+function clientCodeFreeFor(telegramId) {
+  return String(process.env.CLIENT_CODE_FREE_TELEGRAM_IDS || '').split(',').map(value => value.trim()).filter(Boolean).includes(String(telegramId));
+}
+
 /** «Код <SID>» → списать 50 ₽ и прислать только QR-код. */
 async function handleClientCode(from, chatId, sid) {
+  const { qrText: freeQr } = buildClientQr(sid);
+  if (clientCodeFreeFor(from.id)) {
+    await sendPhoto(chatId, clientQrUrl(freeQr), { caption: 'Бесплатный доступ.' });
+    return;
+  }
   const userId = await findUser(from.id);
   if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR, войдите через Telegram — баланс хранится в кабинете.'); return; }
   const { qrText } = buildClientQr(sid);
@@ -278,6 +289,132 @@ async function handleClientCode(from, chatId, sid) {
     await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: CLIENT_CODE_PRICE * 100, p_note: `qr refund ${qrText}` }) }).catch(() => {});
     throw error;
   }
+}
+
+// ── Поиск SID клиента в боте: по телефону (последние цифры) или номеру ячейки ──
+// Данные берём из списка товаров пункта (loadGoodsInPickPoint): там у каждой записи есть
+// buyer_sid, номер ячейки (cell) и телефон клиента (buyer.mobile, середина замаскирована).
+
+function goodSid(item) {
+  const value = item?.buyer_sid ?? item?.buyer?.user_sid ?? item?.user_sid ?? item?.buyer_id ?? item?.buyer?.user_id ?? item?.user_id;
+  const sid = Number(value);
+  return Number.isSafeInteger(sid) && sid > 0 ? String(sid) : null;
+}
+function goodPhone(item) { return String(item?.buyer?.mobile ?? item?.buyer?.phone ?? item?.mobile ?? item?.phone ?? ''); }
+function goodCell(item) { return String(item?.cell ?? item?.cell_address ?? '').trim(); }
+function goodName(item) { return String(item?.buyer?.name ?? item?.name ?? '').trim(); }
+
+/** Совпадения по запросу: цифры могут быть и номером ячейки, и хвостом телефона — ищем и так, и так. */
+function findClientsByQuery(goods, digits) {
+  const out = new Map();
+  for (const item of Array.isArray(goods) ? goods : []) {
+    const sid = goodSid(item);
+    if (!sid) continue;
+    const cell = goodCell(item);
+    const phoneDigits = goodPhone(item).replace(/\D/g, '');
+    const cellMatch = cell && cell.replace(/\D/g, '') === digits;
+    const phoneMatch = digits.length >= 3 && phoneDigits.length >= digits.length && phoneDigits.endsWith(digits);
+    if (!cellMatch && !phoneMatch) continue;
+    const entry = out.get(sid) || { sid, phone: '', cells: new Set(), name: '' };
+    if (cell) entry.cells.add(cell);
+    if (!entry.phone && goodPhone(item)) entry.phone = goodPhone(item);
+    if (!entry.name && goodName(item)) entry.name = goodName(item);
+    out.set(sid, entry);
+  }
+  return [...out.values()];
+}
+
+/** Весь список товаров пункта с кэшем на 2 минуты (общий с loadPickupEvents). */
+async function loadGoodsSnapshot(telegramId, connection) {
+  const cacheKey = Number(telegramId);
+  let snapshot = localGoodsSnapshots.get(cacheKey);
+  if (!snapshot || Date.now() - snapshot.loadedAt > GOODS_SNAPSHOT_TTL_MS) {
+    const goods = [];
+    let cursor = 0;
+    for (let page = 0; page < 20; page += 1) {
+      const result = await wbPvz.loadGoodsInPickPoint(connection.session, cursor);
+      goods.push(...result.goods);
+      if (!result.goods.length || result.cursor == null || result.cursor <= cursor) break;
+      cursor = result.cursor;
+    }
+    snapshot = { goods, loadedAt: Date.now() };
+    localGoodsSnapshots.set(cacheKey, snapshot);
+  }
+  return snapshot.goods;
+}
+
+async function promptClientQuery(from, chatId, messageId) {
+  await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
+  await showScreen(chatId, messageId, [
+    `<b>🔎 Поиск клиента (ПВЗ ${(await getWbConnection(from.id))?.session?.pointId || ''})</b>`,
+    'Отправьте <b>номер ячейки</b> или <b>телефон</b> (можно последние 4 цифры).',
+    'Например: <code>245</code> или <code>1234</code> или <code>79991234567</code>.',
+    '',
+    'Ищу по текущим заказам в пункте.',
+  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
+}
+
+/** После входа в кабинет WB: если ждали поиск клиента — к поиску, иначе к отзывам. */
+async function afterWbReady(from, chatId) {
+  const session = await getSession(from.id);
+  if (session?.state === 'await_wb_for_search') { await clearSession(from.id); return promptClientQuery(from, chatId); }
+  return showReviewFilters(from, chatId);
+}
+
+/** «Найти ID в боте»: нужен вход в кабинет WB (как для отзывов), затем запрос телефона/ячейки. */
+async function startClientSearch(from, chatId, messageId) {
+  const userId = await findUser(from.id);
+  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR после поиска, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  const connection = await getWbConnection(from.id);
+  if (connection?.session?.token && connection.state === 'ready') return promptClientQuery(from, chatId, messageId);
+  await saveSession(from, chatId, 'await_wb_for_search', { userId });
+  if (connection?.session?.token && connection.state === 'await_point') return beginPointSelection(from, chatId, connection);
+  const session = { deviceId: crypto.randomUUID() };
+  await saveWbConnection(from, chatId, 'await_phone', session);
+  await showScreen(chatId, messageId, '<b>Вход в кабинет WB</b>\nДля поиска клиента по телефону или ячейке нужен вход в кабинет WB.\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.', { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
+}
+
+async function runClientSearch(from, chatId, query) {
+  const connection = await getWbConnection(from.id);
+  if (!connection?.session?.token || connection.state !== 'ready') { await clearSession(from.id); return startClientSearch(from, chatId); }
+  const digits = String(query || '').replace(/\D/g, '');
+  if (!digits) return sendMessage(chatId, 'Отправьте номер ячейки или телефон цифрами (можно последние 4 цифры).');
+  let goods;
+  try {
+    goods = await loadGoodsSnapshot(from.id, connection);
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) { await deleteWbConnection(from.id); await clearSession(from.id); await sendMessage(chatId, 'Сессия WB истекла. Подключите кабинет заново.'); return startClientSearch(from, chatId); }
+    throw error;
+  }
+  const matches = findClientsByQuery(goods, digits);
+  if (!matches.length) {
+    return sendMessage(chatId, [
+      'Не нашёл клиента по этому запросу среди текущих заказов пункта.',
+      'Попробуйте номер ячейки или другие цифры телефона. WB хранит только недавние заказы — старых в онлайне нет.',
+      '',
+      '<b>Не нашли здесь — найдите ID в программе «Помощник ПВЗ».</b>',
+      'Установите её на компьютер пункта, где стоит WB-PVZ: в ячейке клиента или поиском по телефону будет ID (SID).',
+      `Скачать: ${PROGRAM_URL}`,
+    ].join('\n'), { reply_markup: choiceKeyboard([
+      [{ text: '🔁 Искать снова', callback_data: 'code:find' }],
+      [{ text: '🖥 Что умеет «Помощник ПВЗ»', callback_data: 'menu:helper' }],
+      MENU_ROW,
+    ]) });
+  }
+  const lines = ['<b>🔎 Найдено:</b>', 'Выберите клиента — пришлю QR (спишется ' + wallet.formatRub(CLIENT_CODE_PRICE) + ').', ''];
+  const rows = [];
+  matches.slice(0, 10).forEach((match, index) => {
+    const cells = [...match.cells].join(', ');
+    const parts = [`${index + 1}. ${maskWbPhone(match.phone)}`];
+    if (cells) parts.push(`яч. ${escapeHtml(cells)}`);
+    parts.push(`ID <code>${match.sid}</code>`);
+    lines.push(parts.join(' · '));
+    rows.push([{ text: `${index + 1}. Получить QR`, callback_data: `code:qr:${match.sid}` }]);
+  });
+  if (matches.length > 10) lines.push(`\n…и ещё ${matches.length - 10}. Уточните запрос.`);
+  rows.push([{ text: '🔁 Искать снова', callback_data: 'code:find' }, ...MENU_ROW]);
+  await clearSession(from.id);
+  await sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
 }
 
 async function showHelperInfo(chatId, messageId) {
@@ -862,21 +999,7 @@ function reviewAuthorIds(review) {
 }
 
 async function loadPickupEvents(telegramId, connection, userIds) {
-  const cacheKey = Number(telegramId);
-  let snapshot = localGoodsSnapshots.get(cacheKey);
-  if (!snapshot || Date.now() - snapshot.loadedAt > GOODS_SNAPSHOT_TTL_MS) {
-    const goods = [];
-    let cursor = 0;
-    for (let page = 0; page < 20; page += 1) {
-      const result = await wbPvz.loadGoodsInPickPoint(connection.session, cursor);
-      goods.push(...result.goods);
-      if (!result.goods.length || result.cursor == null || result.cursor <= cursor) break;
-      cursor = result.cursor;
-    }
-    snapshot = { goods, loadedAt: Date.now() };
-    localGoodsSnapshots.set(cacheKey, snapshot);
-  }
-  return findPickupEvents(snapshot.goods, userIds);
+  return findPickupEvents(await loadGoodsSnapshot(telegramId, connection), userIds);
 }
 
 async function showReviewFilters(from, chatId, messageId) {
@@ -1063,7 +1186,7 @@ async function beginPointSelection(from, chatId, connection) {
   if (points.length === 1) {
     const session = await wbPvz.selectPoint(connection.session, points[0].id);
     await saveWbConnection(from, chatId, 'ready', session);
-    return showReviewFilters(from, chatId);
+    return afterWbReady(from, chatId);
   }
   await saveWbConnection(from, chatId, 'await_point', connection.session);
   await sendMessage(chatId, '<b>Выберите ПВЗ</b>', { reply_markup: pointKeyboard(points) });
@@ -1585,7 +1708,7 @@ async function handleCallback(callback) {
     if (!connection?.session?.token) return showReviewFilters(from, chatId);
     const session = await wbPvz.selectPoint(connection.session, Number(pointMatch[1]));
     await saveWbConnection(from, chatId, 'ready', session);
-    await showReviewFilters(from, chatId);
+    await afterWbReady(from, chatId);
     return;
   }
   const filterMatch = data.match(/^rv:filter:(all|[1-5])$/);
@@ -1603,6 +1726,9 @@ async function handleCallback(callback) {
     await showScreen(chatId, messageId, 'Генерация отменена.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
+  if (data === 'code:find') { await answerCallbackQuery(callback.id); await startClientSearch(from, chatId, messageId); return; }
+  const codeQr = data.match(/^code:qr:(\d{1,12})$/);
+  if (codeQr) { await answerCallbackQuery(callback.id); await handleClientCode(from, chatId, codeQr[1]); return; }
   if (data === 'code:enter') {
     await answerCallbackQuery(callback.id);
     const current = await getSession(from.id);
@@ -1731,6 +1857,7 @@ async function handleMessage(message) {
   const draft = session.draft || {};
   if (session.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
   if (session.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
+  if (session.state === 'await_client_query') return runClientSearch(from, chatId, text);
   // Ввод в мастер: сообщение пользователя убираем, ответ — в том же экране мастера (ошибка — строкой сверху).
   if (session.state === 'await_quantity') {
     await deleteMessage(chatId, message.message_id).catch(() => {});
@@ -1769,4 +1896,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
