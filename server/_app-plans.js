@@ -23,6 +23,7 @@ const PLANS = Object.freeze({
     codes: 15,
     stickers: 0,
     devices: 1,
+    points: 1,
     summary: 'Подбор кода выдачи для клиента без кода',
     features: BASIC_FEATURES,
   }),
@@ -32,7 +33,8 @@ const PLANS = Object.freeze({
     monthlyPrice: 390,
     codes: 30,
     stickers: 0,
-    devices: 1,
+    devices: 2,
+    points: 1,
     summary: 'Вся работа с ячейками, товарами и отзывами',
     features: STANDARD_FEATURES,
   }),
@@ -42,7 +44,8 @@ const PLANS = Object.freeze({
     monthlyPrice: 790,
     codes: 100,
     stickers: 300,
-    devices: 2,
+    devices: 4,
+    points: 2,
     summary: 'Досье клиентов, стикеры, сотрудники и зарплата',
     features: PRO_FEATURES,
   }),
@@ -67,20 +70,42 @@ const FEATURE_TITLES = Object.freeze({
   risky: 'Предупреждение о клиентах с частыми отказами',
   stickers: 'Печать стикеров товаров и коробок',
   staff: 'Сотрудники: график, зарплата, аванс, удержания WB',
-  archive: 'Архив клиентов старше окна WB',
+  archive: 'Архив клиентов в облаке: на любом ПК и по всем пунктам',
 });
 
 // Доп. услуги — покупаются отдельно от тарифа на свой срок. Цена за весь срок.
-// Архив программа собирает на ПК всегда; услуга только открывает его чтение,
-// поэтому после окончания ничего не теряется.
+// Архив программа собирает всегда (на ПК и в облаке аккаунта); услуга открывает его чтение,
+// загрузку на другие ПК и просмотр других пунктов, поэтому после окончания ничего не теряется.
+//
+// Пакеты (kind: 'pack') добавляют ПК и пункты сверх тарифа: цена за месяц, срок — как у
+// тарифа (1/3/6/12, та же скидка). Пункт дороже ПК и сам добавляет ещё 2 ПК.
+function packPrices(monthly) {
+  return Object.freeze(Object.fromEntries(Object.keys(TERMS).map(m => [m, Math.round((monthly * m * (100 - TERMS[m])) / 100)])));
+}
 const ADDONS = Object.freeze({
   archive: Object.freeze({
     id: 'archive',
     title: 'Архив клиентов',
-    summary: 'История клиента, телефоны и отказы старше того, что хранит база WB',
+    summary: 'История клиентов, телефоны и отказы старше того, что хранит база WB, — на любом ПК и по всем вашим пунктам',
     minPlan: 'standard',
     prices: Object.freeze({ 6: 590, 12: 990 }),
     features: Object.freeze(['archive']),
+  }),
+  devices_1: Object.freeze({
+    id: 'devices_1', kind: 'pack', title: '+1 компьютер', summary: 'Ещё один ПК в аккаунте',
+    minPlan: 'basic', monthlyPrice: 99, devices: 1, points: 0, prices: packPrices(99), features: Object.freeze([]),
+  }),
+  devices_3: Object.freeze({
+    id: 'devices_3', kind: 'pack', title: '+3 компьютера', summary: 'Ещё три ПК в аккаунте',
+    minPlan: 'basic', monthlyPrice: 249, devices: 3, points: 0, prices: packPrices(249), features: Object.freeze([]),
+  }),
+  points_1: Object.freeze({
+    id: 'points_1', kind: 'pack', title: '+1 пункт', summary: 'Ещё один ПВЗ и +2 компьютера',
+    minPlan: 'basic', monthlyPrice: 290, devices: 2, points: 1, prices: packPrices(290), features: Object.freeze([]),
+  }),
+  points_3: Object.freeze({
+    id: 'points_3', kind: 'pack', title: '+3 пункта', summary: 'Ещё три ПВЗ и +6 компьютеров',
+    minPlan: 'basic', monthlyPrice: 790, devices: 6, points: 3, prices: packPrices(790), features: Object.freeze([]),
   }),
 });
 
@@ -130,6 +155,24 @@ function effectiveFeatures(plan, addons, free) {
   return [...new Set(base)];
 }
 
+/**
+ * Сколько ПК и пунктов можно подключить: тариф (ПК — из снимка подписки, пункты — из
+ * конфига) + действующие пакеты. Без подписки — 1 и 1. Бесплатный режим/безлимит — 99.
+ */
+function accountLimits(plan, addons, subDeviceLimit, unlimited) {
+  if (unlimited) return { devices: 99, points: 99 };
+  let devices = isPlan(plan) ? Math.max(Number(subDeviceLimit) || 0, PLANS[plan].devices) : 1;
+  let points = isPlan(plan) ? PLANS[plan].points : 1;
+  for (const [id, info] of Object.entries(addons || {})) {
+    const a = ADDONS[id];
+    if (a?.kind === 'pack' && info && Date.parse(info.ends_at) > Date.now()) {
+      devices += a.devices;
+      points += a.points;
+    }
+  }
+  return { devices, points };
+}
+
 // Цена в рублях без копеек: людям проще 1710 ₽, чем 1710,00.
 function planPrice(plan, months) {
   if (!isPlan(plan) || !isTerm(months)) return null;
@@ -170,6 +213,7 @@ function publicPlans() {
         codes: p.codes,
         stickers: p.stickers,
         devices: p.devices,
+        points: p.points,
         features: p.features,
         prices: Object.fromEntries(Object.keys(TERMS).map(months => [months, planPrice(id, Number(months))])),
       };
@@ -178,15 +222,17 @@ function publicPlans() {
       id: a.id,
       title: a.title,
       summary: a.summary,
+      kind: a.kind || 'service',
       minPlan: a.minPlan,
       prices: { ...a.prices },
       features: [...a.features],
+      ...(a.kind === 'pack' ? { monthlyPrice: a.monthlyPrice, devices: a.devices, points: a.points } : {}),
     })),
   };
 }
 
 module.exports = {
   ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, TERMS,
-  addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm,
+  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm,
   orderSnapshot, planPrice, planRank, publicPlans,
 };

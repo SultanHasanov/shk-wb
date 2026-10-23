@@ -110,7 +110,7 @@ async function listUsers(req, res) {
 
 async function userDetail(req, res, userId) {
   const q = encodeURIComponent(userId);
-  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions, appSubscriptions, appDevices, appUsage, appEnt, appAddons] = await Promise.all([
+  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions, appSubscriptions, appDevices, appUsage, appEnt, appAddons, appPoints] = await Promise.all([
     getAuthUser(userId),
     supabaseFetch(`user_profiles?user_id=eq.${q}&select=*&limit=1`),
     supabaseFetch(`user_preferences?user_id=eq.${q}&select=*&limit=1`),
@@ -131,6 +131,7 @@ async function userDetail(req, res, userId) {
     supabaseFetch(`app_usage?user_id=eq.${q}&select=*&order=created_at.desc&limit=100`).catch(() => []),
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
     supabaseFetch(`app_addons?user_id=eq.${q}&select=*&order=starts_at.desc&limit=50`).catch(() => []),
+    supabaseFetch(`app_points?user_id=eq.${q}&select=id,wb_point_id,name,created_at,last_sync_at,mirror_at,revoked_at&order=created_at.asc`).catch(() => []),
   ]);
   if (!authUser) return res.status(404).json({ error: 'Пользователь не найден' });
   const licenseIds = cellLicenses.map(row => row.id);
@@ -233,6 +234,10 @@ async function userDetail(req, res, userId) {
       })),
       usage: (appUsage || []).map(u => ({
         id: u.id, kind: u.kind, amount: u.amount, source: u.source, createdAt: u.created_at,
+      })),
+      points: (appPoints || []).map(p => ({
+        id: p.id, wbPointId: String(p.wb_point_id), name: p.name, createdAt: p.created_at,
+        lastSyncAt: p.last_sync_at, mirrorAt: p.mirror_at, revokedAt: p.revoked_at,
       })),
       addons: (appAddons || []).map(a => ({
         id: a.id, addon: a.addon, title: ADDONS[a.addon]?.title || a.addon, startsAt: a.starts_at, endsAt: a.ends_at,
@@ -367,8 +372,10 @@ module.exports = async function handler(req, res) {
         method: 'POST', body: JSON.stringify({ p_user: userId, p_addon: addon, p_months: months }),
       });
       await recordAdminAction(req, 'grantAppAddon', userId, { addon, months });
-      await notifyUser(userId, `Вам подключена услуга «${ADDONS[addon].title}»`,
-        `Срок — ${months} мес. Услуга работает вместе с тарифом «${PLANS[ADDONS[addon].minPlan].title}» или выше.`, '/cabinet/subscription');
+      await notifyUser(userId, ADDONS[addon].kind === 'pack' ? `Вам подключено: «${ADDONS[addon].title}»` : `Вам подключена услуга «${ADDONS[addon].title}»`,
+        ADDONS[addon].kind === 'pack'
+          ? `Срок — ${months} мес. ${ADDONS[addon].summary}.`
+          : `Срок — ${months} мес. Услуга работает вместе с тарифом «${PLANS[ADDONS[addon].minPlan].title}» или выше.`, '/cabinet/subscription');
       return res.status(201).json({ ok: true });
     }
     if (req.method === 'POST' && action === 'revokeAppAddon') {
@@ -377,6 +384,17 @@ module.exports = async function handler(req, res) {
       if (!isUuid(addonId)) return badRequest(res, 'Некорректная услуга');
       await supabaseFetch('rpc/admin_revoke_app_addon', { method: 'POST', body: JSON.stringify({ p_addon_id: addonId }) });
       await recordAdminAction(req, 'revokeAppAddon', userId, { id: addonId });
+      return res.status(200).json({ ok: true });
+    }
+    // Отключить пункт (освобождает слот в лимите пунктов; облачные данные пункта остаются).
+    if (req.method === 'POST' && action === 'revokeAppPoint') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const pointId = String(req.body?.id || '');
+      if (!isUuid(pointId)) return badRequest(res, 'Некорректный пункт');
+      await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}`, {
+        method: 'PATCH', body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+      });
+      await recordAdminAction(req, 'revokeAppPoint', userId, { id: pointId });
       return res.status(200).json({ ok: true });
     }
     // Отвязать ПК от аккаунта (освобождает слот в лимите устройств).

@@ -836,6 +836,8 @@ async function cronNotifications(req, res) {
     const freeEnded = await expireAppFreeMode().catch(error => { console.error(error); return null; });
     sent += await notifyFreePeriodEnd().catch(error => { console.error(error); return 0; });
     sent += await notifyTelegramExpiry2d().catch(error => { console.error(error); return 0; });
+    // Облако «Помощника ПВЗ»: просроченные запросы входа/регистрации, архив старше года.
+    await supabaseFetch('rpc/app_sync_maintenance', { method: 'POST', body: '{}' }).catch(error => console.error(error.message));
     for (const license of licenses) {
       const prefs = await supabaseFetch(
         `user_preferences?user_id=eq.${encodeURIComponent(license.owner_user_id)}&select=notify_key_expiry&limit=1`,

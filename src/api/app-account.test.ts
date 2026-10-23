@@ -34,7 +34,9 @@ type Route = (url: string, init: RequestInit) => { status?: number; body: unknow
 function mockSupabase(route: Route) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.includes('consume_api_rate_limit')) return new Response('true', { status: 200 });
-    const hit = route(url, init) || { status: 404, body: { message: 'unexpected ' + url } };
+    const hit = route(url, init)
+      || (url.includes('rpc/app_entitlements') ? { body: { plan: null, device_limit: 1, packs_left: 0, addons: {} } } : undefined)
+      || { status: 404, body: { message: 'unexpected ' + url } };
     return new Response(JSON.stringify(hit.body), { status: hit.status || 200, headers: { 'content-type': 'application/json' } });
   }));
 }
@@ -47,7 +49,7 @@ describe('тарифы программы', () => {
     expect(plans.planPrice('vip', 1)).toBeNull();
   });
   it('кладёт лимиты в снимок заказа', () => {
-    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 100, stickers: 300, devices: 2, monthly_price: 790 }, total: 2133 });
+    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 100, stickers: 300, devices: 4, monthly_price: 790 }, total: 2133 });
   });
   it('отдаёт тарифы публично', async () => {
     const res = response();
@@ -186,7 +188,7 @@ describe('разделы по тарифам и услуга «Архив»', ()
     expect(p.addonSnapshot('archive', 6)?.total).toBe(590);
     expect(p.addonSnapshot('archive', 12)?.total).toBe(990);
     expect(p.addonSnapshot('archive', 1)).toBeNull();
-    expect(p.publicPlans().addons.map(a => a.id)).toEqual(['archive']);
+    expect(p.publicPlans().addons.map(a => a.id)).toEqual(['archive', 'devices_1', 'devices_3', 'points_1', 'points_3']);
     expect(p.publicPlans().features).not.toHaveProperty('sync');
   });
   it('оплата услуги проверяет тариф, заказ исполняется один раз', () => {

@@ -85,5 +85,13 @@ export function AppLoginPage() {
   const code = String(params.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (tokenHash) return <SiteLinkLogin tokenHash={tokenHash} next={params.get('next') || '/cabinet/subscription'} />;
   if (/^[A-Z2-9]{8}$/.test(code)) return <ApproveProgramLogin code={code} />;
+  // ссылка из письма после регистрации в программе: программа сама ждёт подтверждения
+  if (params.get('confirmed') === '1') {
+    return (
+      <Card>
+        <Alert tone="success">Почта подтверждена. Вернитесь в программу «Помощник ПВЗ» — она войдёт в аккаунт сама в течение нескольких секунд.</Alert>
+      </Card>
+    );
+  }
   return <Card><Alert tone="error">Ссылка неполная. Нажмите «Войти через сайт» в программе ещё раз.</Alert></Card>;
 }

@@ -11,7 +11,7 @@ const PRODUCT_TITLES = {
   program: 'Программа «Подбор кодов»',
   program_license: 'Пакет подборов (WBPK)',
   app_subscription: 'Подписка «Помощник ПВЗ»',
-  app_addon: 'Услуга «Архив клиентов»',
+  app_addon: 'Помощник ПВЗ: услуга или пакет',
   wallet_topup: 'Пополнение баланса',
   cell_print_program: 'Печать ячеек',
   cell_print_license: 'Печать ячеек — ключ',

@@ -288,6 +288,10 @@ export type AdminUserDetail = {
       id: string; addon: string; title: string; startsAt: string; endsAt: string;
       canceled: boolean; source: string; price: number; createdAt: string;
     }>;
+    points?: Array<{
+      id: string; wbPointId: string; name: string; createdAt: string;
+      lastSyncAt: string | null; mirrorAt: string | null; revokedAt: string | null;
+    }>;
   };
 };
 

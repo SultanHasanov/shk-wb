@@ -5,6 +5,7 @@ const { requireUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
+const sync = require('../server/_app-sync');
 const { appFreeMode } = require('../server/_app-free');
 const appUpdate = require('../server/_app-update');
 const payments = require('./payments');
@@ -27,6 +28,7 @@ async function legacyTrial(req, res) {
 }
 
 function sendError(res, error) {
+  if (error.code === 'SYNC_NOT_CONFIGURED') return res.status(503).json({ error: error.publicMessage, code: error.code });
   if (error.code && error.status) return res.status(error.status).json({ error: error.message, code: error.code, ...(error.extra || {}) });
   return sendApiError(res, error);
 }
@@ -83,6 +85,13 @@ module.exports = async function handler(req, res) {
       if (!user) return;
       return res.status(200).json(await account.accountSummary(user, null));
     }
+    if (action === 'point' && req.method === 'DELETE' && !req.headers['x-device-id']) {
+      // кабинет на сайте: отключить пункт (облачные данные пункта сохраняются)
+      const user = await requireUser(req, res);
+      if (!user) return;
+      await sync.revokePoint(user.id, req.query.id);
+      return res.status(204).end();
+    }
     if (action === 'device' && req.method === 'DELETE') {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -134,6 +143,36 @@ module.exports = async function handler(req, res) {
       if (result.status === 'pending') return res.status(202).json({ status: 'pending' });
       return await finishLogin(res, result.session, result.userId, result.deviceHash, result.deviceName, result.appVersion);
     }
+    // Регистрация из программы: письмо → человек жмёт ссылку → программа входит сама.
+    if (action === 'signup' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-signup', limit: 5, windowSeconds: 3600 })) return;
+      const b = body(req);
+      const email = String(b.email || '').trim().toLowerCase();
+      if (email && !await enforceRateLimit(req, res, { scope: 'app-signup-email', limit: 3, windowSeconds: 3600, key: email })) return;
+      const deviceHash = account.deviceHashFrom(req);
+      if (!deviceHash) return res.status(400).json({ error: 'Обновите программу', code: 'DEVICE_REQUIRED' });
+      const result = await account.startSignup({ email, password: b.password, deviceHash, deviceName: b.deviceName, version, origin: publicOrigin(req) });
+      if (result.session) return await finishLogin(res, result.session, result.userId, deviceHash, b.deviceName, version);
+      return res.status(201).json({ status: 'pending', id: result.id, secret: result.secret, email: result.email });
+    }
+    if (action === 'signup-poll' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-signup-poll', limit: 300, windowSeconds: 3600 })) return;
+      const b = body(req);
+      const result = await account.pollSignup(String(b.id || ''), String(b.secret || ''));
+      if (result.status === 'pending') return res.status(202).json({ status: 'pending' });
+      return await finishLogin(res, result.session, result.userId, result.deviceHash, result.deviceName, result.appVersion);
+    }
+    if (action === 'signup-resend' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-signup-resend', limit: 5, windowSeconds: 3600 })) return;
+      const b = body(req);
+      return res.status(200).json(await account.resendSignup(String(b.id || ''), String(b.secret || ''), publicOrigin(req)));
+    }
+    if (action === 'password-reset' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-password-reset', limit: 5, windowSeconds: 3600 })) return;
+      const email = String(body(req).email || '').trim().toLowerCase();
+      if (email && !await enforceRateLimit(req, res, { scope: 'app-password-reset-email', limit: 3, windowSeconds: 3600, key: email })) return;
+      return res.status(200).json(await account.sendPasswordReset(email, publicOrigin(req)));
+    }
     if (action === 'refresh' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-refresh', limit: 60, windowSeconds: 600 })) return;
       const token = String(body(req).refreshToken || '');
@@ -148,6 +187,7 @@ module.exports = async function handler(req, res) {
     if (!user) return;
 
     if (action === 'register-device' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-register-device', limit: 30, windowSeconds: 600, key: user.id })) return;
       const deviceHash = account.deviceHashFrom(req);
       if (!deviceHash) return res.status(400).json({ error: 'Обновите программу', code: 'DEVICE_REQUIRED' });
       await account.registerDevice(user.id, deviceHash, body(req).deviceName, version);
@@ -155,6 +195,8 @@ module.exports = async function handler(req, res) {
     }
 
     const device = await account.requireDevice(req, user.id);
+    // Общий потолок на всё остальное с одного аккаунта (синхронизация ходит пачками).
+    if (!await enforceRateLimit(req, res, { scope: 'app-user', limit: 900, windowSeconds: 600, key: user.id })) return;
 
     if (action === 'me' && req.method === 'GET') {
       return res.status(200).json(await account.accountSummary(user, account.deviceHashFrom(req)));
@@ -170,10 +212,73 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ items: await account.usageHistory(user.id, req.query.limit) });
     }
     if (action === 'claim-key' && req.method === 'POST') {
-      const key = await account.claimKey(user.id, body(req).key);
-      return res.status(200).json({ key });
+      // от перебора ключей: попыток мало, ключ из 12 hex-символов
+      if (!await enforceRateLimit(req, res, { scope: 'app-claim-key', limit: 10, windowSeconds: 600, key: user.id })) return;
+      return res.status(200).json(await account.claimKey(user.id, body(req).key));
+    }
+    if (action === 'password-change' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-password-change', limit: 5, windowSeconds: 600, key: user.id })) return;
+      const b = body(req);
+      return res.status(200).json(await account.changePassword(user, b.current, b.password));
+    }
+    if (action === 'logout-others' && req.method === 'POST') {
+      return res.status(200).json(await account.logoutOthers(user, device.id));
+    }
+    if (action === 'security-log' && req.method === 'GET') {
+      return res.status(200).json({ items: await sync.secretAccessLog(user.id, req.query.limit) });
+    }
+
+    // --- пункты и облако ---
+    if (action === 'points' && req.method === 'GET') {
+      return res.status(200).json({ points: await sync.listPoints(user.id) });
+    }
+    if (action === 'points' && req.method === 'POST') {
+      const b = body(req);
+      return res.status(200).json(await sync.registerPoint(user.id, device.id, b.wbPointId, b.name));
+    }
+    if (action === 'point' && req.method === 'DELETE') {
+      await sync.revokePoint(user.id, req.query.id);
+      return res.status(204).end();
+    }
+    if (action === 'point-purge' && req.method === 'POST') {
+      // удалить облачные данные пункта — только с паролем (если он есть у аккаунта)
+      const b = body(req);
+      if (user.email && !String(user.email).endsWith('@users.invalid')) {
+        await account.passwordLogin(user.email, String(b.password || '')).catch(() => {
+          throw account.appError(401, 'BAD_PASSWORD', 'Неверный пароль');
+        });
+      }
+      await sync.purgePoint(user.id, b.point);
+      return res.status(204).end();
+    }
+    if (action === 'archive-push' && req.method === 'POST') {
+      const b = body(req);
+      return res.status(200).json(await sync.archivePush(user.id, String(b.point || ''), b));
+    }
+    if (action === 'archive-pull' && req.method === 'POST') {
+      const b = body(req);
+      return res.status(200).json(await sync.archivePull(user.id, String(b.point || ''), b.since || {}, b.limit));
+    }
+    if (action === 'mirror-push' && req.method === 'POST') {
+      const b = body(req);
+      return res.status(200).json(await sync.mirrorPush(user.id, String(b.point || ''), b));
+    }
+    if (action === 'mirror-pull' && req.method === 'POST') {
+      const b = body(req);
+      return res.status(200).json(await sync.mirrorPull(user.id, String(b.point || ''), b.since, b.limit));
+    }
+    if ((action === 'docs' || action === 'secrets') && req.method === 'GET') {
+      const point = req.query.point ? String(req.query.point) : null;
+      return res.status(200).json({ docs: await sync.docsGet(user.id, device.id, { point, secret: action === 'secrets' }) });
+    }
+    if ((action === 'docs' || action === 'secrets') && req.method === 'PUT') {
+      const b = body(req);
+      return res.status(200).json(await sync.docPut(user.id, device.id, {
+        key: b.key, point: b.point || null, base: b.base, data: b.data, secret: action === 'secrets',
+      }));
     }
     if (action === 'site-link' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-site-link', limit: 20, windowSeconds: 600, key: user.id })) return;
       const next = String(body(req).next || '/cabinet/subscription');
       if (!SITE_LINK_TARGETS.test(next)) return res.status(400).json({ error: 'Некорректная страница', code: 'VALIDATION_ERROR' });
       const tokenHash = await account.magicTokenHash(user.id);
@@ -182,6 +287,7 @@ module.exports = async function handler(req, res) {
     // Оплата из программы по QR-коду СБП: тот же заказ, что на сайте (api/payments.js),
     // только ЮKassa отдаёт ссылку для QR вместо страницы оплаты.
     if (action === 'pay' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-pay', limit: 20, windowSeconds: 600, key: user.id })) return;
       const b = body(req);
       const kind = b.kind === 'addon' ? 'app_addon' : 'app_subscription';
       req.query.action = 'create';

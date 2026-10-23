@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Archive, Check, Download, Laptop, Minus, Unlink } from 'lucide-react';
+import { Archive, Check, Download, Infinity as InfinityIcon, Laptop, MapPin, Minus, PackagePlus, Unlink } from 'lucide-react';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Modal, Progress, Segmented, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { api } from '../../api/client';
 import { useCabinet } from '../../api/cabinet';
-import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRevokeAppDevice } from '../../api/app';
+import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRevokeAppDevice, useRevokeAppPoint } from '../../api/app';
 import { PROGRAM_DOWNLOAD_URL } from '../../lib/downloads';
 import { useMoney } from '../../lib/currency';
 import { formatTotal as formatRub } from '../../lib/pricing';
@@ -69,7 +69,14 @@ function CheckoutModal({ checkout, account, availableKopecks, onClose }: { check
         {mode === 'extend' && current && <Alert tone="info">{t(`Срок добавится к текущему: подписка будет действовать на ${monthsWord(checkout.months, t)} дольше ${date(current.effective?.paidUntil ?? current.paidUntil)}.`, `Мерзім ағымдағыға қосылады: жазылым ${date(current.effective?.paidUntil ?? current.paidUntil)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ жұмыс істейді.`)}</Alert>}
         {mode === 'upgrade' && <Alert tone="info">{t('Новый тариф начнёт работать сразу. Неиспользованные дни текущего тарифа не сгорят: мы пересчитаем их по стоимости и добавим к новому сроку.', 'Жаңа тариф бірден іске қосылады. Ағымдағы тарифтің пайдаланылмаған күндері жанбайды: оларды құны бойынша қайта есептеп, жаңа мерзімге қосамыз.')}</Alert>}
         {mode === 'downgrade' && current && plan && <Alert tone="warning">{t(`Тариф «${plan.title}» начнёт действовать после окончания оплаченного срока — ${date(current.effective?.paidUntil ?? current.paidUntil)}.`, `«${plan.title}» тарифі төленген мерзім аяқталғаннан кейін — ${date(current.effective?.paidUntil ?? current.paidUntil)} күні күшіне енеді.`)}</Alert>}
-        {mode === 'addon' && (
+        {mode === 'addon' && addon?.kind === 'pack' && (
+          <Alert tone="info">
+            {addonEnds
+              ? t(`Срок пакета добавится к текущему: продлится на ${monthsWord(checkout.months, t)} дольше ${date(addonEnds)}.`, `Пакет мерзімі ағымдағыға қосылады: ${date(addonEnds)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ.`)
+              : t(`Лимит увеличится сразу после оплаты: ${addon.summary.toLowerCase()}.`, `Лимит төлемнен кейін бірден артады: ${addon.summary.toLowerCase()}.`)}
+          </Alert>
+        )}
+        {mode === 'addon' && addon?.kind !== 'pack' && (
           <Alert tone="info">
             {addonEnds
               ? t(`Срок добавится к текущему: архив будет открыт на ${monthsWord(checkout.months, t)} дольше ${date(addonEnds)}.`, `Мерзім ағымдағыға қосылады: мұрағат ${date(addonEnds)} күнінен ${monthsWord(checkout.months, t)} ұзағырақ ашық болады.`)
@@ -189,7 +196,7 @@ function Devices({ account }: { account: AppAccount }) {
   return (
     <Card>
       <div className="stack">
-        <div className="row"><h2 style={{ margin: 0 }}>{t('Компьютеры', 'Компьютерлер')}</h2><Badge>{account.devices.length} / {account.deviceLimit}</Badge></div>
+        <div className="row"><h2 style={{ margin: 0 }}>{t('Компьютеры', 'Компьютерлер')}</h2><Badge>{account.unlimited ? account.devices.length : `${account.devices.length} / ${account.deviceLimit}`}</Badge></div>
         {account.devices.length === 0
           ? <EmptyState icon={<Laptop />} title={t('Программа ещё не подключена', 'Бағдарлама әлі қосылмаған')} text={t('Установите «Помощник ПВЗ» и войдите тем же логином и паролем, что на сайте.', '«ПВЗ көмекшісін» орнатып, сайттағы логин мен құпиясөзбен кіріңіз.')} />
           : <div>{account.devices.map(device => (
@@ -202,6 +209,69 @@ function Devices({ account }: { account: AppAccount }) {
               </div>
             ))}</div>}
         <p className="muted" style={{ margin: 0 }}>{t('Отключённый компьютер выйдет из аккаунта при следующем обращении к серверу.', 'Ажыратылған компьютер серверге келесі жүгінгенде аккаунттан шығады.')}</p>
+      </div>
+    </Card>
+  );
+}
+
+/** Пункты (ПВЗ) аккаунта: подключаются сами, когда программа работает на ПК пункта. */
+function Points({ account }: { account: AppAccount }) {
+  const t = useT();
+  const toast = useToast();
+  const revoke = useRevokeAppPoint();
+  const points = account.points ?? [];
+  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : t('ещё нет', 'әлі жоқ'));
+  return (
+    <Card>
+      <div className="stack">
+        <div className="row"><h2 style={{ margin: 0 }}>{t('Пункты', 'Пункттер')}</h2><Badge>{account.unlimited ? points.length : `${points.length} / ${account.pointLimit ?? 1}`}</Badge></div>
+        {points.length === 0
+          ? <EmptyState icon={<MapPin />} title={t('Пунктов пока нет', 'Пункттер әзірге жоқ')} text={t('Пункт подключится сам, когда «Помощник ПВЗ» запустят на компьютере с программой WB этого пункта и войдут в аккаунт.', 'Бағдарлама WB орнатылған компьютерде «ПВЗ көмекшісі» іске қосылып, аккаунтқа кіргенде пункт өзі қосылады.')} />
+          : <div>{points.map(point => (
+              <div key={point.id} className={s.device}>
+                <div>
+                  <strong>{point.name || t(`Пункт ${point.wbPointId}`, `${point.wbPointId} пункті`)}</strong>
+                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>№{point.wbPointId} · {t('архив обновлён', 'мұрағат жаңартылды')} {when(point.lastSyncAt)}</div>
+                </div>
+                <Button variant="ghost" size="sm" loading={revoke.isPending && revoke.variables === point.id} onClick={() => {
+                  if (!window.confirm(t('Отключить пункт? Его архив в облаке сохранится и вернётся, когда пункт подключится снова.', 'Пунктті ажырату керек пе? Оның бұлттағы мұрағаты сақталады.'))) return;
+                  revoke.mutate(point.id, { onSuccess: () => toast(t('Пункт отключён', 'Пункт ажыратылды'), 'success') });
+                }}><Unlink size={15} />{t('Отключить', 'Ажырату')}</Button>
+              </div>
+            ))}</div>}
+        <p className="muted" style={{ margin: 0 }}>{t('Архив, заметки, сотрудники и настройки хранятся в аккаунте: на новом компьютере всё появится после входа. Другие пункты видны в программе с услугой «Архив клиентов».', 'Мұрағат, жазбалар, қызметкерлер мен баптаулар аккаунтта сақталады: жаңа компьютерде кіргеннен кейін бәрі пайда болады.')}</p>
+      </div>
+    </Card>
+  );
+}
+
+/** Пакеты: ещё компьютеры и пункты сверх тарифа. */
+function Packs({ addons, account, onChoose }: { addons: AppAddon[]; account: AppAccount; onChoose: (c: Checkout) => void }) {
+  const t = useT();
+  const date = useDate();
+  const { formatTotal } = useMoney();
+  const [months, setMonths] = useState(1);
+  if (!addons.length || account.unlimited) return null;
+  const terms = Object.keys(addons[0].prices).map(Number).sort((a, b) => a - b);
+  return (
+    <Card>
+      <div className="stack">
+        <div className="row"><PackagePlus size={20} /><h2 style={{ margin: 0 }}>{t('Ещё компьютеры и пункты', 'Қосымша компьютерлер мен пункттер')}</h2></div>
+        <p className="muted" style={{ margin: 0 }}>{t('Добавляются к тарифу на выбранный срок. Каждый пункт сразу даёт и +2 компьютера.', 'Тарифке таңдалған мерзімге қосылады. Әр пункт +2 компьютер береді.')}</p>
+        <Segmented label={t('Срок', 'Мерзім')} value={String(months)} onChange={v => setMonths(Number(v))} options={terms.map(m => ({ value: String(m), label: monthsWord(m, t) }))} />
+        <div className="grid grid-2">
+          {addons.map(a => {
+            const state = account.addons?.find(x => x.id === a.id);
+            return (
+              <div key={a.id} className={s.plan}>
+                <div className={s.planHead}><strong>{a.title}</strong>{state?.active && state.endsAt && <Badge tone="success">{t(`до ${date(state.endsAt)}`, `${date(state.endsAt)} дейін`)}</Badge>}</div>
+                <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{a.summary}</div>
+                <div className="row"><strong>{formatTotal(a.prices[String(months)])}</strong><span className="muted">{t(`за ${monthsWord(months, t)}`, monthsWord(months, t))}</span></div>
+                <Button variant="secondary" size="sm" onClick={() => onChoose({ addon: a, months })}>{state?.active ? t('Продлить', 'Ұзарту') : t('Добавить', 'Қосу')}</Button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </Card>
   );
@@ -229,7 +299,7 @@ function ArchiveCard({ addon, account, onChoose }: { addon: AppAddon; account: A
         <p style={{ margin: 0 }}>{addon.summary}.</p>
         <p className="muted" style={{ margin: 0 }}>
           {t(
-            'База WB хранит выданные товары около двух недель, а отказы — пару месяцев. Программа копирует их в архив на компьютере и ничего из него не удаляет. С услугой досье, поиск по телефону и окно примерки показывают клиента целиком, даже если он не приходил полгода. Когда услуга закончится, архив закроется, но продолжит собираться — после продления вся история снова доступна.',
+            'База WB хранит выданные товары около двух недель, а отказы — пару месяцев. Программа копирует их в архив на компьютере и в облако аккаунта и ничего не удаляет. С услугой досье, поиск по телефону и окно примерки показывают клиента целиком, даже если он не приходил полгода; архив загружается на любой ваш компьютер, а другие пункты видны прямо в программе. Когда услуга закончится, архив закроется, но продолжит собираться — после продления вся история снова доступна.',
             'WB базасы берілген тауарларды шамамен екі апта, бас тартуларды бірнеше ай сақтайды. Бағдарлама оларды компьютердегі мұрағатқа көшіреді және ештеңе өшірмейді. Қызметпен досье, телефон бойынша іздеу және киіп көру терезесі клиентті толық көрсетеді. Қызмет аяқталғанда мұрағат жабылады, бірақ жинала береді — ұзартқаннан кейін бүкіл тарих қайта қолжетімді.',
           )}
         </p>
@@ -286,6 +356,7 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
               <ul className={s.limits}>
                 <li>{t(`${plan.codes} подборов кода в месяц`, `Айына ${plan.codes} код іріктеу`)}</li>
                 {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров в месяц`, `Айына ${plan.stickers} стикер`)}</li>}
+                <li>{(plan.points ?? 1) === 1 ? t('1 пункт', '1 пункт') : t(`${plan.points} пункта`, `${plan.points} пункт`)}</li>
                 <li>{plan.devices === 1 ? t('1 компьютер', '1 компьютер') : t(`До ${plan.devices} компьютеров`, `${plan.devices} компьютерге дейін`)}</li>
               </ul>
               <ul className={s.features}>
@@ -322,7 +393,7 @@ export function SubscriptionPage() {
     const plan = plans.data.plans.find(p => p.id === planId);
     const addon = plans.data.addons?.find(a => a.id === addonId);
     if (plan) setCheckout({ plan, months: 1 });
-    else if (addon) setCheckout({ addon, months: Math.min(...Object.keys(addon.prices).map(Number)) });
+    else if (addon) setCheckout({ addon, months: addon.kind === 'pack' ? 1 : Math.min(...Object.keys(addon.prices).map(Number)) });
     setParams({}, { replace: true });
   }, [plans.data, account.data, params, setParams]);
 
@@ -339,8 +410,11 @@ export function SubscriptionPage() {
     <div className="page">
       <header className="page-head">
         <h1>{t('Подписка «Помощник ПВЗ»', '«ПВЗ көмекшісі» жазылымы')}</h1>
-        <p>{t('Тариф, лимиты и компьютеры программы. Войти в программу можно тем же логином и паролем, что на сайте.', 'Бағдарламаның тарифі, лимиттері және компьютерлері. Бағдарламаға сайттағы логин мен құпиясөзбен кіруге болады.')}</p>
+        <p>{t('Тариф, лимиты, пункты и компьютеры программы. Войти в программу можно тем же логином и паролем, что на сайте.', 'Бағдарламаның тарифі, лимиттері, пункттері және компьютерлері. Бағдарламаға сайттағы логин мен құпиясөзбен кіруге болады.')}</p>
       </header>
+      {account.data.unlimited && (
+        <Alert tone="success"><InfinityIcon size={16} style={{ verticalAlign: -3 }} /> {t('Безлимитный аккаунт: все разделы и услуги открыты бессрочно, подборы не списываются, лимитов на компьютеры и пункты нет.', 'Шексіз аккаунт: барлық бөлімдер мен қызметтер мерзімсіз ашық.')}</Alert>
+      )}
       {account.data.freeMode && account.data.freeUntil && (
         <Alert tone="warning">
           {t(
@@ -361,9 +435,13 @@ export function SubscriptionPage() {
         <CurrentPlan account={account.data} onExtend={extend} />
         <Limits account={account.data} />
       </div>
-      <Devices account={account.data} />
-      <PlanCards plans={plans.data} account={account.data} onChoose={setCheckout} />
-      {plans.data.addons?.map(addon => <ArchiveCard key={addon.id} addon={addon} account={account.data} onChoose={setCheckout} />)}
+      <div className="grid grid-2">
+        <Points account={account.data} />
+        <Devices account={account.data} />
+      </div>
+      {!account.data.unlimited && <PlanCards plans={plans.data} account={account.data} onChoose={setCheckout} />}
+      {plans.data.addons?.filter(a => a.kind !== 'pack').map(addon => <ArchiveCard key={addon.id} addon={addon} account={account.data} onChoose={setCheckout} />)}
+      <Packs addons={plans.data.addons?.filter(a => a.kind === 'pack') ?? []} account={account.data} onChoose={setCheckout} />
       <div className="row">
         <a href={PROGRAM_DOWNLOAD_URL}><Button variant="secondary"><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
       </div>

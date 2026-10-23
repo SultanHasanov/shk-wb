@@ -13,7 +13,7 @@ const {
   yookassa,
 } = require('../server/_payments');
 const { topupBonus, validTopup } = require('../server/_wallet');
-const { ADDONS, addonSnapshot, orderSnapshot, PLANS } = require('../server/_app-plans');
+const { ADDONS, addonSnapshot, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
@@ -192,7 +192,7 @@ module.exports = async function handler(req, res) {
         if (!addonSnap) return res.status(400).json({ error: 'Выберите услугу и срок' });
         // Услуга работает только поверх тарифа: проверяем любую оплаченную подписку
         // не ниже нужного (в т.ч. стоящую в очереди — её отрезок ещё впереди).
-        const need = ADDONS[appAddon].minPlan === 'pro' ? 'pro' : 'standard,pro';
+        const need = PLAN_ORDER.slice(PLAN_ORDER.indexOf(ADDONS[appAddon].minPlan)).join(',');
         const subs = await supabaseFetch(
           `app_subscriptions?user_id=eq.${encodeURIComponent(user.id)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(new Date().toISOString())}&plan=in.(${need})&select=id&limit=1`,
         );

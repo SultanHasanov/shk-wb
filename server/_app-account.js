@@ -9,7 +9,8 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
-const { ADDONS, PLANS, addonAllowed, effectiveFeatures, isPlan } = require('./_app-plans');
+const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan } = require('./_app-plans');
+const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 
 /**
@@ -34,6 +35,32 @@ function effectiveDates(ent, win) {
 }
 
 const DEVICE_RE = /^[a-f0-9]{64}$/;
+
+// Аккаунты без лимитов и оплаты (владелец сервиса): APP_UNLIMITED_USER_IDS — UUID через запятую.
+// Всё открыто бессрочно, подборы не списываются, ПК и пунктов — сколько угодно.
+function isUnlimited(userId) {
+  if (!userId) return false;
+  return String(process.env.APP_UNLIMITED_USER_IDS || '')
+    .split(/[\s,]+/).filter(Boolean).map(s => s.toLowerCase())
+    .includes(String(userId).toLowerCase());
+}
+
+// Права аккаунта целиком: тариф, услуги, фичи и лимиты ПК/пунктов.
+async function entitlementsFor(userId) {
+  const [ent, free] = await Promise.all([
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }),
+    appFreeMode(),
+  ]);
+  const unlimited = isUnlimited(userId);
+  const plan = isPlan(ent.plan) ? ent.plan : null;
+  const addons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
+  const all = free || unlimited;
+  return {
+    ent, free, unlimited, plan, addons,
+    features: effectiveFeatures(plan, addons, all),
+    limits: accountLimits(plan, addons, ent.device_limit, all),
+  };
+}
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 function appError(status, code, message, extra) {
@@ -48,6 +75,9 @@ function appError(status, code, message, extra) {
 function dbErrorCode(error) {
   const text = JSON.stringify(error?.details || error?.message || '');
   for (const code of ['DEVICE_LIMIT', 'LIMIT_EXCEEDED', 'INVALID_AMOUNT', 'UNSUPPORTED_KIND']) {
+    if (text.includes(code)) return code;
+  }
+  for (const code of ['POINT_LIMIT', 'VERSION_CONFLICT']) {
     if (text.includes(code)) return code;
   }
   if (text.includes('Asset belongs to another user')) return 'KEY_OWNED';
@@ -127,6 +157,26 @@ function deviceHashFrom(req) {
   return DEVICE_RE.test(value) ? value : null;
 }
 
+// Письмо и уведомление в кабинете «вход с нового компьютера»: если это не вы — отключите ПК.
+async function notifyNewDevice(userId, name) {
+  const user = await getAuthUser(userId).catch(() => null);
+  const when = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+  await createNotification({
+    userId,
+    kind: 'system',
+    title: 'Вход в «Помощник ПВЗ» с нового компьютера',
+    body: `Компьютер «${String(name || 'Компьютер').slice(0, 80)}» вошёл в ваш аккаунт ${when} (МСК). Если это были не вы — отключите его в кабинете (Подписка → Компьютеры) и смените пароль.`,
+    link: '/cabinet/subscription',
+    dedupeKey: `app-device:${userId}:${Date.now()}`,
+    email: technicalEmail(user?.email) ? null : user.email,
+  }).catch(() => {});
+}
+
+async function deviceKnown(userId, deviceHash) {
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${deviceHash}&select=id&limit=1`).catch(() => [1]);
+  return rows.length > 0;
+}
+
 // В бесплатном режиме лимит ПК не действует: ПК добавляем/возвращаем напрямую.
 async function registerDeviceFree(userId, deviceHash, name, version) {
   const now = new Date().toISOString();
@@ -147,11 +197,19 @@ async function registerDeviceFree(userId, deviceHash, name, version) {
 }
 
 async function registerDevice(userId, deviceHash, name, version) {
-  if (await appFreeMode()) return registerDeviceFree(userId, deviceHash, name, version);
+  const known = await deviceKnown(userId, deviceHash);
+  const id = await registerDeviceLimited(userId, deviceHash, name, version);
+  if (!known) await notifyNewDevice(userId, name);
+  return id;
+}
+
+async function registerDeviceLimited(userId, deviceHash, name, version) {
+  if (isUnlimited(userId) || await appFreeMode()) return registerDeviceFree(userId, deviceHash, name, version);
+  const { limits } = await entitlementsFor(userId);
   try {
     return await supabaseFetch('rpc/app_register_device', {
       method: 'POST',
-      body: JSON.stringify({ p_user: userId, p_hash: deviceHash, p_name: String(name || '').slice(0, 80), p_version: String(version || '').slice(0, 32) }),
+      body: JSON.stringify({ p_user: userId, p_hash: deviceHash, p_name: String(name || '').slice(0, 80), p_version: String(version || '').slice(0, 32), p_limit: limits.devices }),
     });
   } catch (error) {
     if (dbErrorCode(error) === 'DEVICE_LIMIT') {
@@ -203,10 +261,16 @@ function technicalEmail(email) {
   return !email || String(email).endsWith('@users.invalid');
 }
 
+// Ключ в ответах API показываем не целиком: WBPK-••••-••••-3F2A.
+function maskKey(key) {
+  const v = String(key || '');
+  return v.length > 4 ? `WBPK-••••-••••-${v.slice(-4)}` : v;
+}
+
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -216,7 +280,10 @@ async function accountSummary(user, currentHash) {
     appFreeMode(),
     appFreeUntil(),
     appFreeWindow(),
+    supabaseFetch(`app_points?user_id=eq.${uid}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,mirror_at,created_at&order=created_at.asc`).catch(() => []),
   ]);
+  const unlimited = isUnlimited(user.id);
+  const all = free || unlimited;
   const profile = profiles[0] || {};
   const tg = telegram[0] || null;
   const plan = isPlan(ent.plan) ? ent.plan : null;
@@ -233,22 +300,25 @@ async function accountSummary(user, currentHash) {
     // Бесплатный режим (админка): всем вошедшим — Про. Программа читает поле plan первым.
     freeMode: free,
     freeUntil: free ? freeUntil : null,
-    ...(free ? { plan: 'pro' } : {}),
+    // Безлимитный аккаунт: всё открыто бессрочно, оплаты не нужны.
+    unlimited,
+    ...(all ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
-    features: effectiveFeatures(plan, rawAddons, free),
+    features: effectiveFeatures(plan, rawAddons, all),
     // Услуги: куплена до endsAt; active = действует сейчас (на тарифе ниже нужного — false).
     addons: Object.values(ADDONS).map(a => {
       const endsAt = rawAddons[a.id]?.ends_at || null;
       return {
         id: a.id,
+        kind: a.kind || 'service',
         title: a.title,
         endsAt,
-        active: free || Boolean(endsAt && addonAllowed(a.id, plan)),
-        needsPlan: !free && Boolean(endsAt) && !addonAllowed(a.id, plan) ? a.minPlan : null,
+        active: (all && a.kind !== 'pack') || Boolean(endsAt && addonAllowed(a.id, plan)),
+        needsPlan: !all && Boolean(endsAt) && !addonAllowed(a.id, plan) ? a.minPlan : null,
       };
     }),
     // Без подписки, но с пакетами подбор кода всё равно работает — как «Базовый» без квоты.
-    effectivePlan: free ? 'pro' : plan || (packsLeft > 0 ? 'basic' : null),
+    effectivePlan: all ? 'pro' : plan || (packsLeft > 0 ? 'basic' : null),
     subscription: plan ? {
       plan,
       title: PLANS[plan].title,
@@ -265,11 +335,20 @@ async function accountSummary(user, currentHash) {
       codes: { used: Number(ent.codes_used || 0), limit: Number(ent.codes_limit || 0) },
       stickers: { used: Number(ent.stickers_used || 0), limit: Number(ent.stickers_limit || 0) },
     } : null,
-    packs: packs.map(row => ({ key: row.key, total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used) })).filter(p => p.left > 0),
+    packs: packs.map(row => ({ key: maskKey(row.key), total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used), addedAt: row.created_at })),
     packsLeft,
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
-    deviceLimit: free ? 99 : Number(ent.device_limit || 1),
+    deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all).devices,
+    pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all).points,
     devices,
+    points: points.map(p => ({
+      id: p.id,
+      wbPointId: String(p.wb_point_id),
+      name: p.name,
+      lastSyncAt: p.last_sync_at,
+      mirrorAt: p.mirror_at,
+      createdAt: p.created_at,
+    })),
   };
 }
 
@@ -290,19 +369,15 @@ async function leaseRights(req) {
     }
     throw error;
   }
-  const [ent, free] = await Promise.all([
-    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
-    appFreeMode(),
-  ]);
-  const plan = isPlan(ent.plan) ? ent.plan : null;
-  const addons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
-  const features = effectiveFeatures(plan, addons, free);
-  const archiveUntil = free ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
-  return { user: user.id, plan: free ? 'pro' : plan, features, archive_until: archiveUntil, free };
+  const { free, unlimited, plan, addons, features } = await entitlementsFor(user.id);
+  const all = free || unlimited;
+  const archiveUntil = all ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
+  return { user: user.id, plan: all ? 'pro' : plan, features, archive_until: archiveUntil, free: all };
 }
 
 async function consumeCode(userId, deviceId, meta) {
-  // Бесплатный режим: подбор не списываем ни из квоты, ни из пакетов.
+  // Бесплатный режим и безлимитный аккаунт: подбор не списываем ни из квоты, ни из пакетов.
+  if (isUnlimited(userId)) return { ok: true, free: true, unlimited: true };
   if (await appFreeMode()) return { ok: true, free: true };
   try {
     return await supabaseFetch('rpc/app_consume', {
@@ -333,6 +408,13 @@ async function usageHistory(userId, limit = 30) {
   }));
 }
 
+// После привязки: сколько подборов в ключе — чтобы сказать человеку «+N подборов».
+async function keyInfo(value) {
+  const rows = await supabaseFetch(`license_keys?key=eq.${encodeURIComponent(value)}&select=usage_limit,used,active&limit=1`).catch(() => []);
+  const row = rows[0];
+  return row ? { total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used), active: row.active } : null;
+}
+
 async function claimKey(userId, key) {
   const value = String(key || '').trim().toUpperCase();
   if (!/^WBPK-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/.test(value)) throw appError(400, 'VALIDATION_ERROR', 'Ключ выглядит так: WBPK-XXXX-XXXX-XXXX');
@@ -345,7 +427,8 @@ async function claimKey(userId, key) {
     if (code === 'EMAIL_NOT_CONFIRMED') throw appError(403, code, 'Подтвердите почту, чтобы привязать ключ');
     throw error;
   }
-  return value;
+  const info = await keyInfo(value);
+  return { key: maskKey(value), left: info?.left ?? null, total: info?.total ?? null };
 }
 
 // --- Вход через браузер ---
@@ -417,7 +500,143 @@ async function pollBrowserLogin(code, secret) {
   return { status: 'approved', session, userId: row.user_id, deviceHash: row.device_hash, deviceName: row.device_name, appVersion: row.app_version };
 }
 
+// --- Регистрация и пароль прямо из программы ---
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function checkPassword(password) {
+  const value = String(password || '');
+  if (value.length < 8) throw appError(400, 'WEAK_PASSWORD', 'Пароль — не короче 8 символов');
+  if (value.length > 72) throw appError(400, 'WEAK_PASSWORD', 'Пароль — не длиннее 72 символов');
+  if (!/[A-Za-zА-Яа-яЁё]/.test(value) || !/\d/.test(value)) throw appError(400, 'WEAK_PASSWORD', 'В пароле нужны буквы и цифры');
+  return value;
+}
+
+function normalizeEmail(email) {
+  const value = String(email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(value) || value.length > 320) throw appError(400, 'VALIDATION_ERROR', 'Введите корректную почту');
+  return value;
+}
+
+/**
+ * Регистрация: Supabase шлёт письмо со ссылкой, программа опрашивает signup/poll и входит
+ * сама, как только почта подтверждена. Пароль в программе не хранится. Ответ одинаковый,
+ * есть такой аккаунт или нет, — по нему нельзя узнать, зарегистрирована ли почта.
+ */
+async function startSignup({ email, password, deviceHash, deviceName, version, origin }) {
+  const login = normalizeEmail(email);
+  const pass = checkPassword(password);
+  let data;
+  try {
+    data = await authRequest(`signup?redirect_to=${encodeURIComponent(`${origin}/app-login?confirmed=1`)}`, {
+      body: { email: login, password: pass },
+    });
+  } catch (error) {
+    if (error.authCode === 'weak_password') throw appError(400, 'WEAK_PASSWORD', 'Пароль слишком простой — добавьте символов');
+    if (error.authCode === 'over_email_send_rate_limit' || error.status === 429) throw appError(429, 'RATE_LIMITED', 'Слишком много писем. Подождите пару минут и попробуйте снова');
+    if (error.authCode === 'user_already_exists' || error.authCode === 'email_exists') data = {};
+    else if (error.status === 400 || error.status === 422) throw appError(400, 'VALIDATION_ERROR', 'Не удалось зарегистрироваться с этой почтой');
+    else throw error;
+  }
+  // Подтверждение почты выключено — сразу готовая сессия.
+  if (data.access_token) return { session: data, userId: data.user?.id };
+  const userId = data.user?.id || data.id || null;
+  const secret = crypto.randomBytes(32).toString('base64url');
+  const rows = await supabaseFetch('app_signup_requests', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      email: login,
+      poll_secret_hash: hashSecret(secret),
+      device_hash: deviceHash,
+      device_name: String(deviceName || 'Компьютер').slice(0, 80),
+      app_version: String(version || '').slice(0, 32),
+      user_id: userId && await getAuthUser(userId) ? userId : null,
+    }),
+  });
+  return { id: rows[0].id, secret, email: login };
+}
+
+async function signupRequest(id, secret) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(id || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректный запрос');
+  const rows = await supabaseFetch(`app_signup_requests?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
+  const row = rows[0];
+  if (!row) throw appError(404, 'NOT_FOUND', 'Запрос регистрации не найден');
+  const expected = Buffer.from(row.poll_secret_hash);
+  const given = Buffer.from(hashSecret(secret));
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) throw appError(403, 'FORBIDDEN', 'Неверный запрос');
+  if (new Date(row.expires_at) <= new Date()) throw appError(410, 'EXPIRED', 'Ссылка устарела. Зарегистрируйтесь ещё раз.');
+  return row;
+}
+
+// Почта подтверждена → сессия (как вход через браузер). Иначе pending.
+async function pollSignup(id, secret) {
+  const row = await signupRequest(id, secret);
+  if (row.consumed_at) throw appError(409, 'ALREADY_USED', 'Вход уже выполнен. Войдите по почте и паролю.');
+  if (!row.user_id) return { status: 'pending' };
+  const user = await getAuthUser(row.user_id);
+  if (!user?.email_confirmed_at) return { status: 'pending' };
+  const updated = await supabaseFetch(`app_signup_requests?id=eq.${encodeURIComponent(id)}&consumed_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ consumed_at: new Date().toISOString() }),
+  });
+  if (!updated.length) throw appError(409, 'ALREADY_USED', 'Вход уже выполнен. Войдите по почте и паролю.');
+  const session = await sessionForUser(row.user_id);
+  return { status: 'approved', session, userId: row.user_id, deviceHash: row.device_hash, deviceName: row.device_name, appVersion: row.app_version };
+}
+
+async function resendSignup(id, secret, origin) {
+  const row = await signupRequest(id, secret);
+  await authRequest(`resend?redirect_to=${encodeURIComponent(`${origin}/app-login?confirmed=1`)}`, { body: { type: 'signup', email: row.email } })
+    .catch(error => {
+      if (error.status === 429 || error.authCode === 'over_email_send_rate_limit') throw appError(429, 'RATE_LIMITED', 'Письмо уже отправлено. Подождите минуту.');
+    });
+  return { ok: true };
+}
+
+// Письмо со ссылкой на смену пароля (страница сайта). Ответ всегда «отправили».
+async function sendPasswordReset(email, origin) {
+  const login = normalizeEmail(email);
+  await authRequest(`recover?redirect_to=${encodeURIComponent(`${origin}/reset-password`)}`, { body: { email: login } }).catch(() => {});
+  return { ok: true };
+}
+
+async function changePassword(user, current, next) {
+  if (technicalEmail(user.email)) throw appError(400, 'NO_PASSWORD', 'У аккаунта Telegram нет пароля. Задайте почту в кабинете на сайте.');
+  const pass = checkPassword(next);
+  const session = await passwordLogin(user.email, String(current || '')).catch(error => {
+    if (error.code === 'BAD_CREDENTIALS') throw appError(401, 'BAD_PASSWORD', 'Текущий пароль неверный');
+    throw error;
+  });
+  await authRequest('user', { method: 'PUT', token: session.access_token, body: { password: pass } }).catch(error => {
+    if (error.authCode === 'same_password') throw appError(400, 'SAME_PASSWORD', 'Новый пароль совпадает со старым');
+    if (error.authCode === 'weak_password') throw appError(400, 'WEAK_PASSWORD', 'Пароль слишком простой');
+    throw error;
+  });
+  await logout(session.access_token);
+  return { ok: true };
+}
+
+// Выйти на всех других ПК: их сессии закрываются, сами ПК отключаются от аккаунта.
+async function logoutOthers(user, currentDeviceId) {
+  await authRequest('logout?scope=others', { token: user._accessToken }).catch(() => {});
+  await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(user.id)}&revoked_at=is.null&id=neq.${encodeURIComponent(currentDeviceId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ revoked_at: new Date().toISOString() }),
+  });
+  return { ok: true };
+}
+
 module.exports = {
+  changePassword,
+  entitlementsFor,
+  isUnlimited,
+  logoutOthers,
+  pollSignup,
+  resendSignup,
+  sendPasswordReset,
+  startSignup,
   leaseRights,
   accountSummary,
   appError,

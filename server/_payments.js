@@ -3,6 +3,7 @@ const { supabaseFetch } = require('./_supabase');
 const { createNotification, sendEmail } = require('./_notifications');
 const { sendMessage } = require('./_telegram-api');
 const { notifyAdminOrder } = require('./_admin-alerts');
+const { ADDONS } = require('./_app-plans');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
 const LICENSE_PRICES = Object.freeze({ 1:25, 3:40, 5:50, 10:90, 20:150 });
@@ -107,7 +108,7 @@ async function notifyCompleted(order){
   const body=order.product_kind==='app_subscription'
     ?`Подписка «Помощник ПВЗ» оплачена (заказ ${String(order.id).slice(0,8)}). Тариф уже доступен в программе — достаточно войти в аккаунт.`
     :order.product_kind==='app_addon'
-    ?`Услуга «Архив клиентов» для «Помощника ПВЗ» подключена (заказ ${String(order.id).slice(0,8)}). Архив откроется в программе в течение нескольких минут или по кнопке «Обновить».`
+    ?`«${(ADDONS[order.app_addon]||ADDONS.archive).title}» для «Помощника ПВЗ» подключено (заказ ${String(order.id).slice(0,8)}). В программе заработает в течение нескольких минут или по кнопке «Обновить».`
     :order.product_kind==='wallet_topup'
     ?`Баланс пополнен на ${(Number(order.wallet_topup_kopecks||0)/100).toLocaleString('ru-RU')} ₽ (заказ ${String(order.id).slice(0,8)}). Тратить его можно в Telegram-боте.`
     :`Заказ ${String(order.id).slice(0,8)} готов.${deliveryLine} Данные покупки доступны в личном кабинете.`;

@@ -11,19 +11,26 @@ export type AppPlan = {
   codes: number;
   stickers: number;
   devices: number;
+  /** сколько пунктов (ПВЗ) можно подключить */
+  points?: number;
   features: string[];
   prices: Record<string, number>;
 };
-/** Доп. услуга (сейчас одна — архив клиентов). prices — цена за весь срок по числу месяцев. */
-export type AppAddonId = 'archive';
+/** Доп. услуги: архив клиентов и пакеты ПК/пунктов (kind 'pack'). prices — цена за весь срок по числу месяцев. */
+export type AppAddonId = 'archive' | 'devices_1' | 'devices_3' | 'points_1' | 'points_3';
 export type AppAddon = {
   id: AppAddonId;
+  kind?: 'service' | 'pack';
   title: string;
   summary: string;
   minPlan: AppPlanId;
   prices: Record<string, number>;
   features: string[];
+  monthlyPrice?: number;
+  devices?: number;
+  points?: number;
 };
+export type AppPoint = { id: string; wbPointId: string; name: string; lastSyncAt: string | null; mirrorAt: string | null; createdAt: string };
 export type AppPlans = {
   order: AppPlanId[];
   terms: Array<{ months: number; discountPercent: number }>;
@@ -40,7 +47,9 @@ export type AppAccount = {
   freeUntil?: string | null;
   /** итоговые разделы программы: тариф + активные услуги */
   features?: string[];
-  addons?: Array<{ id: AppAddonId; title: string; endsAt: string | null; active: boolean; needsPlan: AppPlanId | null }>;
+  addons?: Array<{ id: AppAddonId; kind?: 'service' | 'pack'; title: string; endsAt: string | null; active: boolean; needsPlan: AppPlanId | null }>;
+  /** безлимитный аккаунт: всё открыто бессрочно */
+  unlimited?: boolean;
   user: { id: string; email: string | null; name: string | null; phone: string | null; telegram: { username: string | null } | null };
   effectivePlan: AppPlanId | null;
   subscription: {
@@ -59,6 +68,8 @@ export type AppAccount = {
   stickerPacksLeft: number;
   deviceLimit: number;
   devices: AppDevice[];
+  pointLimit?: number;
+  points?: AppPoint[];
 };
 
 export const appAccountKey = ['app-account'] as const;
@@ -75,6 +86,15 @@ export function useRevokeAppDevice() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
+  });
+}
+
+/** Отключить пункт от аккаунта (данные в облаке остаются — подключится снова сам). */
+export function useRevokeAppPoint() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/api/app/points/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
   });
 }

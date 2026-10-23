@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Ban, Eye, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { type AdminUserDetail, useAdminUser, useAdminUserAction } from '../../api/admin';
+import { useAppPlans } from '../../api/app';
 import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
 import { dateTime, money } from '../../api/cabinet';
 import type { CellPrintMarketplaceScope } from '../../lib/pricing';
@@ -93,6 +94,11 @@ export function AdminUserPage() {
   const grantAddon = useAdminUserAction<{ userId: string; addon: string; months: number }>('grantAppAddon');
   const revokeAddon = useAdminUserAction<{ userId: string; id: string }>('revokeAppAddon');
   const [addonMonths, setAddonMonths] = useState(6);
+  const [addonId, setAddonId] = useState('archive');
+  const revokePoint = useAdminUserAction<{ userId: string; id: string }>('revokeAppPoint');
+  const appPlans = useAppPlans();
+  const addonList = appPlans.data?.addons ?? [];
+  const addonTerms = Object.keys(addonList.find(a => a.id === addonId)?.prices ?? { 6: 0, 12: 0 }).map(Number).sort((a, b) => a - b);
   const [appPlan, setAppPlan] = useState('standard');
   const [appMonths, setAppMonths] = useState(1);
 
@@ -398,24 +404,34 @@ export function AdminUserPage() {
           <p className={s.mutedNote}>Подписок нет.</p>
         )}
 
-        <h4 style={{ marginTop: 16 }}>Услуга «Архив клиентов»</h4>
+        <h4 style={{ marginTop: 16 }}>Услуги и пакеты</h4>
         <div className={s.toolbar}>
+          <Field label="Что">
+            <Select value={addonId} onChange={e => {
+              const next = e.target.value;
+              setAddonId(next);
+              const terms = Object.keys(addonList.find(a => a.id === next)?.prices ?? {}).map(Number);
+              if (terms.length && !terms.includes(addonMonths)) setAddonMonths(Math.min(...terms));
+            }}>
+              {(addonList.length ? addonList : [{ id: 'archive', title: 'Архив клиентов' }]).map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+            </Select>
+          </Field>
           <Field label="Срок">
             <Select value={String(addonMonths)} onChange={e => setAddonMonths(Number(e.target.value))}>
-              <option value="6">6 месяцев</option>
-              <option value="12">12 месяцев</option>
+              {addonTerms.map(m => <option key={m} value={String(m)}>{m} мес.</option>)}
             </Select>
           </Field>
           <Button
             loading={grantAddon.isPending}
-            onClick={() => run(grantAddon, { userId, addon: 'archive', months: addonMonths }, 'Архив подключён')}
+            onClick={() => run(grantAddon, { userId, addon: addonId, months: addonMonths }, 'Подключено')}
           >
             <Plus size={16} />
-            Подключить архив
+            Подключить
           </Button>
         </div>
         <p className={s.mutedNote}>
-          Работает вместе с тарифом Стандарт или Про. Отзыв закрывает доступ в программе, сам архив на ПК клиента не удаляется.
+          Архив работает вместе с тарифом Стандарт или Про; отзыв закрывает доступ, сам архив (на ПК и в облаке) не удаляется.
+          Пакеты добавляют компьютеры и пункты к лимиту тарифа.
         </p>
         {user.app?.addons?.length ? (
           <Table>
@@ -445,6 +461,34 @@ export function AdminUserPage() {
             </tbody>
           </Table>
         ) : null}
+
+        <h4 style={{ marginTop: 16 }}>Пункты ({user.app?.points?.filter(p => !p.revokedAt).length ?? 0})</h4>
+        {user.app?.points?.length ? (
+          <Table>
+            <thead>
+              <tr><th>Пункт</th><th>Подключён</th><th>Архив обновлён</th><th>Статус</th><th /></tr>
+            </thead>
+            <tbody>
+              {user.app.points.map(p => (
+                <tr key={p.id}>
+                  <td>{p.name || 'Пункт'} <span className={s.mutedNote}>№{p.wbPointId}</span></td>
+                  <td>{shortDate(p.createdAt)}</td>
+                  <td>{p.lastSyncAt ? shortDate(p.lastSyncAt) : '—'}</td>
+                  <td><Badge tone={p.revokedAt ? 'error' : 'success'}>{p.revokedAt ? 'отключён' : 'подключён'}</Badge></td>
+                  <td>
+                    {!p.revokedAt && (
+                      <Button variant="ghost" size="sm" onClick={() => run(revokePoint, { userId, id: p.id }, 'Пункт отключён')}>
+                        <Trash2 size={16} />
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <p className={s.mutedNote}>Пунктов нет — подключатся сами, когда программа войдёт в аккаунт на ПК пункта.</p>
+        )}
 
         <h4 style={{ marginTop: 16 }}>Компьютеры ({user.app?.devices?.filter(d => !d.revokedAt).length ?? 0})</h4>
         {user.app?.devices?.length ? (
