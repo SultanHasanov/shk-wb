@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { createNotification, sendEmail } = require('./_notifications');
 const { sendMessage } = require('./_telegram-api');
+const { notifyAdminOrder } = require('./_admin-alerts');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
 const LICENSE_PRICES = Object.freeze({ 1:25, 3:40, 5:50, 10:90, 20:150 });
@@ -77,6 +78,7 @@ async function completeOrder(order, payment) {
     const fulfilledAt=new Date().toISOString();
     await supabaseFetch(`payment_orders?id=eq.${order.id}`,{method:'PATCH',body:JSON.stringify({status:'succeeded',provider_status:'succeeded',fulfillment_status:'fulfilled',fulfilled_at:fulfilledAt,fulfillment_error:null,paid_at:order.paid_at||now,updated_at:fulfilledAt})});
     completed={...completed,fulfillment_status:'fulfilled',fulfilled_at:fulfilledAt};
+    await notifyAdminOrder(completed).catch(error=>console.error('Admin order alert failed',error.message));
     await notifyCompleted(completed);
     return completed;
   } catch(error) {

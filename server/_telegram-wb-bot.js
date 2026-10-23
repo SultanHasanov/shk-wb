@@ -8,6 +8,7 @@ const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, LICENSE_PRICES, REVIEW_PRICE } = r
 const { buildClientQr } = require('./_wb-code');
 const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
+const { notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { isTechnicalTelegramUser } = require('./_telegram-account');
 const wbPvz = require('./_wb-pvz');
@@ -297,6 +298,7 @@ async function handleClientCode(from, chatId, sid) {
     body: JSON.stringify({ p_user: userId, p_kopecks: CLIENT_CODE_PRICE * 100, p_event_key: `qr:${userId}:${qrText}`, p_details: { sid: String(sid) } }),
   });
   if (!spent?.ok) return showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100);
+  notifyAdminSpend({ userId, priceRub: CLIENT_CODE_PRICE, title: 'Код клиента (QR)', balanceKopecks: spent.balance }).catch(() => {});
   try {
     await sendPhoto(chatId, clientQrUrl(qrText), { caption: `Списано ${wallet.formatRub(CLIENT_CODE_PRICE)} · баланс ${wallet.formatRub(Number(spent.balance) / 100)}` });
   } catch (error) {
@@ -1212,6 +1214,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
     // bot_review_spend списывает 25 ₽ с баланса (миграция 20261023_wallet.sql), balance — в копейках.
     const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId }) });
     if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then);
+    if (!spent.free) notifyAdminSpend({ userId, priceRub: REVIEW_PRICE, title: 'Кто поставил оценку', balanceKopecks: spent.balance }).catch(() => {});
     footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(REVIEW_PRICE)} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
   }
   await sendMessage(chatId, `${info.text}\n\n<i>${footer}</i>`);
