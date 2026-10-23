@@ -4,11 +4,14 @@
  * Релиз лежит ВНЕ папки сайта (переживает деплои): $PVZ_APP_UPDATES_DIR/latest.json
  *   { "version": "1.4.1", "notes": "…", "pub_date": "2026-10-20T10:00:00Z",
  *     "file": "Помощник ПВЗ_1.4.1_x64-setup.exe", "signature": "<содержимое .sig>",
- *     "min_version": "1.4.0", "mandatory": false }
+ *     "min_version": "1.4.0", "mandatory": false,
+ *     "auto": true, "mandatory_after": "2026-10-25T21:00:00Z" }
  * Выпуск версии = залить установщик, его .sig и latest.json по scp. Деплой сайта не нужен.
  *
  * Обязательность: min_version = max(env PVZ_APP_MIN_VERSION, latest.min_version);
  * версия программы ниже min_version (или latest.mandatory) → обновление обязательное.
+ * mandatory_after — mandatory включается только с этой даты (до неё версия ставится как обычная).
+ * auto: false — программа не ставит версию сама в простое, только по кнопке (по умолчанию — ставит).
  *
  * Аренда: программа работает только пока у неё есть подписанное (Ed25519) подтверждение
  * сервера не старше PVZ_LEASE_SECONDS (по умолчанию час). Ключ — PVZ_LEASE_PRIVATE_KEY (PEM PKCS8).
@@ -46,9 +49,11 @@ function policy(current) {
   const envMin = String(process.env.PVZ_APP_MIN_VERSION || '').trim();
   const minVersion = maxVersion(envMin === '0' ? '' : envMin, latest && latest.min_version ? String(latest.min_version) : '');
   const newer = !!(latest && current && isOlder(current, latest.version));
+  const after = latest && latest.mandatory_after ? Date.parse(latest.mandatory_after) : NaN;
+  const mandatoryNow = latest && latest.mandatory === true && !(after > Date.now());
   const mandatory = !!current && (
     (minVersion && isOlder(current, minVersion)) ||
-    (newer && latest.mandatory === true)
+    (newer && mandatoryNow)
   );
   return { latest, newer, mandatory: !!mandatory, minVersion: minVersion || null };
 }
@@ -67,6 +72,8 @@ function updateResponse(req, res, origin) {
     signature: latest.signature,
     mandatory,
     min_version: minVersion,
+    mandatory_after: latest.mandatory === true && latest.mandatory_after ? String(latest.mandatory_after) : null,
+    auto: latest.auto !== false,
   });
 }
 
