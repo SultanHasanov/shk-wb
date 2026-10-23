@@ -260,16 +260,31 @@ async function showClientCodePaywall(from, chatId, sid, balance) {
   ]) });
 }
 
-/** Telegram ID через запятую в CLIENT_CODE_FREE_TELEGRAM_IDS — QR без оплаты (владелец сервиса). */
+/**
+ * Безлимитный тариф: «Код клиента», «Кто поставил оценку» и стикеры товаров/коробок без оплаты.
+ * Имя — для фразы «У вас, <имя>, безлимитный тариф».
+ */
+const UNLIMITED_TELEGRAM_USERS = { 439335621: 'Султан', 1751409240: 'Зара' };
+
+function unlimitedName(telegramId) { return UNLIMITED_TELEGRAM_USERS[String(telegramId)] || null; }
+
+function unlimitedLine(telegramId) {
+  const name = unlimitedName(telegramId);
+  return name ? `У вас, ${name}, безлимитный тариф.` : 'Бесплатный доступ.';
+}
+
+function envIdList(name) { return String(process.env[name] || '').split(',').map(value => value.trim()).filter(Boolean); }
+
+/** Безлимит или Telegram ID через запятую в CLIENT_CODE_FREE_TELEGRAM_IDS — QR без оплаты. */
 function clientCodeFreeFor(telegramId) {
-  return String(process.env.CLIENT_CODE_FREE_TELEGRAM_IDS || '').split(',').map(value => value.trim()).filter(Boolean).includes(String(telegramId));
+  return Boolean(unlimitedName(telegramId)) || envIdList('CLIENT_CODE_FREE_TELEGRAM_IDS').includes(String(telegramId));
 }
 
 /** «Код <SID>» → списать 50 ₽ и прислать только QR-код. */
 async function handleClientCode(from, chatId, sid) {
   const { qrText: freeQr } = buildClientQr(sid);
   if (clientCodeFreeFor(from.id)) {
-    await sendPhoto(chatId, clientQrUrl(freeQr), { caption: 'Бесплатный доступ.' });
+    await sendPhoto(chatId, clientQrUrl(freeQr), { caption: unlimitedLine(from.id) });
     return;
   }
   const userId = await findUser(from.id);
@@ -511,6 +526,12 @@ function wizardView(state, draft) {
     return { text: `${trail}${error}<b>Отправьте номер сообщением</b>\n${draft.category === 'box' ? 'Номер коробки' : 'ШК'} — ровно ${length} цифр.`, rows: [[GEN_BACK, GEN_CANCEL]] };
   }
   // state === 'confirm'
+  if (draft.unlimited) {
+    return { text: `${trail}${error}<b>Проверьте параметры</b>\nУ вас, ${escapeHtml(draft.unlimited)}, безлимитный тариф — генерация бесплатная.`, rows: [
+      [{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }],
+      [GEN_BACK, GEN_CANCEL],
+    ] };
+  }
   if (draft.accessCode) {
     return { text: `${trail}${error}<b>Проверьте параметры</b>\nГенерации спишутся с вашего кода доступа.`, rows: [
       [{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }],
@@ -550,7 +571,7 @@ async function wizardBack(from, chatId, session, messageId) {
     return renderWizard(from, chatId, 'choose_mode', draft, messageId);
   }
   if (state === 'confirm') {
-    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks;
+    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks; delete draft.unlimited;
     if (draft.mode === 'range') { delete draft.quantity; return renderWizard(from, chatId, 'await_quantity', draft, messageId); }
     delete draft.code;
     return renderWizard(from, chatId, 'await_code', draft, messageId);
@@ -682,6 +703,13 @@ function telegramRequesterHash(telegramId) {
 /** Подтверждение: сначала генерации на кодах доступа, если их нет — оплата с баланса. */
 async function requestConfirmation(from, chatId, draft, messageId) {
   const units = requiredUnits(draft);
+  if (unlimitedName(from.id)) {
+    // Безлимит: свой код без оплаты, лимит которого бот поднимает сам перед каждой генерацией.
+    draft.unlimited = unlimitedName(from.id);
+    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks;
+    return renderWizard(from, chatId, 'confirm', draft, messageId);
+  }
+  delete draft.unlimited;
   const accessCode = await selectAccessCode(draft.userId, units);
   if (accessCode) { draft.accessCode = accessCode; delete draft.walletCost; delete draft.balanceKopecks; }
   else {
@@ -696,6 +724,23 @@ async function requestConfirmation(from, chatId, draft, messageId) {
 async function ownTopupCode(userId) {
   const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code&order=created_at.desc&limit=1`);
   return rows[0]?.code || null;
+}
+
+const UNLIMITED_CODE_NAME = 'Безлимитный тариф (Telegram)';
+
+/** Код безлимитного тарифа владельца: создаём при первой генерации, лимит держим с большим запасом. */
+async function unlimitedAccessCode(userId, units) {
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&name=eq.${encodeURIComponent(UNLIMITED_CODE_NAME)}&select=code,active,generation_limit,generation_used&order=created_at.asc&limit=1`);
+  const row = rows[0];
+  if (!row) {
+    const code = `STK-${crypto.randomBytes(16).toString('hex').toUpperCase()}`;
+    await supabaseFetch('sticker_access_codes', { method: 'POST', body: JSON.stringify({ code, name: UNLIMITED_CODE_NAME, active: true, owner_user_id: userId, generation_limit: 100000, generation_used: 0 }) });
+    return code;
+  }
+  if (!row.active || remainingOf(row) < units + 1000) {
+    await supabaseFetch(`sticker_access_codes?code=eq.${encodeURIComponent(row.code)}`, { method: 'PATCH', body: JSON.stringify({ active: true, generation_limit: Number(row.generation_used || 0) + units + 100000 }) });
+  }
+  return row.code;
 }
 
 /** Купить с баланса ровно нужное число генераций; возвращает код, на который они легли. */
@@ -764,7 +809,10 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
   const requestId = `${from.id}:${messageId}${draft.nonce || ''}`;
   if (!await claimGenerationRequest(requestId, from, chatId, draft)) { await onDuplicate(); return; }
   let paidLine = '';
-  if (!draft.accessCode) {
+  if (draft.unlimited) {
+    draft.accessCode = await unlimitedAccessCode(draft.userId, requiredUnits(draft));
+    paidLine = ` У вас, ${escapeHtml(draft.unlimited)}, безлимитный тариф.`;
+  } else if (!draft.accessCode) {
     // Генераций на кодах нет — докупаем ровно нужное с баланса и генерируем этим кодом.
     const bought = await buyGenerationsWithWallet(draft);
     if (!bought.ok) {
@@ -793,7 +841,7 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     await clearSession(from.id);
     // Если генерации уже куплены с баланса, они остались на коде — следующая попытка возьмёт их без оплаты.
-    const kept = paidLine ? '\n\nОплаченные генерации остались на вашем счёте — попробуйте ещё раз, повторно платить не нужно.' : '';
+    const kept = paidLine && !draft.unlimited ? '\n\nОплаченные генерации остались на вашем счёте — попробуйте ещё раз, повторно платить не нужно.' : '';
     await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
   }
 }
@@ -1131,9 +1179,9 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
  * «👤 Кто поставил оценку» — платно: 1 проверка за клиента в этом ПВЗ. Баланс проверяем до запроса
  * к WB, а списываем после — и только если WB что-то отдал. Повтор того же автора бесплатный.
  */
-/** Telegram ID через запятую в REVIEW_FREE_TELEGRAM_IDS — «Кто поставил оценку» без оплаты (владелец сервиса). */
+/** Безлимит или Telegram ID через запятую в REVIEW_FREE_TELEGRAM_IDS — «Кто поставил оценку» без оплаты. */
 function reviewFreeFor(telegramId) {
-  return String(process.env.REVIEW_FREE_TELEGRAM_IDS || '').split(',').map(value => value.trim()).includes(String(telegramId));
+  return Boolean(unlimitedName(telegramId)) || envIdList('REVIEW_FREE_TELEGRAM_IDS').includes(String(telegramId));
 }
 
 async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
@@ -1141,7 +1189,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   if (reviewFreeFor(from.id)) {
     const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
-    return sendMessage(chatId, `${info.text}\n\n<i>Бесплатный доступ.</i>`);
+    return sendMessage(chatId, `${info.text}\n\n<i>${unlimitedLine(from.id)}</i>`);
   }
   const userId = await findUser(from.id);
   if (!userId) return showReviewPaywall(from, chatId);
