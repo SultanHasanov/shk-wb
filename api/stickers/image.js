@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { boxStickerSvg, stickerSvg } = require('../../server/_stickers');
+const { boxStickerSvg, clientQrPng, stickerSvg } = require('../../server/_stickers');
+const { isClientQrText } = require('../../server/_wb-code');
 const { supabaseFetch } = require('../../server/_supabase');
 const { requireUser } = require('../../server/_user-auth');
 const path = require('path');
@@ -19,6 +20,26 @@ module.exports = async function handler(req, res) {
   const expires = Number(req.query?.expires || 0);
   let variant = String(req.query?.variant || '');
   let prefix = String(req.query?.prefix || 'TRBX').toUpperCase();
+  // Режим «голый QR из подписанного текста» — код клиента для Telegram-бота.
+  const qrText = String(req.query?.qr || '');
+  if (qrText) {
+    if (!process.env.STICKER_CLIENT_SECRET) return res.status(500).end();
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isInteger(expires) || expires < now || expires > now + 3700) return res.status(403).end();
+    if (!isClientQrText(qrText)) return res.status(400).end();
+    const expected = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(`qr:${qrText}:${expires}`).digest('base64url');
+    const left = Buffer.from(token); const right = Buffer.from(expected);
+    if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return res.status(403).end();
+    try {
+      const png = await clientQrPng(qrText);
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.status(200).send(Buffer.from(png));
+    } catch (error) {
+      console.error(error);
+      return res.status(502).end();
+    }
+  }
   if (!/^\d{1,12}$/.test(code)) return res.status(400).end();
   try {
     if (example) {

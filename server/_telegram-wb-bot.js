@@ -4,7 +4,8 @@ const path = require('path');
 const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
-const { CELL_PRINT_PRICES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
+const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
+const { buildClientQr } = require('./_wb-code');
 const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
@@ -217,19 +218,66 @@ async function showMainMenu(from, chatId, messageId) {
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
 }
 
-async function showFindCode(chatId, messageId) {
+/** Подписанная ссылка на «голый» QR кода клиента (отдаёт api/stickers/image в режиме qr). */
+function clientQrUrl(qrText) {
+  const expires = Math.floor(Date.now() / 1000) + 3600;
+  const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(`qr:${qrText}:${expires}`).digest('base64url');
+  return publicUrl(`/api/stickers/image?qr=${encodeURIComponent(qrText)}&token=${encodeURIComponent(token)}&expires=${expires}&format=png`);
+}
+
+async function showClientCode(chatId, messageId) {
   const free = await helperFreeText();
   const text = [
     '<b>🔑 Код клиента</b>',
-    'Подберёт программа «Помощник ПВЗ» на компьютере пункта — за пару минут.',
+    `Чтобы получить QR клиента, отправьте: <code>Код ID</code>. За QR спишется <b>${wallet.formatRub(CLIENT_CODE_PRICE)}</b> с баланса бота.`,
     '',
-    `1. Скачайте: ${PROGRAM_URL}`,
-    '2. Войдите аккаунтом shk-wb.ru',
-    '3. Ячейка клиента → «Найти код»',
+    '<b>Где взять ID (SID) клиента</b> — в программе «Помощник ПВЗ» на ПК пункта:',
+    '• откройте ячейку клиента — рядом с ID будет кнопка копирования;',
+    '• или найдите клиента по номеру телефона.',
+    `Для доступа к ячейкам и поиску нужен тариф «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
     '',
-    free ? `От ${PLANS.basic.monthlyPrice} ₽/мес · сейчас ${free}` : `От ${PLANS.basic.monthlyPrice} ₽/мес`,
+    'Пример команды:',
+    '<code>Код 191607973</code>',
   ].join('\n');
-  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([[{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }], MENU_ROW]) });
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    [{ text: `🛒 Купить «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:basic' }],
+    [{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }],
+    MENU_ROW,
+  ]) });
+}
+
+/** Не хватает денег на QR — пополнить ровно на недостающее и выдать QR (afterWalletTopup → qr:<sid>). */
+async function showClientCodePaywall(from, chatId, sid, balance) {
+  const text = [
+    `<b>🔑 Код клиента — ${wallet.formatRub(CLIENT_CODE_PRICE)}</b>`,
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b> — не хватает.`,
+    'После пополнения QR придёт сам.',
+  ].join('\n');
+  await sendMessage(chatId, text, { reply_markup: choiceKeyboard([
+    topupAndBuyRow(CLIENT_CODE_PRICE - balance, `qr:${sid}`),
+    MENU_ROW,
+  ]) });
+}
+
+/** «Код <SID>» → списать 50 ₽ и прислать только QR-код. */
+async function handleClientCode(from, chatId, sid) {
+  const userId = await findUser(from.id);
+  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  const { qrText } = buildClientQr(sid);
+  const balance = await walletRub(userId);
+  if (balance < CLIENT_CODE_PRICE) return showClientCodePaywall(from, chatId, sid, balance);
+  const spent = await supabaseFetch('rpc/wallet_spend', {
+    method: 'POST',
+    body: JSON.stringify({ p_user: userId, p_kopecks: CLIENT_CODE_PRICE * 100, p_event_key: `qr:${userId}:${qrText}`, p_details: { sid: String(sid) } }),
+  });
+  if (!spent?.ok) return showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100);
+  try {
+    await sendPhoto(chatId, clientQrUrl(qrText), { caption: `Списано ${wallet.formatRub(CLIENT_CODE_PRICE)} · баланс ${wallet.formatRub(Number(spent.balance) / 100)}` });
+  } catch (error) {
+    // Фото не ушло — возвращаем деньги, чтобы не списать за несделанное.
+    await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: CLIENT_CODE_PRICE * 100, p_note: `qr refund ${qrText}` }) }).catch(() => {});
+    throw error;
+  }
 }
 
 async function showHelperInfo(chatId, messageId) {
@@ -976,19 +1024,19 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   if (!userId) return showReviewPaywall(from, chatId);
   const clientId = authorIdentifiers(reviewOrUserId, userSid)[0] || null;
   const pointId = Number(connection.session.pointId) || 0;
-  let revealed = false;
-  if (clientId) {
-    const [rows, balance] = await Promise.all([
-      supabaseFetch(`bot_review_reveals?user_id=eq.${encodeURIComponent(userId)}&point_id=eq.${pointId}&client_id=eq.${clientId}&select=client_id&limit=1`),
-      walletRub(userId),
-    ]);
-    revealed = rows.length > 0;
-    if (!revealed && balance < REVIEW_PRICE) return showReviewPaywall(from, chatId, 'empty', undefined, then);
-  }
-  const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
+  // Баланс, факт прошлого показа и данные автора узнаём параллельно. Пэйвол показываем только
+  // после запроса к WB: если автора не определить, показ бесплатный и денег не требуется.
+  const [revealed, balance, info] = await Promise.all([
+    clientId
+      ? supabaseFetch(`bot_review_reveals?user_id=eq.${encodeURIComponent(userId)}&point_id=eq.${pointId}&client_id=eq.${clientId}&select=client_id&limit=1`).then(rows => rows.length > 0)
+      : Promise.resolve(false),
+    walletRub(userId),
+    buildReviewAuthor(from, connection, reviewOrUserId, userSid),
+  ]);
   let footer;
   if (!clientId || !info.found) footer = 'Данных об авторе нет — деньги не списаны.';
   else if (revealed) footer = 'Этого автора вы уже смотрели — бесплатно.';
+  else if (balance < REVIEW_PRICE) return showReviewPaywall(from, chatId, 'empty', undefined, then);
   else {
     // bot_review_spend списывает 25 ₽ с баланса (миграция 20261023_wallet.sql), balance — в копейках.
     const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId }) });
@@ -1462,6 +1510,11 @@ async function afterWalletTopup(order) {
     await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]));
     return true;
   }
+  const qr = /^qr:(\d{1,12})$/.exec(then);
+  if (qr) {
+    await handleClientCode(from, chatId, qr[1]);
+    return true;
+  }
   if (then.startsWith('shop:')) {
     // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
     const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
@@ -1488,7 +1541,7 @@ async function handleMenu(from, chatId, item, messageId) {
   // Ушли из мастера кнопкой меню — его черновик больше не нужен.
   if (item !== 'stickers') await clearSession(from.id).catch(() => {});
   if (item === 'stickers') return startGeneration(from, chatId, messageId);
-  if (item === 'code') return showFindCode(chatId, messageId);
+  if (item === 'code') return showClientCode(chatId, messageId);
   if (item === 'reviews') return showReviewFilters(from, chatId, messageId);
   if (item === 'helper') return showHelperInfo(chatId, messageId);
   if (item === 'cellprint') return showCellPrintInfo(chatId, messageId);
@@ -1622,12 +1675,16 @@ async function handleMessage(message) {
   if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: HOME_KEYBOARD }); return; }
   if (/^\/(generate|stickers)(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
-  if (/^\/code(?:@\w+)?$/i.test(text)) return showFindCode(chatId);
+  if (/^\/code(?:@\w+)?$/i.test(text)) return showClientCode(chatId);
   if (/^\/profile(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
   if (/^\/invite(?:@\w+)?$/i.test(text)) return showReferrals(from, chatId);
   if (/^\/reviews(?:@\w+)?$/i.test(text)) return showReviewFilters(from, chatId);
   if (/^\/account(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
   if (/^\/orders(?:@\w+)?$/i.test(text) || text === '📦 Мои индивидуальные заказы') return showIndividualOrders(from, chatId);
+  // «Код <SID>» → QR клиента (списывает 50 ₽). Голое «код …» без цифр — показываем инструкцию.
+  const codeMatch = /^\s*код\s+(\d{1,12})\s*$/iu.exec(text);
+  if (codeMatch) return handleClientCode(from, chatId, codeMatch[1]);
+  if (/^\s*код\b/iu.test(text)) return showClientCode(chatId);
   // Старые кнопки большой клавиатуры ещё висят у людей — принимаем их.
   if (text === '➕ Создать ШК' || text === '🏷 Стикеры и QR') return startGeneration(from, chatId);
   if (text === '🏷 Стикеры для товаров') return startForCategory(from, chatId, 'product');

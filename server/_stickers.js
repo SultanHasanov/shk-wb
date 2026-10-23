@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode');
+const { isClientQrText } = require('./_wb-code');
 
 const VERHOEFF_MUL = [
   [0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],
@@ -52,6 +53,15 @@ function requesterHash(req) {
 
 async function qrPng(code, width = 700, margin = 3) {
   return QRCode.toBuffer(encodeWbPayload(code), {
+    type: 'png', width, margin, errorCorrectionLevel: 'M',
+    color: { dark: '#000000', light: '#ffffff' },
+  });
+}
+
+/** «Голый» QR из строки кода клиента (без рамки WB) для бота. */
+async function clientQrPng(text, width = 600, margin = 4) {
+  if (!isClientQrText(text)) throw new Error('Invalid client QR text');
+  return QRCode.toBuffer(String(text), {
     type: 'png', width, margin, errorCorrectionLevel: 'M',
     color: { dark: '#000000', light: '#ffffff' },
   });
@@ -190,4 +200,4 @@ async function boxStickerSvg(prefix, code) {
   </svg>`;
 }
 
-module.exports = { boxStickerSvg, encodeWbPayload, qrPng, qrTextPng, requesterHash, returnStickerDesign, returnStickerSvg, splitCode, stickerDecorations, stickerSvg };
+module.exports = { boxStickerSvg, clientQrPng, encodeWbPayload, qrPng, qrTextPng, requesterHash, returnStickerDesign, returnStickerSvg, splitCode, stickerDecorations, stickerSvg };

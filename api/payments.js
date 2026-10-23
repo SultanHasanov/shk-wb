@@ -204,7 +204,7 @@ module.exports = async function handler(req, res) {
       // «Пополнить на X ₽ и купить» из бота: что купить сразу после зачисления (afterWalletTopup)
       // и какой экран бота превратить в «Готово». Принимаем только известный формат.
       const walletThen = String(req.body?.walletThen || '');
-      const walletThenValid = /^(gen|rv:(all|[1-5]):\d{1,4}:\d|shop:[a-z0-9:]{1,60})$/.test(walletThen);
+      const walletThenValid = /^(gen|rv:(all|[1-5]):\d{1,4}:\d|qr:\d{1,12}|shop:[a-z0-9:]{1,60})$/.test(walletThen);
       const walletMessage = Number(req.body?.walletMessage || 0);
       if (productKind === 'wallet_topup') {
         if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы пополнить баланс' });

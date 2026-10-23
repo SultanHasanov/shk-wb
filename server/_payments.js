@@ -8,6 +8,8 @@ const LICENSE_PRICES = Object.freeze({ 1:25, 3:40, 5:50, 10:90, 20:150 });
 // «Кто поставил оценку» в Telegram-боте: цена за одного автора, списывается с баланса
 // (сама сумма списания зашита в bot_review_spend, миграция 20261023_wallet.sql — менять вместе).
 const REVIEW_PRICE = 25;
+// «Код клиента» в Telegram-боте: цена за один QR, списывается с баланса (rpc wallet_spend).
+const CLIENT_CODE_PRICE = 50;
 const CELL_PRINT_PRICES = Object.freeze({7:{1:50,2:85,3:115,5:175,10:300,20:500},30:{1:150,2:255,3:345,5:525,10:900,20:1500},90:{1:350,2:595,3:805,5:1225,10:2100,20:3500},180:{1:600,2:1020,3:1380,5:2100,10:3600,20:6000},365:{1:1000,2:1700,3:2300,5:3500,10:6000,20:10000}});
 
 function hasYookassa() { return Boolean(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY); }
@@ -146,4 +148,4 @@ async function notifyCompleted(order){
     }
   }
 }
-module.exports = { CELL_PRINT_PRICES, completeOrder, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };
+module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };
