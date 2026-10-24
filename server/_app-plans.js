@@ -110,11 +110,11 @@ const ADDONS = Object.freeze({
   // Зеркало пункта: его ячейки, «в пути» и клиенты видны с других ПК аккаунта. Цена — за пункт:
   // зеркало занимает место в облаке. Пункты берутся по порядку подключения (первые N).
   mirror_1: Object.freeze({
-    id: 'mirror_1', kind: 'pack', title: 'Пункт с любого ПК', summary: 'Ячейки, «в пути» и клиенты одного пункта — на других компьютерах аккаунта',
+    id: 'mirror_1', kind: 'pack', title: 'Загрузка с другого ПК', summary: 'Ячейки, «в пути» и история клиентов одного пункта — на других компьютерах аккаунта, напрямую с компьютера пункта',
     minPlan: 'standard', monthlyPrice: 199, devices: 0, points: 0, mirror: 1, prices: packPrices(199), features: Object.freeze(['mirror']),
   }),
   mirror_3: Object.freeze({
-    id: 'mirror_3', kind: 'pack', title: '3 пункта с любого ПК', summary: 'То же для трёх пунктов',
+    id: 'mirror_3', kind: 'pack', title: 'Загрузка с другого ПК — 3 пункта', summary: 'То же для трёх пунктов',
     minPlan: 'standard', monthlyPrice: 597, devices: 0, points: 0, mirror: 3, prices: packPrices(597), features: Object.freeze(['mirror']),
   }),
 });

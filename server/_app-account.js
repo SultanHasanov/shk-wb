@@ -202,9 +202,11 @@ async function registerDeviceFree(userId, deviceHash, name, version) {
   return created[0].id;
 }
 
+// Название ПК задаётся при первом входе (адрес пункта или «Домашний ноутбук») и дальше меняется
+// только переименованием — повторный вход его не затирает (пустое имя = оставить как есть).
 async function registerDevice(userId, deviceHash, name, version) {
   const known = await deviceKnown(userId, deviceHash);
-  const id = await registerDeviceLimited(userId, deviceHash, name, version);
+  const id = await registerDeviceLimited(userId, deviceHash, known ? '' : name, version);
   if (!known) await notifyNewDevice(userId, name);
   return id;
 }
@@ -229,7 +231,7 @@ async function registerDeviceLimited(userId, deviceHash, name, version) {
 async function requireDevice(req, userId) {
   const hash = deviceHashFrom(req);
   if (!hash) throw appError(400, 'DEVICE_REQUIRED', 'Обновите программу');
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,last_seen_at&limit=1`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at&limit=1`);
   if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
   const device = rows[0];
   if (Date.now() - new Date(device.last_seen_at).getTime() > 10 * 60 * 1000) {
@@ -251,6 +253,19 @@ async function listDevices(userId, currentHash) {
     createdAt: row.created_at,
     current: Boolean(currentHash && row.device_hash === currentHash),
   }));
+}
+
+async function renameDevice(userId, deviceId, name) {
+  const clean = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
+  if (!clean) throw appError(400, 'VALIDATION_ERROR', 'Введите название компьютера');
+  const rows = await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ name: clean }),
+  });
+  if (!rows.length) throw appError(404, 'NOT_FOUND', 'Устройство не найдено');
+  return { id: rows[0].id, name: rows[0].name };
 }
 
 async function revokeDevice(userId, deviceId) {
@@ -346,7 +361,7 @@ async function accountSummary(user, currentHash) {
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
     deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all).devices,
     pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all).points,
-    // сколько пунктов видно с других ПК (пакеты «Пункт с любого ПК»)
+    // сколько пунктов можно загружать на другие ПК (пакеты «Загрузка с другого ПК»)
     mirrorLimit: mirrorLimit(plan, rawAddons, unlimited),
     devices,
     points: points.map(p => ({
@@ -662,6 +677,7 @@ module.exports = {
   refreshSession,
   registerDevice,
   requireDevice,
+  renameDevice,
   revokeDevice,
   sessionPayload,
   startBrowserLogin,

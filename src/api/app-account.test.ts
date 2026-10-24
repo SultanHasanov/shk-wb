@@ -92,6 +92,39 @@ describe('вход и списание в программе', () => {
     expect(res.body).toMatchObject({ code: 'DEVICE_LIMIT', devices: [{ id: 'd1', name: 'Старый', current: false }], session: { access_token: 'acc' } });
   });
 
+  it('повторный вход не затирает название ПК (пустое имя = оставить)', async () => {
+    let sent: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes('grant_type=password')) return { body: session };
+      if (url.includes('app_devices?') && url.includes('select=id&limit=1')) return { body: [{ id: 'dev-1' }] };
+      if (url.includes('rpc/app_register_device')) { sent = JSON.parse(String(init.body)); return { body: 'dev-1' }; }
+    });
+    const res = response();
+    await handler(request('login', { method: 'POST', body: { email: 'a@b.c', password: 'x', deviceName: 'DESKTOP-123' } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(sent).toMatchObject({ p_name: '' });
+  });
+
+  it('переименование ПК — только своего и не пустым', async () => {
+    let patched: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes('/auth/v1/user')) return { body: { id: 'u1', email: 'a@b.c' } };
+      if (url.includes('app_devices?id=eq.') && init.method === 'PATCH') {
+        patched = JSON.parse(String(init.body));
+        expect(url).toContain('user_id=eq.u1');
+        return { body: [{ id: '11111111-1111-4111-8111-111111111111', name: patched!.name }] };
+      }
+    });
+    const id = '11111111-1111-4111-8111-111111111111';
+    const ok = response();
+    await handler({ ...request('device', { method: 'PATCH', body: { name: '  ПВЗ   ул. Садовая, 12 ' }, headers: { authorization: 'Bearer t' } }), query: { action: 'device', id } }, ok);
+    expect(ok.statusCode).toBe(200);
+    expect(patched).toEqual({ name: 'ПВЗ ул. Садовая, 12' });
+    const empty = response();
+    await handler({ ...request('device', { method: 'PATCH', body: { name: '  ' }, headers: { authorization: 'Bearer t' } }), query: { action: 'device', id } }, empty);
+    expect(empty.statusCode).toBe(400);
+  });
+
   it('неверный пароль — понятная ошибка', async () => {
     mockSupabase(url => { if (url.includes('grant_type=password')) return { status: 400, body: { error_code: 'invalid_credentials', msg: 'Invalid login credentials' } }; });
     const res = response();

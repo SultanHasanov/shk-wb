@@ -3,7 +3,8 @@
 //
 // Кто что может (проверяется на каждый запрос, ПК уже проверен requireDevice):
 //   * отправлять архив и зеркало своего пункта — любой вошедший (собранное не теряется);
-//   * скачивать архив — только с услугой «Архив»; зеркало — только пункты из пакетов «Пункт с любого ПК»
+//   * скачивать архив — только с услугой «Архив»; зеркало — только пункты из пакетов «Загрузка с другого ПК»
+//     (с 1.6 архив и зеркало здесь не хранятся — см. _app-relay.js и APP_CLOUD_STORAGE_OFF)
 //     (или безлимит/бесплатный режим);
 //   * документы и секреты — любой вошедший (это его же настройки).
 // Пункт всегда ищется по (id, user_id) — чужой пункт не найдётся даже по точному id.
@@ -109,8 +110,16 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+// С Помощника 1.6 архив и зеркало хранятся только на компьютерах (передаются ПК→ПК, _app-relay.js).
+// APP_CLOUD_STORAGE_OFF=1 — после выпуска 1.6 обязательным: сервер больше ничего не записывает,
+// а старые версии получают «принято» и не повторяют отправку.
+function cloudStorageOff() {
+  return /^(1|true|yes)$/i.test(String(process.env.APP_CLOUD_STORAGE_OFF || ''));
+}
+
 async function archivePush(userId, pointId, body) {
   await ownPoint(userId, pointId);
+  if (cloudStorageOff()) return { changed: 0, disabled: true };
   const goods = asArray(body.goods);
   const clients = asArray(body.clients);
   const reviews = asArray(body.reviews);
@@ -164,9 +173,11 @@ function cursor(value) {
 }
 
 
-/** Изменения архива пункта после курсоров since = {goods, clients, reviews, shk}. */
-async function archivePull(userId, pointId, since = {}, limit = MAX_PULL_ROWS) {
-  await requireArchive(userId);
+/** Изменения архива пункта после курсоров since = {goods, clients, reviews, shk}.
+ *  С 1.6 программа один раз забирает отсюда то, что успело накопиться на сервере, в отдельный файл
+ *  на ПК — это свои же данные, поэтому без проверки услуги (показ истории закрыт в самой программе). */
+async function archivePull(userId, pointId, since = {}, limit = MAX_PULL_ROWS, { exportAll = false } = {}) {
+  if (!exportAll) await requireArchive(userId);
   await ownPoint(userId, pointId);
   const n = Math.max(1, Math.min(MAX_PULL_ROWS, Number(limit) || MAX_PULL_ROWS));
   const [goods, clients, reviews, shk] = await Promise.all([
@@ -219,6 +230,7 @@ async function mirrorAllowed(userId, pointId) {
 
 async function mirrorPush(userId, pointId, body) {
   await ownPoint(userId, pointId);
+  if (cloudStorageOff()) return { changed: 0, disabled: true };
   if (!await mirrorAllowed(userId, pointId)) return { changed: 0, disabled: true };
   const rows = asArray(body.rows);
   if (rows.length > MAX_PUSH_ROWS) throw appError(413, 'TOO_LARGE', `Не больше ${MAX_PUSH_ROWS} строк за раз`);

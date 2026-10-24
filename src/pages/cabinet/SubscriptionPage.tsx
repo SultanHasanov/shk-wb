@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Archive, Check, Download, Infinity as InfinityIcon, Laptop, MapPin, Minus, PackagePlus, Unlink } from 'lucide-react';
+import { Archive, Check, Download, Infinity as InfinityIcon, Laptop, MapPin, Minus, PackagePlus, Pencil, Unlink } from 'lucide-react';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Modal, Progress, Segmented, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { api } from '../../api/client';
 import { useCabinet } from '../../api/cabinet';
-import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRevokeAppDevice, useRevokeAppPoint } from '../../api/app';
+import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRenameAppDevice, useRevokeAppDevice, useRevokeAppPoint } from '../../api/app';
 import { PROGRAM_DOWNLOAD_URL } from '../../lib/downloads';
 import { useMoney } from '../../lib/currency';
 import { formatTotal as formatRub } from '../../lib/pricing';
@@ -193,6 +193,15 @@ function Devices({ account }: { account: AppAccount }) {
   const t = useT();
   const toast = useToast();
   const revoke = useRevokeAppDevice();
+  const rename = useRenameAppDevice();
+  const askName = (id: string, current: string) => {
+    const name = window.prompt(t('Название компьютера (например, адрес пункта или «Домашний ноутбук»)', 'Компьютер атауы'), current);
+    if (name == null || !name.trim() || name.trim() === current) return;
+    rename.mutate({ id, name: name.trim() }, {
+      onSuccess: () => toast(t('Название сохранено', 'Атауы сақталды'), 'success'),
+      onError: e => toast(e instanceof Error ? e.message : String(e), 'error'),
+    });
+  };
   return (
     <Card>
       <div className="stack">
@@ -205,7 +214,10 @@ function Devices({ account }: { account: AppAccount }) {
                   <strong>{device.name}</strong>
                   <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{t('Был в сети', 'Желіде болды')} {new Date(device.lastSeenAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{device.appVersion ? ` · v${device.appVersion}` : ''}</div>
                 </div>
-                <Button variant="ghost" size="sm" loading={revoke.isPending && revoke.variables === device.id} onClick={() => revoke.mutate(device.id, { onSuccess: () => toast(t('Компьютер отключён', 'Компьютер ажыратылды'), 'success') })}><Unlink size={15} />{t('Отключить', 'Ажырату')}</Button>
+                <div className="row" style={{ gap: 4 }}>
+                  <Button variant="ghost" size="sm" onClick={() => askName(device.id, device.name)}><Pencil size={15} />{t('Переименовать', 'Атын өзгерту')}</Button>
+                  <Button variant="ghost" size="sm" loading={revoke.isPending && revoke.variables === device.id} onClick={() => revoke.mutate(device.id, { onSuccess: () => toast(t('Компьютер отключён', 'Компьютер ажыратылды'), 'success') })}><Unlink size={15} />{t('Отключить', 'Ажырату')}</Button>
+                </div>
               </div>
             ))}</div>}
         <p className="muted" style={{ margin: 0 }}>{t('Отключённый компьютер выйдет из аккаунта при следующем обращении к серверу.', 'Ажыратылған компьютер серверге келесі жүгінгенде аккаунттан шығады.')}</p>
@@ -256,9 +268,9 @@ function Packs({ addons, account, onChoose, mirror = false }: { addons: AppAddon
   return (
     <Card>
       <div className="stack">
-        <div className="row"><PackagePlus size={20} /><h2 style={{ margin: 0 }}>{mirror ? t('Пункт с любого ПК', 'Пункт кез келген ДК-дан') : t('Ещё компьютеры и пункты', 'Қосымша компьютерлер мен пункттер')}</h2></div>
+        <div className="row"><PackagePlus size={20} /><h2 style={{ margin: 0 }}>{mirror ? t('Загрузка с другого ПК', 'Басқа ДК-дан жүктеу') : t('Ещё компьютеры и пункты', 'Қосымша компьютерлер мен пункттер')}</h2></div>
         <p className="muted" style={{ margin: 0 }}>{mirror
-          ? t('Ячейки, «в пути» и клиенты пункта видны на других компьютерах аккаунта — например, дома. Цена за пункт, с тарифа Стандарт; в бесплатный период не входит. На компьютере самого пункта всё работает и без этого.', 'Пункттің ұяшықтары, тауарлары және клиенттері аккаунттың басқа компьютерлерінде көрінеді. Баға — бір пунктке, Стандарт тарифінен.')
+          ? t('Данные пункта — ячейки, «в пути», история клиентов — загружаются с компьютера пункта на другой компьютер аккаунта, например домашний. Хранятся только на компьютерах, на сервере не остаются. Цена за пункт, с тарифа Стандарт; в бесплатный период не входит.', 'Пункт деректері пункт компьютерінен аккаунттың басқа компьютеріне жүктеледі. Тек компьютерлерде сақталады. Баға — бір пунктке, Стандарт тарифінен.')
           : t('Добавляются к тарифу на выбранный срок. Каждый пункт сразу даёт и +2 компьютера.', 'Тарифке таңдалған мерзімге қосылады. Әр пункт +2 компьютер береді.')}</p>
         <Segmented label={t('Срок', 'Мерзім')} value={String(months)} onChange={v => setMonths(Number(v))} options={terms.map(m => ({ value: String(m), label: monthsWord(m, t) }))} />
         <div className="grid grid-2">

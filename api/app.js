@@ -6,6 +6,7 @@ const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
 const sync = require('../server/_app-sync');
+const relay = require('../server/_app-relay');
 const { appFreeMode } = require('../server/_app-free');
 const appUpdate = require('../server/_app-update');
 const payments = require('./payments');
@@ -97,6 +98,12 @@ module.exports = async function handler(req, res) {
       if (!user) return;
       await account.revokeDevice(user.id, req.query.id);
       return res.status(204).end();
+    }
+    if (action === 'device' && req.method === 'PATCH') {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (!await enforceRateLimit(req, res, { scope: 'app-device-rename', limit: 30, windowSeconds: 600, key: user.id })) return;
+      return res.status(200).json(await account.renameDevice(user.id, req.query.id, body(req).name));
     }
 
     // Обновление и аренда — ДО проверки версии: устаревшая программа должна узнать,
@@ -194,7 +201,50 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Оплата из программы по QR-коду СБП: тот же заказ, что на сайте (api/payments.js),
+    // только ЮKassa отдаёт ссылку для QR вместо страницы оплаты. До проверки ПК: из окна
+    // «лимит компьютеров» докупают компьютер, пока этот ещё не подключён.
+    if (action === 'pay' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-pay', limit: 20, windowSeconds: 600, key: user.id })) return;
+      const b = body(req);
+      const kind = b.kind === 'addon' ? 'app_addon' : 'app_subscription';
+      req.query.action = 'create';
+      req.body = {
+        productKind: kind,
+        ...(kind === 'app_addon'
+          ? { appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
+          : { appPlan: String(b.plan || ''), appTermMonths: Number(b.months || 0) }),
+        accepted: b.accepted === true,
+        paymentMethod: 'sbp_qr',
+        returnTo: 'cabinet',
+      };
+      return payments(req, res);
+    }
+    if (action === 'pay-status' && req.method === 'GET') {
+      req.query.action = 'status';
+      return payments(req, res);
+    }
     const device = await account.requireDevice(req, user.id);
+
+    // --- загрузка данных пункта с другого ПК (server/_app-relay.js) — свой потолок частоты:
+    // ПК держит inbox постоянно, а большая загрузка идёт сотней кусков ---
+    if (action.startsWith('relay-')) {
+      if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
+      if (action === 'relay-inbox' && req.method === 'POST') return res.status(200).json(await relay.inbox(user.id, device, body(req)));
+      if (action === 'relay-peers' && req.method === 'GET') return res.status(200).json(relay.peers(user.id, device));
+      if (action === 'relay-ask' && req.method === 'POST') return res.status(200).json(await relay.ask(user.id, device, body(req)));
+      if (action === 'relay-put' && req.method === 'POST') return res.status(200).json(relay.put(user.id, device, req.query, req.body));
+      if (action === 'relay-ack' && req.method === 'POST') return res.status(200).json(relay.ack(user.id, device, req.query));
+      if (action === 'relay-get' && req.method === 'GET') {
+        const out = await relay.get(user.id, device, req.query);
+        if (!out.bytes) return res.status(200).json(out);
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('X-Relay-Last', out.last ? '1' : '0');
+        return res.status(200).end(out.bytes);
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
     // Общий потолок на всё остальное с одного аккаунта (синхронизация ходит пачками).
     if (!await enforceRateLimit(req, res, { scope: 'app-user', limit: 900, windowSeconds: 600, key: user.id })) return;
 
@@ -257,7 +307,7 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'archive-pull' && req.method === 'POST') {
       const b = body(req);
-      return res.status(200).json(await sync.archivePull(user.id, String(b.point || ''), b.since || {}, b.limit));
+      return res.status(200).json(await sync.archivePull(user.id, String(b.point || ''), b.since || {}, b.limit, { exportAll: b.export === true }));
     }
     if (action === 'mirror-push' && req.method === 'POST') {
       const b = body(req);
@@ -283,28 +333,6 @@ module.exports = async function handler(req, res) {
       if (!SITE_LINK_TARGETS.test(next)) return res.status(400).json({ error: 'Некорректная страница', code: 'VALIDATION_ERROR' });
       const tokenHash = await account.magicTokenHash(user.id);
       return res.status(200).json({ url: `${publicOrigin(req)}/app-login?th=${encodeURIComponent(tokenHash)}&next=${encodeURIComponent(next)}` });
-    }
-    // Оплата из программы по QR-коду СБП: тот же заказ, что на сайте (api/payments.js),
-    // только ЮKassa отдаёт ссылку для QR вместо страницы оплаты.
-    if (action === 'pay' && req.method === 'POST') {
-      if (!await enforceRateLimit(req, res, { scope: 'app-pay', limit: 20, windowSeconds: 600, key: user.id })) return;
-      const b = body(req);
-      const kind = b.kind === 'addon' ? 'app_addon' : 'app_subscription';
-      req.query.action = 'create';
-      req.body = {
-        productKind: kind,
-        ...(kind === 'app_addon'
-          ? { appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
-          : { appPlan: String(b.plan || ''), appTermMonths: Number(b.months || 0) }),
-        accepted: b.accepted === true,
-        paymentMethod: 'sbp_qr',
-        returnTo: 'cabinet',
-      };
-      return payments(req, res);
-    }
-    if (action === 'pay-status' && req.method === 'GET') {
-      req.query.action = 'status';
-      return payments(req, res);
     }
     if (action === 'logout' && req.method === 'POST') {
       await account.revokeDevice(user.id, device.id).catch(() => {});

@@ -29,7 +29,7 @@ export type AppAddon = {
   monthlyPrice?: number;
   devices?: number;
   points?: number;
-  /** пунктов в зеркале (пакеты «Пункт с любого ПК») */
+  /** пунктов, которые можно загружать на другие ПК (пакеты «Загрузка с другого ПК») */
   mirror?: number;
 };
 export type AppPoint = { id: string; wbPointId: string; name: string; lastSyncAt: string | null; mirrorAt: string | null; createdAt: string };
@@ -89,6 +89,16 @@ export function useRevokeAppDevice() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
+  });
+}
+
+/** Переименовать компьютер (название видно в программе и при загрузке данных с другого ПК). */
+export function useRenameAppDevice() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api<{ id: string; name: string }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
   });
 }
