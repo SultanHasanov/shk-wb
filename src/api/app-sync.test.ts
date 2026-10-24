@@ -265,6 +265,24 @@ describe('зеркало — услуга «Пункт с любого ПК»', 
     expect(mirrorPlans.effectiveFeatures('standard', { mirror_1: future }, false)).toContain('mirror');
   });
 
+  it('список пунктов: без услуги mirrorAt не пустой (программа не шлёт зеркало по кругу)', async () => {
+    const created = '2026-10-20T10:00:00Z';
+    const route = (url: string) => {
+      if (url.includes('app_points?user_id=eq.')) return { body: [{ id: POINT, wb_point_id: 7, name: 'П', created_at: created }, { id: OTHER, wb_point_id: 8, name: 'В', created_at: created }] };
+      if (url.includes('app_points?id=in.')) return { body: [] };
+    };
+    mockSupabase(route);
+    let res = response();
+    await handler(request('points'), res);
+    expect((res.body as { points: { mirrorAt: string | null }[] }).points.map(p => p.mirrorAt)).toEqual([created, created]);
+
+    mockSupabase(route, { plan: 'standard', device_limit: 2, addons: { mirror_1: future } });
+    res = response();
+    await handler(request('points'), res);
+    // первый оплачен, зеркала ещё нет — null, программа отправит его целиком
+    expect((res.body as { points: { mirrorAt: string | null }[] }).points.map(p => p.mirrorAt)).toEqual([null, created]);
+  });
+
   it('без пакета отправку принимаем и не пишем', async () => {
     const calls = mockSupabase(url => {
       if (url.includes('app_points?id=eq.')) return { body: [{ id: POINT, wb_point_id: 7 }] };

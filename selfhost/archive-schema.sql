@@ -1,4 +1,4 @@
--- Архив «Помощника ПВЗ» в своём Postgres на сервере (база pvz_archive, роль shkwb, только сокет).
+-- Архив и зеркало «Помощника ПВЗ» в своём Postgres на сервере (база pvz_archive, роль shkwb, только сокет).
 -- Перенесён из Supabase (20261028_app_points_sync.sql): таблицы и app_archive_push — те же,
 -- seq сохранены при переносе, поэтому курсоры программ остаются верными.
 -- Пункты (app_points) живут в Supabase, поэтому внешнего ключа на них здесь нет:
@@ -135,5 +135,60 @@ begin
   delete from app_archive_shk where fetched_at < cut;
   get diagnostics d = row_count;
   return jsonb_build_object('goods', a, 'clients', b, 'reviews', c, 'shk', d);
+end;
+$$;
+
+-- ---------- зеркало базы WB пункта (услуга «Пункт с любого ПК») ----------
+-- Было в Supabase (app_point_rows + колонки mirror_* в app_points): 12 пунктов заняли 1 ГБ.
+-- Отметки пункта (схема таблиц, время, порог удалений) — здесь же, в app_mirror_points.
+
+create table if not exists app_point_rows (
+  point_id uuid not null,
+  tbl text not null check (tbl ~ '^[a-z_]{1,40}$'),
+  pk text not null check (char_length(pk) between 1 and 400),
+  -- null = строки больше нет в базе WB (для тех, кто тянет изменения)
+  data_enc text check (char_length(data_enc) <= 64000),
+  updated_at timestamptz not null default now(),
+  seq bigint not null default nextval('app_sync_seq'),
+  primary key (point_id, tbl, pk)
+);
+create index if not exists app_point_rows_seq_idx on app_point_rows(point_id, seq);
+create index if not exists app_point_rows_gone_idx on app_point_rows(point_id, updated_at) where data_enc is null;
+
+create table if not exists app_mirror_points (
+  point_id uuid primary key,
+  mirror_schema jsonb,
+  mirror_floor bigint not null default 0,
+  mirror_at timestamptz
+);
+
+create or replace function app_mirror_push(p_point uuid, p_rows jsonb, p_schema jsonb)
+returns bigint language plpgsql as $$
+declare
+  n bigint;
+  floor_seq bigint;
+begin
+  insert into app_mirror_points (point_id) values (p_point) on conflict do nothing;
+  if p_schema is not null then
+    update app_mirror_points set mirror_schema = p_schema where point_id = p_point;
+  end if;
+  insert into app_point_rows as cur (point_id, tbl, pk, data_enc)
+  select p_point, r->>'t', r->>'k', nullif(r->>'d', '')
+    from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) r
+   where coalesce(r->>'t', '') <> '' and coalesce(r->>'k', '') <> ''
+  on conflict (point_id, tbl, pk) do update
+     set data_enc = excluded.data_enc, updated_at = now(), seq = nextval('app_sync_seq')
+   where excluded.data_enc is distinct from cur.data_enc;
+  get diagnostics n = row_count;
+  -- удалённые строки помним 3 дня; кто не заходил дольше — перекачает зеркало целиком
+  select max(seq) into floor_seq from app_point_rows
+   where point_id = p_point and data_enc is null and updated_at < now() - interval '3 days';
+  if floor_seq is not null then
+    delete from app_point_rows
+     where point_id = p_point and data_enc is null and updated_at < now() - interval '3 days';
+    update app_mirror_points set mirror_floor = greatest(mirror_floor, floor_seq) where point_id = p_point;
+  end if;
+  update app_mirror_points set mirror_at = now() where point_id = p_point;
+  return n;
 end;
 $$;

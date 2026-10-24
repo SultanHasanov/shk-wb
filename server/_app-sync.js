@@ -46,13 +46,21 @@ async function requireArchive(userId) {
 // ---------- пункты ----------
 
 async function listPoints(userId) {
-  const rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,mirror_at,created_at,last_device_id&order=created_at.asc`);
+  const rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,created_at,last_device_id&order=created_at.asc`);
+  // сбой отметок зеркала не должен ломать список пунктов
+  const [allowed, meta] = await Promise.all([
+    mirrorAllowedSet(userId, rows).catch(() => new Set()),
+    archive.mirrorMeta(rows.map(p => p.id)).catch(error => { console.error('mirror meta:', error.message); return {}; }),
+  ]);
   return rows.map(p => ({
     id: p.id,
     wbPointId: String(p.wb_point_id),
     name: p.name,
     lastSyncAt: p.last_sync_at,
-    mirrorAt: p.mirror_at,
+    // Пустой mirrorAt программа понимает как «зеркала в облаке нет» и шлёт его целиком заново.
+    // Пункту без услуги отдаём дату подключения, иначе 1.5.0 гоняет зеркало по кругу (24.10 —
+    // ~130 пачек в минуту): отправка всё равно отбрасывается. Купят — станет null, придёт целиком.
+    mirrorAt: allowed.has(p.id) ? meta[p.id]?.at || null : p.created_at,
     createdAt: p.created_at,
     lastDeviceId: p.last_device_id,
   }));
@@ -81,7 +89,7 @@ async function registerPoint(userId, deviceId, wbPointId, name) {
 
 async function ownPoint(userId, pointId) {
   if (!UUID_RE.test(String(pointId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректный пункт');
-  const rows = await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name,mirror_schema,mirror_floor,mirror_at&limit=1`);
+  const rows = await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name&limit=1`);
   if (!rows.length) throw appError(404, 'POINT_NOT_FOUND', 'Пункт не подключён к аккаунту');
   return rows[0];
 }
@@ -190,18 +198,23 @@ const TABLE_RE = /^[a-z_]{1,40}$/;
 // Зеркало — платная услуга (пакеты mirror_* в _app-plans.js): хранится только для первых
 // N пунктов аккаунта по порядку подключения. Остальным отправку принимаем и не пишем, отдаём
 // пусто — старые программы (1.5.0 шлют зеркало всем) не видят ошибки и не повторяют отправку.
-// У такого пункта mirror_at остаётся пустым, поэтому после покупки программа отправит всё заново.
+// Зеркала такого пункта нет, поэтому после покупки программа отправит его целиком (см. listPoints).
 // APP_MIRROR_DISABLED=1 — выключить зеркало всем (аварийный выключатель).
 function mirrorDisabled() {
   return /^(1|true|yes)$/i.test(String(process.env.APP_MIRROR_DISABLED || ''));
 }
 
-async function mirrorAllowed(userId, pointId) {
-  if (mirrorDisabled()) return false;
+// Пункты, у которых хранится зеркало. points — уже загруженные пункты аккаунта по порядку подключения.
+async function mirrorAllowedSet(userId, points) {
+  if (mirrorDisabled()) return new Set();
   const { mirror } = await entitlementsFor(userId);
-  if (mirror <= 0) return false;
-  const rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id&order=created_at.asc&limit=${mirror}`);
-  return rows.some(r => r.id === pointId);
+  if (mirror <= 0) return new Set();
+  const rows = points || await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id&order=created_at.asc&limit=${mirror}`);
+  return new Set(rows.slice(0, mirror).map(r => r.id));
+}
+
+async function mirrorAllowed(userId, pointId) {
+  return (await mirrorAllowedSet(userId)).has(pointId);
 }
 
 async function mirrorPush(userId, pointId, body) {
@@ -220,27 +233,24 @@ async function mirrorPush(userId, pointId, body) {
   const payload = rows
     .filter(r => r && TABLE_RE.test(String(r.t || '')) && r.k)
     .map(r => ({ t: r.t, k: str(r.k, 400), d: r.d == null ? null : seal(userId, str(r.d, 48000)) }));
-  const changed = await supabaseFetch('rpc/app_mirror_push', {
-    method: 'POST',
-    body: JSON.stringify({ p_point: pointId, p_rows: payload, p_schema: schema }),
-  });
-  return { changed: Number(changed) || 0 };
+  return { changed: await archive.mirrorPush(pointId, payload, schema) };
 }
 
 async function mirrorPull(userId, pointId, since, limit = MAX_PULL_ROWS) {
-  const point = await ownPoint(userId, pointId);
+  await ownPoint(userId, pointId);
   const from = cursor(since);
+  const meta = (await archive.mirrorMeta([pointId]))[pointId] || { schema: null, floor: 0, at: null };
   if (!await mirrorAllowed(userId, pointId)) {
-    return { reset: false, schema: point.mirror_schema || null, at: point.mirror_at, rows: [], next: from, more: false, disabled: true };
+    return { reset: false, schema: meta.schema, at: meta.at, rows: [], next: from, more: false, disabled: true };
   }
   // отстали дальше, чем помнятся удаления, — начинаем зеркало заново
-  const reset = from > 0 && from < Number(point.mirror_floor || 0);
+  const reset = from > 0 && from < meta.floor;
   const n = Math.max(1, Math.min(MAX_PULL_ROWS, Number(limit) || MAX_PULL_ROWS));
-  const rows = await supabaseFetch(`app_point_rows?point_id=eq.${encodeURIComponent(pointId)}&seq=gt.${reset ? 0 : from}&select=tbl,pk,data_enc,seq&order=seq.asc&limit=${n}`);
+  const rows = await archive.mirrorPull(pointId, reset ? 0 : from, n);
   return {
     reset,
-    schema: point.mirror_schema || null,
-    at: point.mirror_at,
+    schema: meta.schema,
+    at: meta.at,
     rows: rows.map(r => ({ t: r.tbl, k: r.pk, d: r.data_enc ? open(userId, r.data_enc) : null })),
     next: rows.length ? rows[rows.length - 1].seq : (reset ? 0 : from),
     more: rows.length >= n,
@@ -327,7 +337,7 @@ async function secretAccessLog(userId, limit = 30) {
 async function purgePoint(userId, pointId) {
   await ownPoint(userId, pointId);
   await archive.purge(pointId);
-  await supabaseFetch(`app_point_rows?point_id=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
+  await archive.mirrorPurge(pointId);
   await supabaseFetch(`app_docs?user_id=eq.${encodeURIComponent(userId)}&scope=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
   await supabaseFetch(`app_docs_history?user_id=eq.${encodeURIComponent(userId)}&scope=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
   await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}`, {

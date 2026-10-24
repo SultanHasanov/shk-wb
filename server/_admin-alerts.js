@@ -75,4 +75,4 @@ async function notifyAdminSpend({ userId, priceRub, title, balanceKopecks }) {
   await sendToAdmins(lines.join('\n'));
 }
 
-module.exports = { notifyAdminOrder, notifyAdminSpend };
+module.exports = { notifyAdminOrder, notifyAdminSpend, sendToAdmins };

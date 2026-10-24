@@ -73,4 +73,58 @@ async function maintenance() {
   return rows[0]?.r || null;
 }
 
-module.exports = { TABLES, maintenance, pull, purge, push };
+// ---------- зеркало базы пункта ----------
+// В своём Postgres отметки пункта (схема, время, порог удалений) — в app_mirror_points;
+// в Supabase — колонки mirror_* в app_points.
+
+/** Отметки зеркала пунктов: { [pointId]: { schema, floor, at } }. */
+async function mirrorMeta(pointIds) {
+  const ids = [...new Set(pointIds.filter(Boolean))];
+  if (!ids.length) return {};
+  const p = db();
+  const rows = p
+    ? (await p.query('select point_id as id, mirror_schema, mirror_floor, mirror_at from app_mirror_points where point_id = any($1::uuid[])', [ids])).rows
+    : await supabaseFetch(`app_points?id=in.(${ids.map(encodeURIComponent).join(',')})&select=id,mirror_schema,mirror_floor,mirror_at`);
+  return Object.fromEntries(rows.map(r => [r.id, {
+    schema: r.mirror_schema || null,
+    floor: Number(r.mirror_floor || 0),
+    at: r.mirror_at instanceof Date ? r.mirror_at.toISOString() : r.mirror_at || null,
+  }]));
+}
+
+async function mirrorPush(pointId, rows, schema) {
+  const p = db();
+  if (!p) {
+    return Number(await supabaseFetch('rpc/app_mirror_push', {
+      method: 'POST',
+      body: JSON.stringify({ p_point: pointId, p_rows: rows, p_schema: schema }),
+    })) || 0;
+  }
+  const { rows: out } = await p.query('select app_mirror_push($1, $2, $3) as n', [pointId, JSON.stringify(rows), schema ? JSON.stringify(schema) : null]);
+  return Number(out[0]?.n) || 0;
+}
+
+async function mirrorPull(pointId, since, limit) {
+  const p = db();
+  if (!p) {
+    return supabaseFetch(`app_point_rows?point_id=eq.${encodeURIComponent(pointId)}&seq=gt.${since}&select=tbl,pk,data_enc,seq&order=seq.asc&limit=${limit}`);
+  }
+  const { rows } = await p.query(
+    'select tbl, pk, data_enc, seq from app_point_rows where point_id = $1 and seq > $2 order by seq asc limit $3',
+    [pointId, since, limit],
+  );
+  return rows;
+}
+
+/** Стереть зеркало пункта (пункт отключили или удалили его данные). */
+async function mirrorPurge(pointId) {
+  const p = db();
+  if (!p) {
+    await supabaseFetch(`app_point_rows?point_id=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
+    return;
+  }
+  await p.query('delete from app_point_rows where point_id = $1', [pointId]);
+  await p.query('delete from app_mirror_points where point_id = $1', [pointId]);
+}
+
+module.exports = { TABLES, maintenance, mirrorMeta, mirrorPull, mirrorPurge, mirrorPush, pull, purge, push };

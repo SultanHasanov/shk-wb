@@ -180,3 +180,6 @@ app.use((req, res, next) => {
 app.use((req, res) => res.status(404).type('text/plain').send('404: NOT_FOUND'));
 
 app.listen(port, '127.0.0.1', () => console.log(`shk-wb listening on 127.0.0.1:${port}`));
+
+// Мало места на диске (архив/зеркало Помощника в своём Postgres) — сообщение админу в Telegram.
+require('../server/_disk-alert').startDiskAlert();
