@@ -107,6 +107,16 @@ const ADDONS = Object.freeze({
     id: 'points_3', kind: 'pack', title: '+3 пункта', summary: 'Ещё три ПВЗ и +6 компьютеров',
     minPlan: 'basic', monthlyPrice: 790, devices: 6, points: 3, prices: packPrices(790), features: Object.freeze([]),
   }),
+  // Зеркало пункта: его ячейки, «в пути» и клиенты видны с других ПК аккаунта. Цена — за пункт:
+  // зеркало занимает место в облаке. Пункты берутся по порядку подключения (первые N).
+  mirror_1: Object.freeze({
+    id: 'mirror_1', kind: 'pack', title: 'Пункт с любого ПК', summary: 'Ячейки, «в пути» и клиенты одного пункта — на других компьютерах аккаунта',
+    minPlan: 'standard', monthlyPrice: 199, devices: 0, points: 0, mirror: 1, prices: packPrices(199), features: Object.freeze(['mirror']),
+  }),
+  mirror_3: Object.freeze({
+    id: 'mirror_3', kind: 'pack', title: '3 пункта с любого ПК', summary: 'То же для трёх пунктов',
+    minPlan: 'standard', monthlyPrice: 597, devices: 0, points: 0, mirror: 3, prices: packPrices(597), features: Object.freeze(['mirror']),
+  }),
 });
 
 function isPlan(value) {
@@ -147,7 +157,9 @@ function addonSnapshot(addon, months) {
  * addons — { archive: { ends_at } } из app_entitlements.
  */
 function effectiveFeatures(plan, addons, free) {
-  if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features)])];
+  // зеркало в бесплатный режим не входит — только купленное (место в облаке)
+  const mirror = mirrorLimit(plan, addons, false) > 0 ? ['mirror'] : [];
+  if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
   const base = isPlan(plan) ? [...PLANS[plan].features] : [];
   for (const [id, info] of Object.entries(addons || {})) {
     if (addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) base.push(...ADDONS[id].features);
@@ -171,6 +183,18 @@ function accountLimits(plan, addons, subDeviceLimit, unlimited) {
     }
   }
   return { devices, points };
+}
+
+// Сколько пунктов аккаунта зеркалируется: действующие пакеты mirror_* на тарифе не ниже minPlan.
+// Бесплатный режим не даёт зеркала; безлимит — все пункты.
+function mirrorLimit(plan, addons, unlimited) {
+  if (unlimited) return 99;
+  let n = 0;
+  for (const [id, info] of Object.entries(addons || {})) {
+    const a = ADDONS[id];
+    if (a?.mirror && addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) n += a.mirror;
+  }
+  return n;
 }
 
 // Цена в рублях без копеек: людям проще 1710 ₽, чем 1710,00.
@@ -226,13 +250,13 @@ function publicPlans() {
       minPlan: a.minPlan,
       prices: { ...a.prices },
       features: [...a.features],
-      ...(a.kind === 'pack' ? { monthlyPrice: a.monthlyPrice, devices: a.devices, points: a.points } : {}),
+      ...(a.kind === 'pack' ? { monthlyPrice: a.monthlyPrice, devices: a.devices, points: a.points, mirror: a.mirror || 0 } : {}),
     })),
   };
 }
 
 module.exports = {
   ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, TERMS,
-  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm,
+  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm, mirrorLimit,
   orderSnapshot, planPrice, planRank, publicPlans,
 };

@@ -188,7 +188,7 @@ describe('разделы по тарифам и услуга «Архив»', ()
     expect(p.addonSnapshot('archive', 6)?.total).toBe(590);
     expect(p.addonSnapshot('archive', 12)?.total).toBe(990);
     expect(p.addonSnapshot('archive', 1)).toBeNull();
-    expect(p.publicPlans().addons.map(a => a.id)).toEqual(['archive', 'devices_1', 'devices_3', 'points_1', 'points_3']);
+    expect(p.publicPlans().addons.map(a => a.id)).toEqual(['archive', 'devices_1', 'devices_3', 'points_1', 'points_3', 'mirror_1', 'mirror_3']);
     expect(p.publicPlans().features).not.toHaveProperty('sync');
   });
   it('оплата услуги проверяет тариф, заказ исполняется один раз', () => {

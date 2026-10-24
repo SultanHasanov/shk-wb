@@ -3,13 +3,14 @@
 //
 // Кто что может (проверяется на каждый запрос, ПК уже проверен requireDevice):
 //   * отправлять архив и зеркало своего пункта — любой вошедший (собранное не теряется);
-//   * скачивать архив, смотреть зеркало чужого пункта — только с услугой «Архив»
+//   * скачивать архив — только с услугой «Архив»; зеркало — только пункты из пакетов «Пункт с любого ПК»
 //     (или безлимит/бесплатный режим);
 //   * документы и секреты — любой вошедший (это его же настройки).
 // Пункт всегда ищется по (id, user_id) — чужой пункт не найдётся даже по точному id.
 const { supabaseFetch } = require('./_supabase');
 const { open, seal } = require('./_app-crypto');
 const { appError, dbErrorCode, entitlementsFor } = require('./_app-account');
+const archive = require('./_archive-db');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PUSH_ROWS = 1000;
@@ -138,8 +139,15 @@ async function archivePush(userId, pointId, body) {
       data: seal(userId, str(x.data, 48000)),
     })),
   };
-  const changed = await supabaseFetch('rpc/app_archive_push', { method: 'POST', body: JSON.stringify(payload) });
-  return { changed: Number(changed) || 0 };
+  const changed = await archive.push(payload);
+  // в своём Postgres пунктов нет — отметку синхронизации ставим в Supabase сами
+  if (process.env.ARCHIVE_DATABASE_URL) {
+    await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ last_sync_at: new Date().toISOString() }),
+    }).catch(error => console.error('last_sync_at:', error.message));
+  }
+  return { changed };
 }
 
 function cursor(value) {
@@ -147,9 +155,6 @@ function cursor(value) {
   return Number.isSafeInteger(n) && n > 0 ? n : 0;
 }
 
-async function pullTable(table, pointId, since, limit, select) {
-  return supabaseFetch(`${table}?point_id=eq.${encodeURIComponent(pointId)}&seq=gt.${since}&select=${select}&order=seq.asc&limit=${limit}`);
-}
 
 /** Изменения архива пункта после курсоров since = {goods, clients, reviews, shk}. */
 async function archivePull(userId, pointId, since = {}, limit = MAX_PULL_ROWS) {
@@ -157,10 +162,10 @@ async function archivePull(userId, pointId, since = {}, limit = MAX_PULL_ROWS) {
   await ownPoint(userId, pointId);
   const n = Math.max(1, Math.min(MAX_PULL_ROWS, Number(limit) || MAX_PULL_ROWS));
   const [goods, clients, reviews, shk] = await Promise.all([
-    pullTable('app_archive_goods', pointId, cursor(since.goods), n, 'uid,sid,status,purpose,updated,rank,data_enc,seq'),
-    pullTable('app_archive_clients', pointId, cursor(since.clients), n, 'sid,mobile_enc,name_enc,first_seen,last_seen,seq'),
-    pullTable('app_archive_reviews', pointId, cursor(since.reviews), n, 'rid,rated_at,data_enc,seq'),
-    pullTable('app_archive_shk', pointId, cursor(since.shk), n, 'code,fetched_at,data_enc,seq'),
+    archive.pull('app_archive_goods', pointId, cursor(since.goods), n),
+    archive.pull('app_archive_clients', pointId, cursor(since.clients), n),
+    archive.pull('app_archive_reviews', pointId, cursor(since.reviews), n),
+    archive.pull('app_archive_shk', pointId, cursor(since.shk), n),
   ]);
   const last = (rows, prev) => (rows.length ? rows[rows.length - 1].seq : cursor(prev));
   return {
@@ -182,8 +187,26 @@ async function archivePull(userId, pointId, since = {}, limit = MAX_PULL_ROWS) {
 
 const TABLE_RE = /^[a-z_]{1,40}$/;
 
+// Зеркало — платная услуга (пакеты mirror_* в _app-plans.js): хранится только для первых
+// N пунктов аккаунта по порядку подключения. Остальным отправку принимаем и не пишем, отдаём
+// пусто — старые программы (1.5.0 шлют зеркало всем) не видят ошибки и не повторяют отправку.
+// У такого пункта mirror_at остаётся пустым, поэтому после покупки программа отправит всё заново.
+// APP_MIRROR_DISABLED=1 — выключить зеркало всем (аварийный выключатель).
+function mirrorDisabled() {
+  return /^(1|true|yes)$/i.test(String(process.env.APP_MIRROR_DISABLED || ''));
+}
+
+async function mirrorAllowed(userId, pointId) {
+  if (mirrorDisabled()) return false;
+  const { mirror } = await entitlementsFor(userId);
+  if (mirror <= 0) return false;
+  const rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id&order=created_at.asc&limit=${mirror}`);
+  return rows.some(r => r.id === pointId);
+}
+
 async function mirrorPush(userId, pointId, body) {
   await ownPoint(userId, pointId);
+  if (!await mirrorAllowed(userId, pointId)) return { changed: 0, disabled: true };
   const rows = asArray(body.rows);
   if (rows.length > MAX_PUSH_ROWS) throw appError(413, 'TOO_LARGE', `Не больше ${MAX_PUSH_ROWS} строк за раз`);
   let schema = null;
@@ -205,9 +228,11 @@ async function mirrorPush(userId, pointId, body) {
 }
 
 async function mirrorPull(userId, pointId, since, limit = MAX_PULL_ROWS) {
-  await requireArchive(userId);
   const point = await ownPoint(userId, pointId);
   const from = cursor(since);
+  if (!await mirrorAllowed(userId, pointId)) {
+    return { reset: false, schema: point.mirror_schema || null, at: point.mirror_at, rows: [], next: from, more: false, disabled: true };
+  }
   // отстали дальше, чем помнятся удаления, — начинаем зеркало заново
   const reset = from > 0 && from < Number(point.mirror_floor || 0);
   const n = Math.max(1, Math.min(MAX_PULL_ROWS, Number(limit) || MAX_PULL_ROWS));
@@ -301,10 +326,8 @@ async function secretAccessLog(userId, limit = 30) {
 // Удалить облачные данные пункта (архив, зеркало, документы пункта) — по просьбе владельца.
 async function purgePoint(userId, pointId) {
   await ownPoint(userId, pointId);
-  const q = `point_id=eq.${encodeURIComponent(pointId)}`;
-  for (const table of ['app_archive_goods', 'app_archive_clients', 'app_archive_reviews', 'app_archive_shk', 'app_point_rows']) {
-    await supabaseFetch(`${table}?${q}`, { method: 'DELETE' });
-  }
+  await archive.purge(pointId);
+  await supabaseFetch(`app_point_rows?point_id=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
   await supabaseFetch(`app_docs?user_id=eq.${encodeURIComponent(userId)}&scope=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
   await supabaseFetch(`app_docs_history?user_id=eq.${encodeURIComponent(userId)}&scope=eq.${encodeURIComponent(pointId)}`, { method: 'DELETE' });
   await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}`, {

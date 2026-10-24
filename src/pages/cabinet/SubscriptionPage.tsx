@@ -246,7 +246,7 @@ function Points({ account }: { account: AppAccount }) {
 }
 
 /** Пакеты: ещё компьютеры и пункты сверх тарифа. */
-function Packs({ addons, account, onChoose }: { addons: AppAddon[]; account: AppAccount; onChoose: (c: Checkout) => void }) {
+function Packs({ addons, account, onChoose, mirror = false }: { addons: AppAddon[]; account: AppAccount; onChoose: (c: Checkout) => void; mirror?: boolean }) {
   const t = useT();
   const date = useDate();
   const { formatTotal } = useMoney();
@@ -256,8 +256,10 @@ function Packs({ addons, account, onChoose }: { addons: AppAddon[]; account: App
   return (
     <Card>
       <div className="stack">
-        <div className="row"><PackagePlus size={20} /><h2 style={{ margin: 0 }}>{t('Ещё компьютеры и пункты', 'Қосымша компьютерлер мен пункттер')}</h2></div>
-        <p className="muted" style={{ margin: 0 }}>{t('Добавляются к тарифу на выбранный срок. Каждый пункт сразу даёт и +2 компьютера.', 'Тарифке таңдалған мерзімге қосылады. Әр пункт +2 компьютер береді.')}</p>
+        <div className="row"><PackagePlus size={20} /><h2 style={{ margin: 0 }}>{mirror ? t('Пункт с любого ПК', 'Пункт кез келген ДК-дан') : t('Ещё компьютеры и пункты', 'Қосымша компьютерлер мен пункттер')}</h2></div>
+        <p className="muted" style={{ margin: 0 }}>{mirror
+          ? t('Ячейки, «в пути» и клиенты пункта видны на других компьютерах аккаунта — например, дома. Цена за пункт, с тарифа Стандарт; в бесплатный период не входит. На компьютере самого пункта всё работает и без этого.', 'Пункттің ұяшықтары, тауарлары және клиенттері аккаунттың басқа компьютерлерінде көрінеді. Баға — бір пунктке, Стандарт тарифінен.')
+          : t('Добавляются к тарифу на выбранный срок. Каждый пункт сразу даёт и +2 компьютера.', 'Тарифке таңдалған мерзімге қосылады. Әр пункт +2 компьютер береді.')}</p>
         <Segmented label={t('Срок', 'Мерзім')} value={String(months)} onChange={v => setMonths(Number(v))} options={terms.map(m => ({ value: String(m), label: monthsWord(m, t) }))} />
         <div className="grid grid-2">
           {addons.map(a => {
@@ -441,7 +443,8 @@ export function SubscriptionPage() {
       </div>
       {!account.data.unlimited && <PlanCards plans={plans.data} account={account.data} onChoose={setCheckout} />}
       {plans.data.addons?.filter(a => a.kind !== 'pack').map(addon => <ArchiveCard key={addon.id} addon={addon} account={account.data} onChoose={setCheckout} />)}
-      <Packs addons={plans.data.addons?.filter(a => a.kind === 'pack') ?? []} account={account.data} onChoose={setCheckout} />
+      <Packs addons={plans.data.addons?.filter(a => a.kind === 'pack' && !a.mirror) ?? []} account={account.data} onChoose={setCheckout} />
+      <Packs mirror addons={plans.data.addons?.filter(a => a.kind === 'pack' && a.mirror) ?? []} account={account.data} onChoose={setCheckout} />
       <div className="row">
         <a href={PROGRAM_DOWNLOAD_URL}><Button variant="secondary"><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
       </div>

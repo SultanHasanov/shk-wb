@@ -246,3 +246,53 @@ describe('безлимитный аккаунт', () => {
     expect(calls.some(c => c.url.includes('rpc/app_consume'))).toBe(false);
   });
 });
+
+describe('зеркало — услуга «Пункт с любого ПК»', () => {
+  const future = { ends_at: '2099-01-01T00:00:00Z' };
+  const OTHER = '33333333-3333-4333-8333-333333333333';
+  const mirrorPlans = plans as unknown as {
+    mirrorLimit: (plan: string | null, addons: Record<string, { ends_at: string }>, unlimited: boolean) => number;
+    effectiveFeatures: (plan: string | null, addons: Record<string, { ends_at: string }>, free: boolean) => string[];
+  };
+
+  it('лимит: пакеты со Стандарта, бесплатный режим зеркала не даёт', () => {
+    expect(mirrorPlans.mirrorLimit('standard', {}, false)).toBe(0);
+    expect(mirrorPlans.mirrorLimit('standard', { mirror_1: future, mirror_3: future }, false)).toBe(4);
+    expect(mirrorPlans.mirrorLimit('basic', { mirror_1: future }, false)).toBe(0);
+    expect(mirrorPlans.mirrorLimit(null, {}, true)).toBe(99);
+    expect(mirrorPlans.effectiveFeatures(null, {}, true)).not.toContain('mirror');
+    expect(mirrorPlans.effectiveFeatures('standard', { mirror_1: future }, true)).toContain('mirror');
+    expect(mirrorPlans.effectiveFeatures('standard', { mirror_1: future }, false)).toContain('mirror');
+  });
+
+  it('без пакета отправку принимаем и не пишем', async () => {
+    const calls = mockSupabase(url => {
+      if (url.includes('app_points?id=eq.')) return { body: [{ id: POINT, wb_point_id: 7 }] };
+    });
+    const res = response();
+    await handler(request('mirror-push', { method: 'POST', body: { point: POINT, rows: [{ t: 'cells', k: '1', d: '{}' }] } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ changed: 0, disabled: true });
+    expect(calls.some(c => c.url.includes('rpc/app_mirror_push'))).toBe(false);
+  });
+
+  it('пакет на 1 пункт — пишется только первый по порядку подключения', async () => {
+    const route = (url: string) => {
+      if (url.includes('app_points?id=eq.')) return { body: [{ id: url.includes(OTHER) ? OTHER : POINT, wb_point_id: 7 }] };
+      if (url.includes('app_points?user_id=eq.')) return { body: [{ id: POINT }] };
+      if (url.includes('rpc/app_mirror_push')) return { body: 1 };
+    };
+    const ent = { plan: 'standard', device_limit: 2, addons: { mirror_1: future } };
+    let calls = mockSupabase(route, ent);
+    let res = response();
+    await handler(request('mirror-push', { method: 'POST', body: { point: POINT, rows: [{ t: 'cells', k: '1', d: '{}' }] } }), res);
+    expect(res.body).toMatchObject({ changed: 1 });
+    expect(calls.some(c => c.url.includes('rpc/app_mirror_push'))).toBe(true);
+
+    calls = mockSupabase(route, ent);
+    res = response();
+    await handler(request('mirror-push', { method: 'POST', body: { point: OTHER, rows: [{ t: 'cells', k: '1', d: '{}' }] } }), res);
+    expect(res.body).toMatchObject({ changed: 0, disabled: true });
+    expect(calls.some(c => c.url.includes('rpc/app_mirror_push'))).toBe(false);
+  });
+});

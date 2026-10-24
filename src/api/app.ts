@@ -17,7 +17,7 @@ export type AppPlan = {
   prices: Record<string, number>;
 };
 /** Доп. услуги: архив клиентов и пакеты ПК/пунктов (kind 'pack'). prices — цена за весь срок по числу месяцев. */
-export type AppAddonId = 'archive' | 'devices_1' | 'devices_3' | 'points_1' | 'points_3';
+export type AppAddonId = 'archive' | 'devices_1' | 'devices_3' | 'points_1' | 'points_3' | 'mirror_1' | 'mirror_3';
 export type AppAddon = {
   id: AppAddonId;
   kind?: 'service' | 'pack';
@@ -29,6 +29,8 @@ export type AppAddon = {
   monthlyPrice?: number;
   devices?: number;
   points?: number;
+  /** пунктов в зеркале (пакеты «Пункт с любого ПК») */
+  mirror?: number;
 };
 export type AppPoint = { id: string; wbPointId: string; name: string; lastSyncAt: string | null; mirrorAt: string | null; createdAt: string };
 export type AppPlans = {
@@ -69,6 +71,7 @@ export type AppAccount = {
   deviceLimit: number;
   devices: AppDevice[];
   pointLimit?: number;
+  mirrorLimit?: number;
   points?: AppPoint[];
 };
 

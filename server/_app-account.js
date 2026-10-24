@@ -9,7 +9,7 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
-const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan } = require('./_app-plans');
+const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, mirrorLimit } = require('./_app-plans');
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 
@@ -45,6 +45,11 @@ function isUnlimited(userId) {
     .includes(String(userId).toLowerCase());
 }
 
+// Фича «mirror» = есть хотя бы один зеркальный пункт (у безлимита — всегда).
+function withMirror(features, mirror) {
+  return mirror > 0 && !features.includes('mirror') ? [...features, 'mirror'] : features;
+}
+
 // Права аккаунта целиком: тариф, услуги, фичи и лимиты ПК/пунктов.
 async function entitlementsFor(userId) {
   const [ent, free] = await Promise.all([
@@ -55,9 +60,10 @@ async function entitlementsFor(userId) {
   const plan = isPlan(ent.plan) ? ent.plan : null;
   const addons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
   const all = free || unlimited;
+  const mirror = mirrorLimit(plan, addons, unlimited);
   return {
-    ent, free, unlimited, plan, addons,
-    features: effectiveFeatures(plan, addons, all),
+    ent, free, unlimited, plan, addons, mirror,
+    features: withMirror(effectiveFeatures(plan, addons, all), mirror),
     limits: accountLimits(plan, addons, ent.device_limit, all),
   };
 }
@@ -304,7 +310,7 @@ async function accountSummary(user, currentHash) {
     unlimited,
     ...(all ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
-    features: effectiveFeatures(plan, rawAddons, all),
+    features: withMirror(effectiveFeatures(plan, rawAddons, all), mirrorLimit(plan, rawAddons, unlimited)),
     // Услуги: куплена до endsAt; active = действует сейчас (на тарифе ниже нужного — false).
     addons: Object.values(ADDONS).map(a => {
       const endsAt = rawAddons[a.id]?.ends_at || null;
@@ -340,6 +346,8 @@ async function accountSummary(user, currentHash) {
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
     deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all).devices,
     pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all).points,
+    // сколько пунктов видно с других ПК (пакеты «Пункт с любого ПК»)
+    mirrorLimit: mirrorLimit(plan, rawAddons, unlimited),
     devices,
     points: points.map(p => ({
       id: p.id,
