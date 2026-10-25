@@ -484,6 +484,28 @@ export function useSetAdminAppFreeMode() {
   });
 }
 
+/** Резервный подбор кода клиента по хешам (кнопка «Быстрый QR» в программе). */
+export type AdminAppCrackFallback = { enabled: boolean };
+
+export function useAdminAppCrackFallback() {
+  return useQuery({
+    queryKey: ['admin', 'app-crack-fallback'] as const,
+    queryFn: () => adminApi<AdminAppCrackFallback>(`${RESOURCE}appCrackFallback`),
+  });
+}
+
+export function useSetAdminAppCrackFallback() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      adminApi<AdminAppCrackFallback>(`${RESOURCE}appCrackFallback`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: data => queryClient.setQueryData(['admin', 'app-crack-fallback'], data),
+  });
+}
+
 /** Статистика «Помощника ПВЗ»: скачивания установщика, новые компьютеры, активные, оплаты. */
 export type AdminAppStats = {
   totals: {

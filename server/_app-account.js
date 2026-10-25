@@ -12,6 +12,7 @@ const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
 const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, mirrorLimit } = require('./_app-plans');
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
+const { crackFallbackEnabled } = require('./_app-flags');
 
 /**
  * Фактические даты подписки с учётом бесплатного периода. При его окончании подписки
@@ -291,7 +292,7 @@ function maskKey(key) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -302,6 +303,7 @@ async function accountSummary(user, currentHash) {
     appFreeUntil(),
     appFreeWindow(),
     supabaseFetch(`app_points?user_id=eq.${uid}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,mirror_at,created_at&order=created_at.asc`).catch(() => []),
+    crackFallbackEnabled().catch(() => false),
   ]);
   const unlimited = isUnlimited(user.id);
   const all = free || unlimited;
@@ -323,6 +325,8 @@ async function accountSummary(user, currentHash) {
     freeUntil: free ? freeUntil : null,
     // Безлимитный аккаунт: всё открыто бессрочно, оплаты не нужны.
     unlimited,
+    // Переключатели из админки (резервный подбор кода и т.п.).
+    flags: { crackFallback: crackFallback === true },
     ...(all ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
     features: withMirror(effectiveFeatures(plan, rawAddons, all), mirrorLimit(plan, rawAddons, unlimited)),
@@ -411,6 +415,31 @@ async function consumeCode(userId, deviceId, meta) {
     if (dbErrorCode(error) === 'LIMIT_EXCEEDED') throw appError(409, 'LIMIT_EXCEEDED', 'Подборы закончились: лимит месяца исчерпан и нет пакетов. Докупите пакет или смените тариф.');
     throw error;
   }
+}
+
+// Списание подбора с WBPK-ключа (режим «Базовый» без входа в аккаунт).
+async function consumeKey(key) {
+  const value = String(key || '').trim();
+  if (!value) throw appError(400, 'VALIDATION_ERROR', 'Нет ключа');
+  const rows = await supabaseFetch('rpc/consume_license', { method: 'POST', body: JSON.stringify({ p_key: value }) }).catch(() => []);
+  if (!rows.length) throw appError(409, 'LIMIT_EXCEEDED', 'Подборы в ключе закончились. Докупите пакет или смените тариф.');
+  const row = rows[0];
+  return { via: 'key', left: Math.max(0, Number(row.usage_limit || 0) - Number(row.used || 0)) };
+}
+
+/**
+ * Один биллинг «подбора» для генерации кода клиента. Вошедший аккаунт — через квоту/пакеты
+ * (consumeCode), иначе — по WBPK-ключу из тела. Бросает 401, если ни того, ни другого нет.
+ */
+async function billCode(req, { key, meta } = {}) {
+  const user = await optionalUser(req).catch(() => null);
+  if (user) {
+    const device = await requireDevice(req, user.id);
+    const result = await consumeCode(user.id, device.id, meta || {});
+    return { via: 'account', ...result };
+  }
+  if (key) return consumeKey(key);
+  throw appError(401, 'AUTH_REQUIRED', 'Войдите в аккаунт или добавьте ключ');
 }
 
 async function usageHistory(userId, limit = 30) {
@@ -666,6 +695,8 @@ module.exports = {
   approveBrowserLogin,
   claimKey,
   consumeCode,
+  consumeKey,
+  billCode,
   dbErrorCode,
   deviceHashFrom,
   listDevices,

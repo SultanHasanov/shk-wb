@@ -15,6 +15,7 @@ const {
   createCellLicense, createStickerAccessCode, recordAdminAction, validateProgramPromo,
 } = require('../../server/_admin-grants');
 const { freeModeState, setAppFreeMode } = require('../../server/_app-free');
+const { crackFallbackState, setCrackFallback } = require('../../server/_app-flags');
 
 module.exports = async function handler(req, res) {
   if (req.query.cabinet) return handleCabinetAdmin(req, res);
@@ -30,6 +31,7 @@ module.exports = async function handler(req, res) {
   if (req.query.resource === 'stats') return handleStats(req, res);
   if (req.query.resource === 'freeGenerations') return handleFreeGenerations(req, res);
   if (req.query.resource === 'appFreeMode') return handleAppFreeMode(req, res);
+  if (req.query.resource === 'appCrackFallback') return handleAppCrackFallback(req, res);
   if (req.query.resource === 'appStats') return handleAppStats(req, res);
   const config = RESOURCES[req.query.resource];
   const id = req.query.id;
@@ -164,6 +166,21 @@ async function handleAppFreeMode(req, res) {
         return res.status(400).json({ error: 'Дата окончания должна быть в будущем' });
       const state = await setAppFreeMode(req.body?.enabled === true, until);
       await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, until: state.until, extended: state.extended }).catch(() => {});
+      return res.json(state);
+    }
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  } catch (error) { return sendApiError(res, error); }
+}
+
+// Резервный подбор кода клиента по хешам (кнопка «Быстрый QR» в программе): GET — состояние,
+// POST {enabled} — включить/выключить. Включённый флаг открывает /api/app/crack-code.
+async function handleAppCrackFallback(req, res) {
+  try {
+    if (req.method === 'GET') return res.json(await crackFallbackState());
+    if (req.method === 'POST') {
+      const state = await setCrackFallback(req.body?.enabled === true);
+      await recordAdminAction(req, 'setAppCrackFallback', null, { enabled: state.enabled }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');

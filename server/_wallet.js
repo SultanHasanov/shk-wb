@@ -63,6 +63,26 @@ async function getBalanceKopecks(userId) {
   return Number(rows[0]?.balance_kopecks || 0);
 }
 
+/** Баланс + последние движения для кабинета/программы. */
+async function walletSummary(userId, limit = 30) {
+  const n = Math.max(1, Math.min(100, Number(limit) || 30));
+  const uid = encodeURIComponent(userId);
+  const [balanceKopecks, ledger] = await Promise.all([
+    getBalanceKopecks(userId),
+    supabaseFetch(`wallet_ledger?user_id=eq.${uid}&select=kind,amount_kopecks,order_id,details,created_at&order=created_at.desc&limit=${n}`).catch(() => []),
+  ]);
+  return {
+    balanceKopecks,
+    ledger: ledger.map(row => ({
+      kind: row.kind,
+      amountKopecks: Number(row.amount_kopecks || 0),
+      orderId: row.order_id || null,
+      note: row.details?.note || row.details?.reason || null,
+      createdAt: row.created_at,
+    })),
+  };
+}
+
 /**
  * Купить с баланса. fields — колонки заказа для выдачи (range_quantity, renewal_target_key,
  * cell_print_*, license_iterations, app_plan…). Возвращает { ok:true, order, balanceKopecks }
@@ -108,6 +128,6 @@ async function payWithWallet({ userId, productKind, fields = {}, priceRub, snaps
 
 module.exports = {
   MAX_TOPUP, MIN_TOPUP, TOPUP_AMOUNTS, TOPUP_BONUS_STEPS,
-  affordableGenerations, formatRub, generationCost, getBalanceKopecks, payWithWallet,
+  affordableGenerations, formatRub, generationCost, getBalanceKopecks, walletSummary, payWithWallet,
   topupBonus, topupBonusPercent, validTopup,
 };

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { type AdminProgramKey, useAdminAppFreeMode, useAdminAppStats, useAdminResource, useAdminResourceMutation, useSetAdminAppFreeMode } from '../../api/admin';
+import { type AdminProgramKey, useAdminAppCrackFallback, useAdminAppFreeMode, useAdminAppStats, useAdminResource, useAdminResourceMutation, useSetAdminAppCrackFallback, useSetAdminAppFreeMode } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
 import { shortDate } from '../../lib/admin-users';
 import { Alert, Badge, Button, Card, Field, Input, Segmented, Skeleton, Stat, Switch, Table, useToast } from '../../ui';
@@ -18,6 +18,8 @@ export function AdminProgramPage() {
   const promoMutation = useAdminResourceMutation<{ code: string; limit: number; note: string; active: boolean }>('programPromo');
   const freeMode = useAdminAppFreeMode();
   const setFreeMode = useSetAdminAppFreeMode();
+  const crack = useAdminAppCrackFallback();
+  const setCrack = useSetAdminAppCrackFallback();
 
   return (
     <div className="page stack-lg">
@@ -49,6 +51,28 @@ export function AdminProgramPage() {
           <p className={s.mutedNote}>Включён с {new Date(freeMode.data.since).toLocaleString('ru-RU')}.</p>
         )}
         {freeMode.data?.enabled && <FreeUntil current={freeMode.data.until} />}
+      </Card>
+      <Card>
+        <h3>Резервный подбор кода («Быстрый QR»)</h3>
+        {crack.isPending ? (
+          <Skeleton height={48} />
+        ) : crack.isError ? (
+          <Alert tone="error">Не удалось загрузить настройку: {crack.error.message}</Alert>
+        ) : (
+          <Switch
+            checked={crack.data.enabled}
+            disabled={setCrack.isPending}
+            onChange={e =>
+              setCrack.mutate(e.target.checked, {
+                onSuccess: d => toast(d.enabled ? 'Кнопка «Быстрый QR» показана в программе' : 'Кнопка «Быстрый QR» скрыта', 'success'),
+                onError: error => toast(error.message, 'error'),
+              })
+            }
+            description="Обычный «QR код клиента» считается по SID мгновенно. Этот резерв нужен, если код не совпал: программа отправляет на сервер хеши клиента из базы WB, сервер подбирает код и возвращает его. Пока выключено — кнопки «Быстрый QR» в программе нет. Подбор по-прежнему списывает один подбор (как обычный код)."
+          >
+            Показывать кнопку резервного подбора «Быстрый QR»
+          </Switch>
+        )}
       </Card>
       <Card>
         <h3>Подписки «Помощник ПВЗ»</h3>

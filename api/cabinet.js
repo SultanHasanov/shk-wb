@@ -1041,3 +1041,8 @@ module.exports = async function handler(req, res) {
     return sendApiError(res, error);
   }
 };
+
+// Переиспользование серверных функций из /api/app (программа «Помощник ПВЗ»).
+module.exports.getOrders = getOrders;
+module.exports.getAssets = getAssets;
+module.exports.getReferral = getReferral;

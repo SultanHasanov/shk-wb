@@ -8,8 +8,13 @@ const account = require('../server/_app-account');
 const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
 const { appFreeMode } = require('../server/_app-free');
+const { crackFallbackEnabled } = require('../server/_app-flags');
+const { buildClientQr } = require('../server/_wb-code');
+const { crackClientQr } = require('../server/_wb-crack');
+const wallet = require('../server/_wallet');
 const appUpdate = require('../server/_app-update');
 const payments = require('./payments');
+const cabinet = require('./cabinet');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
 // Отдельный файл не заводим: на Vercel 12 функций — это лимит тарифа, поэтому
@@ -190,6 +195,33 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ session: account.sessionPayload(session) });
     }
 
+    // --- Код клиента: формула и подбор живут только на сервере (server/_wb-code.js,
+    // server/_wb-crack.js). Биллинг — аккаунтом (Bearer) или WBPK-ключом из тела, поэтому
+    // эндпоинты до requireUser: «Базовый» без входа тоже должен получать коды.
+    if (action === 'client-qr' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-client-qr', limit: 60, windowSeconds: 60 })) return;
+      const b = body(req);
+      const sid = String(b.sid || '').replace(/\D/g, '');
+      if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
+      const meta = { cell: String(b.cell || '').slice(0, 16) || undefined, via: 'client-qr' };
+      const billing = await account.billCode(req, { key: b.key, meta });
+      const { code, qrText } = buildClientQr(sid);
+      return res.status(200).json({ code, qrText, billing });
+    }
+    if (action === 'crack-code' && req.method === 'POST') {
+      if (!await crackFallbackEnabled()) return res.status(403).json({ error: 'Резервный подбор отключён', code: 'CRACK_DISABLED' });
+      if (!await enforceRateLimit(req, res, { scope: 'app-crack-code', limit: 30, windowSeconds: 60 })) return;
+      const b = body(req);
+      const sid = String(b.sid || '').replace(/\D/g, '');
+      if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
+      const hashes = Array.isArray(b.hashes) ? b.hashes.slice(0, 50) : [];
+      const found = crackClientQr(sid, hashes);
+      if (!found) return res.status(404).json({ error: 'Код не найден по хешам', code: 'CODE_NOT_FOUND' });
+      const meta = { cell: String(b.cell || '').slice(0, 16) || undefined, via: 'crack' };
+      const billing = await account.billCode(req, { key: b.key, meta });
+      return res.status(200).json({ code: found.code, qrText: found.qrText, billing });
+    }
+
     const user = await requireUser(req, res);
     if (!user) return;
 
@@ -260,6 +292,20 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'usage' && req.method === 'GET') {
       return res.status(200).json({ items: await account.usageHistory(user.id, req.query.limit) });
+    }
+    // Полные данные аккаунта с сайта: баланс, покупки, активы (ключи WBPK + лицензии печати
+    // ячеек с устройствами), рефералы. Делегируем серверным функциям кабинета.
+    if (action === 'wallet' && req.method === 'GET') {
+      return res.status(200).json(await wallet.walletSummary(user.id, req.query.limit));
+    }
+    if (action === 'orders' && req.method === 'GET') {
+      return res.status(200).json({ items: await cabinet.getOrders(user.id, 25) });
+    }
+    if (action === 'assets' && req.method === 'GET') {
+      return res.status(200).json({ items: await cabinet.getAssets(user.id) });
+    }
+    if (action === 'referrals' && req.method === 'GET') {
+      return res.status(200).json(await cabinet.getReferral(user.id));
     }
     if (action === 'claim-key' && req.method === 'POST') {
       // от перебора ключей: попыток мало, ключ из 12 hex-символов

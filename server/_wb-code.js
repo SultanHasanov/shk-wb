@@ -33,13 +33,17 @@ function clientCode(sid, date = new Date()) {
   return sdbm(`${moscowDDMMYYYY(date)}_${sid}`) % 100000;
 }
 
+/** { code, qrText } для уже известного кода (формула или подбор). random6 — случайное 6-значное. */
+function qrFromCode(sid, code) {
+  const normalized = String(sid);
+  const code5 = String(Number(code)).padStart(5, '0');
+  const random6 = String(crypto.randomInt(100000, 1000000));
+  return { code: Number(code), qrText: `${normalized}_${code5}_${random6}_1` };
+}
+
 /** { code, qrText } для SID на текущий день. random6 — случайное 6-значное число. */
 function buildClientQr(sid, date = new Date()) {
-  const normalized = String(sid);
-  const code = clientCode(normalized, date);
-  const code5 = String(code).padStart(5, '0');
-  const random6 = String(crypto.randomInt(100000, 1000000));
-  return { code, qrText: `${normalized}_${code5}_${random6}_1` };
+  return qrFromCode(sid, clientCode(String(sid), date));
 }
 
 /** Строгая проверка формата QR-строки перед отрисовкой/подписью. */
@@ -47,4 +51,4 @@ function isClientQrText(text) {
   return /^\d{1,12}_\d{5}_\d{6}_\d$/.test(String(text || ''));
 }
 
-module.exports = { sdbm, moscowDDMMYYYY, clientCode, buildClientQr, isClientQrText };
+module.exports = { sdbm, moscowDDMMYYYY, clientCode, qrFromCode, buildClientQr, isClientQrText };
