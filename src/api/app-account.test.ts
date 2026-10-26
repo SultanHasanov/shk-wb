@@ -156,6 +156,33 @@ describe('вход и списание в программе', () => {
     expect(res.body).toMatchObject({ code: 'LIMIT_EXCEEDED' });
   });
 
+  it('повтор QR передаёт тот же идентификатор и возвращает прежний результат без нового списания', async () => {
+    const id = '188d3fc4-dc27-44bb-b63c-ecc497bb614d';
+    const requests: string[] = [];
+    let saved: { qrText: string; billing: { via: string }; replayed: boolean } | null = null;
+    mockSupabase((url, init) => {
+      if (url.endsWith('/auth/v1/user')) return { body: { id: 'u1', email: 'a@b.c' } };
+      if (url.includes('app_devices?')) return { body: [{ id: 'dev-1', last_seen_at: new Date().toISOString() }] };
+      if (url.includes('rpc/app_code_once')) {
+        const payload = JSON.parse(String(init.body));
+        requests.push(payload.p_request);
+        saved ??= { qrText: payload.p_qr_text, billing: { via: 'account' }, replayed: false };
+        return { body: { ...saved, replayed: requests.length > 1 } };
+      }
+    });
+    const make = () => request('client-qr', { method: 'POST', body: { sid: '123456789', requestId: id }, headers: { authorization: 'Bearer acc' } });
+    const first = response();
+    const second = response();
+    await handler(make(), first);
+    await handler(make(), second);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(requests).toEqual([id, id]);
+    expect((second.body as { qrText: string }).qrText).toBe((first.body as { qrText: string }).qrText);
+    expect((second.body as { code: number }).code).toBe(Number((second.body as { qrText: string }).qrText.split('_')[1]));
+    expect(second.body).toMatchObject({ replayed: true });
+  });
+
   it('старая сборка без версии не попадает в API программы', async () => {
     process.env.PROGRAM_MIN_VERSION = '1.3.15';
     const res = response();

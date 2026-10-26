@@ -43,6 +43,11 @@ function body(req) {
   return req.body && typeof req.body === 'object' ? req.body : {};
 }
 
+function codeFromQrText(qrText) {
+  const value = String(qrText || '').split('_')[1];
+  return /^\d{5}$/.test(value) ? Number(value) : null;
+}
+
 // Сессия + регистрация ПК. При лимите ПК токены всё равно отдаём: из программы
 // можно сразу отключить лишний компьютер и повторить регистрацию.
 async function finishLogin(res, session, userId, deviceHash, deviceName, version) {
@@ -204,20 +209,30 @@ module.exports = async function handler(req, res) {
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
       const meta = { cell: String(b.cell || '').slice(0, 16) || undefined, via: 'client-qr' };
+      if (b.requestId) {
+        const qr = buildClientQr(sid);
+        const result = await account.billClientCode(req, { key: b.key, meta, requestId: b.requestId, sid, qrText: qr.qrText });
+        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, billing: result.billing, replayed: result.replayed });
+      }
       const billing = await account.billCode(req, { key: b.key, meta });
       const { code, qrText } = buildClientQr(sid);
       return res.status(200).json({ code, qrText, billing });
     }
     if (action === 'crack-code' && req.method === 'POST') {
       if (!await crackFallbackEnabled()) return res.status(403).json({ error: 'Резервный подбор отключён', code: 'CRACK_DISABLED' });
-      if (!await enforceRateLimit(req, res, { scope: 'app-crack-code', limit: 30, windowSeconds: 60 })) return;
+      if (!await enforceRateLimit(req, res, { scope: 'app-crack-code', limit: 5, windowSeconds: 60 })) return;
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
+      await account.authorizeCodeAttempt(req, b.key);
       const hashes = Array.isArray(b.hashes) ? b.hashes.slice(0, 50) : [];
       const found = crackClientQr(sid, hashes);
       if (!found) return res.status(404).json({ error: 'Код не найден по хешам', code: 'CODE_NOT_FOUND' });
       const meta = { cell: String(b.cell || '').slice(0, 16) || undefined, via: 'crack' };
+      if (b.requestId) {
+        const result = await account.billClientCode(req, { key: b.key, meta, requestId: b.requestId, sid, qrText: found.qrText });
+        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, billing: result.billing, replayed: result.replayed });
+      }
       const billing = await account.billCode(req, { key: b.key, meta });
       return res.status(200).json({ code: found.code, qrText: found.qrText, billing });
     }

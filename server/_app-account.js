@@ -81,7 +81,7 @@ function appError(status, code, message, extra) {
 // Исключения из SQL-функций приходят текстом в details — достаём наш код.
 function dbErrorCode(error) {
   const text = JSON.stringify(error?.details || error?.message || '');
-  for (const code of ['DEVICE_LIMIT', 'LIMIT_EXCEEDED', 'INVALID_AMOUNT', 'UNSUPPORTED_KIND']) {
+  for (const code of ['DEVICE_LIMIT', 'LIMIT_EXCEEDED', 'CODE_REQUEST_CONFLICT', 'INVALID_AMOUNT', 'UNSUPPORTED_KIND']) {
     if (text.includes(code)) return code;
   }
   for (const code of ['POINT_LIMIT', 'VERSION_CONFLICT']) {
@@ -421,10 +421,47 @@ async function consumeCode(userId, deviceId, meta) {
 async function consumeKey(key) {
   const value = String(key || '').trim();
   if (!value) throw appError(400, 'VALIDATION_ERROR', 'Нет ключа');
-  const rows = await supabaseFetch('rpc/consume_license', { method: 'POST', body: JSON.stringify({ p_key: value }) }).catch(() => []);
+  const rows = await supabaseFetch('rpc/consume_license', { method: 'POST', body: JSON.stringify({ p_key: value }) });
   if (!rows.length) throw appError(409, 'LIMIT_EXCEEDED', 'Подборы в ключе закончились. Докупите пакет или смените тариф.');
   const row = rows[0];
   return { via: 'key', left: Math.max(0, Number(row.usage_limit || 0) - Number(row.used || 0)) };
+}
+
+async function authorizeCodeAttempt(req, key) {
+  const user = await optionalUser(req).catch(() => null);
+  if (user) {
+    await requireDevice(req, user.id);
+    return;
+  }
+  const value = String(key || '').trim();
+  if (!value) throw appError(401, 'AUTH_REQUIRED', 'Войдите в аккаунт или добавьте ключ');
+  const active = await supabaseFetch('rpc/app_code_key_active', { method: 'POST', body: JSON.stringify({ p_key: value }) });
+  if (!active) throw appError(401, 'INVALID_KEY', 'Ключ не найден или подборы закончились');
+}
+
+async function billClientCode(req, { key, meta, requestId, sid, qrText }) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(requestId || ''))) {
+    throw appError(400, 'VALIDATION_ERROR', 'Некорректный идентификатор запроса кода');
+  }
+  const user = await optionalUser(req).catch(() => null);
+  const charge = async body => {
+    try {
+      return await supabaseFetch('rpc/app_code_once', { method: 'POST', body: JSON.stringify(body) });
+    } catch (error) {
+      if (dbErrorCode(error) === 'LIMIT_EXCEEDED') throw appError(409, 'LIMIT_EXCEEDED', 'Подборы закончились. Докупите пакет или смените тариф.');
+      if (dbErrorCode(error) === 'CODE_REQUEST_CONFLICT') throw appError(409, 'CODE_REQUEST_CONFLICT', 'Этот запрос уже использован для другого клиента');
+      throw error;
+    }
+  };
+  if (user) {
+    const device = await requireDevice(req, user.id);
+    if (isUnlimited(user.id) || await appFreeMode()) {
+      return { qrText, billing: { via: 'account', ok: true, free: true }, replayed: false };
+    }
+    return charge({ p_request: requestId, p_user: user.id, p_device: device.id, p_key: null, p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
+  }
+  if (!key) throw appError(401, 'AUTH_REQUIRED', 'Войдите в аккаунт или добавьте ключ');
+  return charge({ p_request: requestId, p_user: null, p_device: null, p_key: String(key).trim(), p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
 }
 
 /**
@@ -696,6 +733,8 @@ module.exports = {
   claimKey,
   consumeCode,
   consumeKey,
+  authorizeCodeAttempt,
+  billClientCode,
   billCode,
   dbErrorCode,
   deviceHashFrom,

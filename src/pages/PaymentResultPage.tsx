@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { observer } from 'mobx-react-lite';
@@ -78,6 +78,7 @@ export const PaymentResultPage = observer(() => {
 
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
+  const [statusOpenedAt] = useState(() => Date.now());
   const fromTelegram = params.get('from') === 'telegram';
   // Без start-параметра: Telegram просто открывает уже существующий чат и не
   // отправляет от имени пользователя видимую команду /start.
@@ -218,10 +219,15 @@ export const PaymentResultPage = observer(() => {
                     </div>
                     <p className="muted" style={{ margin: 0 }}>
                       {t(
-                        'Обычно это занимает несколько секунд. Страницу можно не обновлять — статус обновится сам.',
-                        'Әдетте бұл бірнеше секундқа созылады. Бетті жаңартудың қажеті жоқ — мәртебе өзі жаңарады.',
+                        Date.now() - statusOpenedAt >= 115_000
+                          ? 'Автоматическая проверка завершилась. Нажмите «Проверить оплату», чтобы узнать текущий статус.'
+                          : 'Обычно это занимает несколько секунд. Статус обновится сам в течение двух минут.',
+                        Date.now() - statusOpenedAt >= 115_000
+                          ? 'Автоматты тексеру аяқталды. Қазіргі күйін білу үшін «Төлемді тексеру» батырмасын басыңыз.'
+                          : 'Әдетте бұл бірнеше секундқа созылады. Күйі екі минут ішінде өзі жаңарады.',
                       )}
                     </p>
+                    {Date.now() - statusOpenedAt >= 115_000 && <Button variant="secondary" onClick={() => void order.refetch()}>{t('Проверить оплату', 'Төлемді тексеру')}</Button>}
                   </>
                 )}
 

@@ -12,6 +12,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
   freeUntilText: (enabled: boolean, until: string | null) => string;
   claimErrorText: (error: unknown) => string | null;
+  clientCodeEventKey: (userId: string, qrText: string) => string;
   formatPhone: (value: unknown) => string;
   maskWbPhone: (value: unknown) => string;
   reviewStars: (value: string) => number[];
@@ -36,6 +37,12 @@ describe('Telegram sticker generator bot', () => {
   it('предлагает ввести код при покупке и в профиле', () => {
     const profile = bot.profileKeyboard().inline_keyboard.flat().map(button => button.callback_data);
     expect(profile).toEqual(expect.arrayContaining(['topup:home', 'shop:home', 'code:enter', 'menu:home']));
+  });
+
+  it('считает каждый новый QR того же SID отдельной платной операцией', () => {
+    const first = bot.clientCodeEventKey('u1', '123456789_01234_111111_1');
+    const second = bot.clientCodeEventKey('u1', '123456789_01234_222222_1');
+    expect(first).not.toBe(second);
   });
 
   it('переводит ошибки привязки кода на понятный язык', () => {

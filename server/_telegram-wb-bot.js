@@ -15,6 +15,7 @@ const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
 // Коды из 6 цифр подбираются перебором, поэтому попыток ввода — не больше 10 в час.
 const CODE_ATTEMPTS_PER_HOUR = 10;
 const codeAttemptsFallback = new Map();
@@ -44,7 +45,7 @@ function persistLocalConnections() {
   fs.writeFileSync(temporary, JSON.stringify([...localWbConnections.values()]), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(temporary, file);
 }
-// Постоянная клавиатура — только быстрый возврат. Всё остальное в инлайн-меню (showMainMenu).
+// Старая постоянная клавиатура: больше не отправляется, но её кнопки ещё есть у людей — тексты принимаем.
 const HOME_KEYBOARD = {
   keyboard: [[{ text: '☰ Меню' }, { text: '🏷 Стикеры и QR' }]],
   resize_keyboard: true,
@@ -56,6 +57,7 @@ const PROGRAM_URL = 'https://shk-wb.ru/program';
 const CELL_PRINT_URL = 'https://shk-wb.ru/cell-print';
 const SUPPORT_URL = 'https://t.me/roma_denosov';
 const CHANNEL_URL = 'https://t.me/wbtools_ru';
+const VPN_URL = 'https://t.me/wb_wpn_bot';
 
 const BOT_COMMANDS = [
   { command: 'menu', description: 'Главное меню' },
@@ -91,7 +93,9 @@ async function findUser(telegramId) {
 async function getSession(telegramId) {
   const rows = await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
   const session = rows[0] || null;
-  if (session && Date.now() - new Date(session.updated_at).getTime() > SESSION_TTL_MS) { await clearSession(telegramId); return null; }
+  // Подтверждение покупки живёт дольше: человек уходит пополнять баланс, а после оплаты покупка проходит сама.
+  const ttl = session?.state === 'confirm' ? CONFIRM_TTL_MS : SESSION_TTL_MS;
+  if (session && Date.now() - new Date(session.updated_at).getTime() > ttl) { await clearSession(telegramId); return null; }
   return session;
 }
 
@@ -179,19 +183,23 @@ async function touchSubscriber(from, chatId) {
 function choiceKeyboard(rows) { return { inline_keyboard: rows }; }
 
 const MENU_ROW = [{ text: '☰ Меню', callback_data: 'menu:home' }];
+// Под короткими ответами — кнопка меню (постоянную нижнюю клавиатуру больше не показываем).
+const MENU_KEYBOARD = { inline_keyboard: [MENU_ROW] };
+// Во время входа в WB (ждём телефон или SMS-код) — выйти из него можно кнопкой, а не только /cancel.
+const WB_LOGIN_KEYBOARD = { inline_keyboard: [[{ text: 'Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW]] };
 
 function mainMenuKeyboard(signedIn) {
+  // По две кнопки в ряд с короткими подписями — меню не растягивается. style (Bot API 9.4) — цвет кнопки.
   return choiceKeyboard([
     [{ text: '🏷 Стикеры и QR для коробок', callback_data: 'menu:stickers' }],
-    [{ text: '🔑 Найти код клиента', callback_data: 'menu:code' }],
-    [{ text: '⭐ Отзывы ПВЗ — кто поставил оценку', callback_data: 'menu:reviews' }],
-    [{ text: '🖥 Помощник ПВЗ', callback_data: 'menu:helper' }],
-    [{ text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
-    [{ text: '👥 Пригласить друга — 10%', callback_data: 'menu:ref' }],
+    [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
+    [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
     [signedIn
-      ? { text: '👤 Мой профиль и баланс', callback_data: 'menu:profile' }
-      : { text: '🔐 Войти в кабинет', callback_data: 'menu:login' }],
-    [{ text: '📣 Канал', url: CHANNEL_URL }, { text: '🆘 Поддержка', callback_data: 'menu:support' }, { text: '🌐 Сайт', web_app: { url: publicUrl('/') } }],
+      ? { text: '👤 Профиль', callback_data: 'menu:profile' }
+      : { text: '🔐 Войти', callback_data: 'menu:login' },
+    { text: '🎁 +10% за друга', callback_data: 'menu:ref' }],
+    [{ text: '📣 Канал', url: CHANNEL_URL, style: 'success' }, { text: '🌐 Сайт', web_app: { url: publicUrl('/') }, style: 'primary' }],
+    [{ text: '🛡 Наш VPN', url: VPN_URL }, { text: '🆘 Поддержка', callback_data: 'menu:support' }],
   ]);
 }
 
@@ -211,11 +219,28 @@ async function helperFreeText() {
   catch { return ''; }
 }
 
-async function showMainMenu(from, chatId, messageId) {
-  const [userId, free] = await Promise.all([findUser(from.id), helperFreeText()]);
-  const lines = ['<b>Главное меню</b>'];
-  if (free) lines.push(`🆕 Помощник ПВЗ — ${free}`);
-  lines.push(`📣 <a href="${CHANNEL_URL}">Наш канал</a> — новости и обновления`);
+function greetingTitle(from) {
+  const name = String(from?.first_name || '').trim();
+  return `<b>👋 Здравствуйте${name ? `, ${escapeHtml(name)}` : ''}!</b>`;
+}
+
+/** greet — после /start: приветствие по имени вместо заголовка «Главное меню». */
+async function showMainMenu(from, chatId, messageId, { greet = false, invited = false, notice = '' } = {}) {
+  const userId = await findUser(from.id);
+  // Без ссылок в тексте: канал, VPN и сайт — кнопками ниже.
+  const lines = greet
+    ? [
+      greetingTitle(from),
+      '',
+      'Что умеет бот:',
+      '🏷 Стикеры и QR для коробок — читаются сканером WB',
+      '🔑 QR-код клиента',
+      '⭐ Кто поставил оценку в отзывах ПВЗ',
+      '',
+      'Всё — в меню ниже.',
+    ]
+    : [notice || '<b>Главное меню</b>'];
+  if (invited) lines.push('', 'Вас пригласил коллега — нажмите «🔐 Войти».');
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
 }
 
@@ -333,6 +358,7 @@ async function clubPrice(telegramId, basePrice) {
 }
 
 const clientCodePrice = telegramId => clubPrice(telegramId, CLIENT_CODE_PRICE);
+const clientCodeEventKey = (userId, qrText) => `qr:${userId}:${qrText}`;
 const reviewPrice = telegramId => clubPrice(telegramId, REVIEW_PRICE);
 
 const clubLine = '🎁 У вас скидка 20% как у участника клуба.';
@@ -346,12 +372,13 @@ async function handleClientCode(from, chatId, sid) {
   }
   const userId = await findUser(from.id);
   if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  // Каждый ввод SID — новая платная операция, даже если этот SID уже вводили сегодня.
   const { qrText } = buildClientQr(sid);
   const [balance, { price, club }] = await Promise.all([walletRub(userId), clientCodePrice(from.id)]);
   if (balance < price) return showClientCodePaywall(from, chatId, sid, balance, price);
   const spent = await supabaseFetch('rpc/wallet_spend', {
     method: 'POST',
-    body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_event_key: `qr:${userId}:${qrText}`, p_details: { sid: String(sid), club } }),
+    body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_event_key: clientCodeEventKey(userId, qrText), p_details: { sid: String(sid), club } }),
   });
   if (!spent?.ok) return showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100, price);
   notifyAdminSpend({ userId, priceRub: price, title: `Код клиента (QR)${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
@@ -421,7 +448,7 @@ async function promptClientQuery(from, chatId, messageId) {
   await showScreen(chatId, messageId, [
     `<b>🔎 Поиск клиента (ПВЗ ${(await getWbConnection(from.id))?.session?.pointId || ''})</b>`,
     'Отправьте <b>номер ячейки</b> или <b>телефон</b> (можно последние 4 цифры).',
-    'Например: <code>245</code> или <code>1234</code> или <code>79991234567</code>.',
+    'Например: <code>245</code> или <code>8898</code>.',
     '',
     'Ищу по текущим заказам в пункте.',
   ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
@@ -487,7 +514,8 @@ async function runClientSearch(from, chatId, query) {
   });
   if (matches.length > 10) lines.push(`\n…и ещё ${matches.length - 10}. Уточните запрос.`);
   rows.push([{ text: '🔁 Искать снова', callback_data: 'code:find' }, ...MENU_ROW]);
-  await clearSession(from.id);
+  // Поиск остаётся открытым: следующий номер можно отправить сразу, без кнопки.
+  lines.push('', 'Можно сразу отправить следующий номер.');
   await sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
 }
 
@@ -643,6 +671,7 @@ function miniAppKeyboard() {
     [{ text: 'У меня уже есть кабинет', web_app: { url: publicUrl('/telegram-account') } }],
     [{ text: 'Создать кабинет через Telegram', web_app: { url: publicUrl('/login') } }],
     [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
+    MENU_ROW,
   ]);
 }
 
@@ -727,7 +756,7 @@ async function redeemAccessCode(from, chatId, session, text) {
   const draft = session.draft || {};
   const code = normalizeAccessCode(text.replace(/\s+/g, ''));
   if (!isAccessCode(code)) return sendMessage(chatId, 'Код — это 6 цифр, например <code>123456</code>. Отправьте его ещё раз или нажмите /cancel.');
-  if (!await consumeCodeAttempt(from.id)) return sendMessage(chatId, 'Слишком много попыток. Попробуйте через час.', { reply_markup: HOME_KEYBOARD });
+  if (!await consumeCodeAttempt(from.id)) return sendMessage(chatId, 'Слишком много попыток. Попробуйте через час.', { reply_markup: MENU_KEYBOARD });
   try {
     await supabaseFetch('rpc/claim_user_asset', { method: 'POST', body: JSON.stringify({ p_user_id: draft.userId, p_kind: 'sticker', p_value: code }) });
   } catch (error) {
@@ -739,10 +768,10 @@ async function redeemAccessCode(from, chatId, session, text) {
   const row = rows[0];
   if (row && !row.active) {
     await clearSession(from.id);
-    return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> привязан к кабинету, но сейчас отключён. Обратитесь к тому, кто выдал код.`, { reply_markup: HOME_KEYBOARD });
+    return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> привязан к кабинету, но сейчас отключён. Обратитесь к тому, кто выдал код.`, { reply_markup: MENU_KEYBOARD });
   }
   const left = row ? Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)) : 0;
-  await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: HOME_KEYBOARD });
+  await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: MENU_KEYBOARD });
   // Пришли из генерации, где не хватило остатка, — продолжаем с тем же черновиком.
   if (draft.mode) {
     // Старый экран мастера остался выше в чате — подтверждение показываем новым сообщением под кодом.
@@ -887,22 +916,35 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
   }
   await saveSession(from, chatId, 'generating', draft);
   await showScreen(chatId, messageId, `${wizardTrail(draft)}⏳ Генерирую и подготавливаю PDF…`);
+  let result;
   try {
     const requesterHash = telegramRequesterHash(from.id);
-    const result = await generateStickers({ ...draft, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
+    result = await generateStickers({ ...draft, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
     await completeGenerationRequest(requestId, result);
     await clearSession(from.id);
-    await sendPreview(chatId, requestId, result, 0);
-    await sendDocument(chatId, absoluteAssetUrl(result.pdfUrl), { caption: paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}` });
-    // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
-    if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) });
   } catch (error) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     await clearSession(from.id);
     // Если генерации уже куплены с баланса, они остались на коде — следующая попытка возьмёт их без оплаты.
     const kept = paidLine && !draft.unlimited ? '\n\nОплаченные генерации остались на вашем счёте — попробуйте ещё раз, повторно платить не нужно.' : '';
     await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    return;
   }
+  // Стикеры уже созданы и списаны — если Telegram не принял файл, не пишем «не удалось создать», а даём ссылку.
+  try {
+    await sendPreview(chatId, requestId, result, 0);
+    await sendDocument(chatId, absoluteAssetUrl(result.pdfUrl), { caption: paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}` });
+  } catch (error) {
+    console.warn('Telegram sticker delivery failed', error.message);
+    await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard([
+      [{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }],
+      [{ text: '🌐 История в кабинете', web_app: { url: publicUrl('/cabinet/history') } }],
+      MENU_ROW,
+    ]) }).catch(() => {});
+    return;
+  }
+  // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
+  if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) }).catch(() => {});
 }
 
 function wizardNonce() { return String(crypto.randomInt(100000, 1000000)); }
@@ -983,8 +1025,10 @@ async function showHelp(chatId, messageId) {
   await showScreen(chatId, messageId, [
     '<b>❓ Как пользоваться</b>',
     '🏷 Стикеры и QR — выберите тип и количество, придёт PDF.',
-    '⭐ Отзывы — войдите в кабинет WB по SMS.',
-    '💰 Оплата — с баланса в «👤 Профиль».',
+    '🔑 Код клиента — отправьте <code>Код ID</code>, придёт QR. ID можно найти в боте по ячейке или телефону.',
+    '⭐ Отзывы — войдите в кабинет WB по SMS, затем «Кто поставил оценку».',
+    '💰 Оплата — с баланса: «👤 Профиль» → «Пополнить».',
+    '/cancel — отменить текущее действие.',
   ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '🆘 Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]) });
 }
 
@@ -1042,6 +1086,14 @@ function formatWbDate(value) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+/** Только дата, без времени: «22 окт. 2026 г.» — в шапке отзыва. */
+function formatWbDay(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return escapeHtml(String(value).slice(0, 10));
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'medium' }).format(date);
+}
+
 function formatPhone(value) {
   const digits = String(value || '').replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('7')) return `+7 ${digits.slice(1, 4)} ${digits.slice(4, 7)}-${digits.slice(7, 9)}-${digits.slice(9)}`;
@@ -1059,7 +1111,7 @@ function reviewText(review, position, total) {
   const reasons = Array.isArray(review.reasons_text) ? review.reasons_text.filter(Boolean).join(', ') : '';
   const parts = [
     `<b>Отзыв ${position} из ${total}</b>`,
-    `${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)} · ${formatWbDate(review.rate_dt)}`,
+    `${'⭐'.repeat(stars)}${'☆'.repeat(5 - stars)} · ${formatWbDay(review.rate_dt)}`,
   ];
   if (comment) parts.push(`\n${escapeHtml(comment)}`);
   if (reasons) parts.push(`\nПричины: ${escapeHtml(reasons)}`);
@@ -1156,7 +1208,9 @@ async function sendReviewPage(from, chatId, filterKey, page) {
   }
   for (let index = 0; index < result.data.length; index += 1) {
     const review = result.data[index];
-    const callbackData = `rv:who2:${filterKey}:${safePage}:${index}`;
+    // Метка отзыва (первые 8 символов id): если список сдвинется, найдём именно этот отзыв, а не соседа по позиции.
+    const tag = reviewTag(review);
+    const callbackData = `rv:who2:${filterKey}:${safePage}:${index}${tag ? `:${tag}` : ''}`;
     const keyboard = choiceKeyboard([[{ text: '👤 Кто поставил оценку', callback_data: callbackData }]]);
     await sendMessage(chatId, reviewText(review, safePage * 5 + index + 1, result.total), { reply_markup: keyboard });
   }
@@ -1280,15 +1334,29 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   await sendMessage(chatId, `${info.text}\n\n<i>${footer}</i>`);
 }
 
-async function showReviewAuthorByPosition(from, chatId, filterKey, page, index) {
+function reviewTag(review) {
+  const match = /^([0-9a-f]{8})/i.exec(String(review?.id || ''));
+  return match ? match[1].toLowerCase() : '';
+}
+
+async function showReviewAuthorByPosition(from, chatId, filterKey, page, index, tag) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   const stars = reviewStars(filterKey);
   if (!stars.length || !Number.isInteger(page) || page < 0 || !Number.isInteger(index) || index < 0 || index >= 5) return;
-  const result = await wbPvz.loadReviews(connection.session, stars, page, 5);
-  const review = result.data[index];
-  if (!review) return sendMessage(chatId, 'Отзыв больше не найден в этой позиции. Обновите список отзывов.');
-  return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${page}:${index}`);
+  let review = null, foundPage = page, foundIndex = index;
+  if (tag) {
+    // Новые отзывы сдвигают список вниз — ищем отзыв по метке на его странице и на соседних.
+    for (const candidate of [page, page + 1, page - 1].filter(value => value >= 0)) {
+      const result = await wbPvz.loadReviews(connection.session, stars, candidate, 5);
+      const position = result.data.findIndex(item => reviewTag(item) === tag);
+      if (position >= 0) { review = result.data[position]; foundPage = candidate; foundIndex = position; break; }
+    }
+  } else {
+    review = (await wbPvz.loadReviews(connection.session, stars, page, 5)).data[index] || null;
+  }
+  if (!review) return sendMessage(chatId, 'Этот отзыв больше не найден — список изменился. Откройте отзывы заново, деньги не списаны.', { reply_markup: choiceKeyboard([[{ text: '⭐ К отзывам', callback_data: 'rv:filters' }, ...MENU_ROW]]) });
+  return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${foundPage}:${foundIndex}${tag ? `:${tag}` : ''}`);
 }
 
 async function beginPointSelection(from, chatId, connection) {
@@ -1307,7 +1375,7 @@ async function showIndividualOrders(from, chatId) {
   const userId = await findUser(from.id);
   if (!userId) return sendMessage(chatId, 'Сначала подключите кабинет.', { reply_markup: miniAppKeyboard() });
   const orders = await supabaseFetch(`individual_sticker_orders?user_id=eq.${encodeURIComponent(userId)}&select=id,title,quantity,amount_due,status&order=created_at.desc&limit=10`);
-  if (!orders.length) return sendMessage(chatId, 'Индивидуальных заказов пока нет.', { reply_markup: HOME_KEYBOARD });
+  if (!orders.length) return sendMessage(chatId, 'Индивидуальных заказов пока нет.', { reply_markup: MENU_KEYBOARD });
   for (const order of orders) {
     const paid = order.status === 'paid';
     const rows = [[{ text: paid ? '🌐 Посмотреть каждый стикер' : `💳 Оплатить ${Number(order.amount_due).toFixed(2)} ₽`, web_app: { url: publicUrl(paid ? '/cabinet/history' : '/cabinet/orders') } }]];
@@ -1330,11 +1398,7 @@ async function notifyMiniAppAuthorized(telegramId) {
   const session = await getSession(telegramId);
   if (session?.draft?.authPromptMessageId) await deleteMessage(session.chat_id, session.draft.authPromptMessageId);
   await clearSession(telegramId);
-  await sendMessage(telegramId,
-    '<b>Готово — вход выполнен.</b>\n\nКабинет подключён: стикеры, авторы отзывов и продление программ доступны в меню.',
-    { reply_markup: HOME_KEYBOARD },
-  );
-  await showMainMenu({ id: telegramId }, telegramId);
+  await showMainMenu({ id: telegramId }, telegramId, undefined, { notice: '✅ <b>Вход выполнен</b> — кабинет подключён, баланс и покупки доступны.' });
 }
 
 // ── Баланс: пополнение и покупки с баланса (server/_wallet.js) ──
@@ -1694,8 +1758,9 @@ async function showReferrals(from, chatId, messageId, notice) {
     ...(notice ? [notice, ''] : []),
     `<b>👥 Приглашайте коллег — ${REFERRAL_PERCENT}% с их оплат</b>`,
     '',
-    'Ваша ссылка:',
-    links.telegram || links.site,
+    'Ваша ссылка (нажмите, чтобы скопировать):',
+    // В <code> Telegram копирует текст по нажатию, а не открывает ссылку.
+    `<code>${escapeHtml(links.telegram || links.site)}</code>`,
     '',
     `Приглашено: <b>${invited.length}</b> · заработано: <b>${wallet.formatRub(earned)}</b>`,
     `Доступно: <b>${wallet.formatRub(available)}</b>`,
@@ -1703,6 +1768,8 @@ async function showReferrals(from, chatId, messageId, notice) {
   const share = links.telegram || links.site;
   const shareText = 'Стикеры и QR для возвратов WB, код клиента и отзывы ПВЗ — бот shk-wb.ru';
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    // copy_text (Bot API 7.11) — кнопка кладёт ссылку в буфер обмена.
+    [{ text: '📋 Скопировать ссылку', copy_text: { text: share } }],
     [{ text: '📤 Поделиться ссылкой', url: `https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent(shareText)}` }],
     ...(available > 0 ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
     [{ text: '🏦 Вывести на карту (от 500 ₽)', web_app: { url: publicUrl('/cabinet/referrals') } }],
@@ -1739,9 +1806,9 @@ async function afterWalletTopup(order) {
     await runGeneration(from, chatId, session.draft.msgId, session);
     return true;
   }
-  const review = /^rv:(all|[1-5]):(\d+):(\d)$/.exec(then);
+  const review = /^rv:(all|[1-5]):(\d+):(\d)(?::([0-9a-f]{8}))?$/.exec(then);
   if (review) {
-    await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]));
+    await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4]);
     return true;
   }
   const qr = /^qr:(\d{1,12})$/.exec(then);
@@ -1770,10 +1837,18 @@ async function showSupport(chatId, messageId) {
   ]) });
 }
 
+/** Вход в WB ждал телефон или SMS-код — отменить (готовое подключение не трогаем). */
+async function cancelWbLogin(from, chatId) {
+  const wb = await getWbConnection(from.id);
+  if (wb && (wb.state === 'await_phone' || wb.state === 'await_code')) await saveWbConnection(from, chatId, 'idle', wb.session);
+}
+
 /** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
 async function handleMenu(from, chatId, item, messageId) {
   // Ушли из мастера кнопкой меню — его черновик больше не нужен.
   if (item !== 'stickers') await clearSession(from.id).catch(() => {});
+  // Ушли из незаконченного входа в WB — следующее сообщение больше не считается телефоном или SMS-кодом.
+  if (item !== 'reviews') await cancelWbLogin(from, chatId).catch(() => {});
   if (item === 'stickers') return startGeneration(from, chatId, messageId);
   if (item === 'code') return showClientCode(chatId, messageId, from);
   if (item === 'reviews') return showReviewFilters(from, chatId, messageId);
@@ -1803,8 +1878,8 @@ async function handleCallback(callback) {
   if (shopPay) { await answerCallbackQuery(callback.id); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
   if (data.startsWith('shop:')) { await answerCallbackQuery(callback.id); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
   if (data === 'rv:start' || data === 'rv:filters') { await answerCallbackQuery(callback.id); await showReviewFilters(from, chatId, messageId); return; }
-  if (data === 'rv:disconnect') { await answerCallbackQuery(callback.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: HOME_KEYBOARD }); return; }
-  if (data === 'rv:cancel') { await answerCallbackQuery(callback.id); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (data === 'rv:disconnect') { await answerCallbackQuery(callback.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
+  if (data === 'rv:cancel') { await answerCallbackQuery(callback.id); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
   if (data === 'rv:points') {
     await answerCallbackQuery(callback.id);
     const connection = await getWbConnection(from.id);
@@ -1826,8 +1901,8 @@ async function handleCallback(callback) {
   if (filterMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
   const reviewPageMatch = data.match(/^rv:page:(all|[1-5]):(\d+)$/);
   if (reviewPageMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
-  const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)$/);
-  if (authorPositionMatch) { await answerCallbackQuery(callback.id); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3])); return; }
+  const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)(?::([0-9a-f]{8}))?$/);
+  if (authorPositionMatch) { await answerCallbackQuery(callback.id); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4]); return; }
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
   if (authorMatch) { await answerCallbackQuery(callback.id); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
@@ -1906,21 +1981,15 @@ async function handleMessage(message) {
       await markClubRef(from.id).catch(error => console.warn('Скидка клуба: отметка перехода', error?.message || error));
       // Экран кода клиента пишет про скидку сам; у отзывов первым может быть вход в кабинет WB — говорим здесь.
       const clubText = clubTarget[1] === 'reviews' && await clubDiscount(from.id) ? `\n${clubLine}` : '';
-      await sendMessage(chatId, `<b>👋 Бот shk-wb.ru для ПВЗ Wildberries</b>${clubText}`, { reply_markup: HOME_KEYBOARD });
+      await sendMessage(chatId, `${greetingTitle(from)}${clubText}`);
       return clubTarget[1] === 'code' ? showClientCode(chatId, undefined, from) : showReviewFilters(from, chatId);
     }
-    const intro = [
-      '<b>👋 Бот shk-wb.ru для ПВЗ Wildberries</b>',
-      'Стикеры и QR, код клиента, отзывы, печать ячеек.',
-      ...(invited ? ['', 'Вас пригласил коллега — нажмите «🔐 Войти в кабинет» в меню.'] : []),
-    ].join('\n');
-    // Первое сообщение заменяет старую большую клавиатуру на короткую, второе — само меню.
-    await sendMessage(chatId, intro, { reply_markup: HOME_KEYBOARD });
-    return showMainMenu(from, chatId);
+    // Одно сообщение: приветствие + инлайн-меню. Постоянную клавиатуру не шлём — «☰ Меню» есть на каждом экране.
+    return showMainMenu(from, chatId, undefined, { greet: true, invited });
   }
   if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(chatId);
   if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
-  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: HOME_KEYBOARD }); return; }
+  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
   if (/^\/(generate|stickers)(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
   if (/^\/code(?:@\w+)?$/i.test(text)) return showClientCode(chatId, undefined, from);
   if (/^\/profile(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
@@ -1938,26 +2007,48 @@ async function handleMessage(message) {
   if (text === '📦 QR для коробок') return startForCategory(from, chatId, 'box');
   if (text === '💳 Остаток' || text === '👤 Аккаунт') return showProfile(from, chatId);
   if (text === '⭐ Отзывы ПВЗ') return showReviewFilters(from, chatId);
+  // Сначала — ввод, которого ждёт открытый экран (мастер, сумма, поиск). Иначе незаконченный вход в WB
+  // («пришлите телефон») перехватывал бы, например, количество стикеров или ШК из 11 цифр.
+  const session = await getSession(from.id);
+  const draft = session?.draft || {};
+  if (session?.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
+  if (session?.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
+  if (session?.state === 'await_client_query') return runClientSearch(from, chatId, text);
+  // Ввод в мастер: сообщение пользователя убираем, ответ — в том же экране мастера (ошибка — строкой сверху).
+  if (session?.state === 'await_quantity') {
+    await deleteMessage(chatId, message.message_id).catch(() => {});
+    const quantity = Number(text);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — нужно целое число от 1 до 500.`; return renderWizard(from, chatId, 'await_quantity', draft); }
+    draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
+  }
+  if (session?.state === 'await_code') {
+    await deleteMessage(chatId, message.message_id).catch(() => {});
+    const length = draft.category === 'box' ? 10 : 11;
+    const code = text.replace(/\s+/g, '');
+    if (!new RegExp(`^\\d{${length}}$`).test(code)) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — номер должен содержать ровно ${length} цифр.`; return renderWizard(from, chatId, 'await_code', draft); }
+    draft.code = code; return requestConfirmation(from, chatId, draft);
+  }
   const wbConnection = await getWbConnection(from.id);
   if (wbConnection?.state === 'await_phone') {
     await deleteMessage(chatId, message.message_id);
     let phone = text.replace(/\D/g, '');
     if (phone.length === 11 && phone.startsWith('8')) phone = `7${phone.slice(1)}`;
-    if (!/^7\d{10}$/.test(phone)) return sendMessage(chatId, 'Введите номер в формате <code>79991234567</code>.');
+    if (!/^7\d{10}$/.test(phone)) return sendMessage(chatId, 'Введите номер телефона сотрудника в формате <code>79991234567</code>.', { reply_markup: WB_LOGIN_KEYBOARD });
     try {
       const result = await wbPvz.requestCode(wbConnection.session || { deviceId: crypto.randomUUID() }, phone);
       await saveWbConnection(from, chatId, 'await_code', result.session);
-      await sendMessage(chatId, `Код отправлен. Введите код из сообщения WB в течение ${result.ttl} сек. Сообщение с кодом будет удалено.`);
+      await sendMessage(chatId, `Код отправлен. Введите код из сообщения WB в течение ${result.ttl} сек. Сообщение с кодом будет удалено.`, { reply_markup: WB_LOGIN_KEYBOARD });
     } catch (error) {
       await saveWbConnection(from, chatId, 'await_phone', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
-      await sendMessage(chatId, `Не удалось отправить код WB: ${escapeHtml(error.message)}`);
+      await sendMessage(chatId, `Не удалось отправить код WB: ${escapeHtml(error.message)}
+Отправьте номер ещё раз или отмените вход.`, { reply_markup: WB_LOGIN_KEYBOARD });
     }
     return;
   }
   if (wbConnection?.state === 'await_code') {
     await deleteMessage(chatId, message.message_id);
     const code = text.replace(/\D/g, '');
-    if (!/^\d{4,6}$/.test(code)) return sendMessage(chatId, 'Введите код WB из 4–6 цифр.');
+    if (!/^\d{4,6}$/.test(code)) return sendMessage(chatId, 'Введите код WB из 4–6 цифр.', { reply_markup: WB_LOGIN_KEYBOARD });
     try {
       const session = await wbPvz.confirmCode(wbConnection.session, code);
       await saveWbConnection(from, chatId, 'await_point', session);
@@ -1969,30 +2060,22 @@ async function handleMessage(message) {
       }
     } catch (error) {
       await saveWbConnection(from, chatId, 'await_code', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
-      await sendMessage(chatId, `Не удалось войти в WB: ${escapeHtml(error.message)}`);
+      await sendMessage(chatId, `Не удалось войти в WB: ${escapeHtml(error.message)}
+Проверьте код и отправьте ещё раз.`, { reply_markup: WB_LOGIN_KEYBOARD });
     }
     return;
   }
-  const session = await getSession(from.id);
   if (!session) return showMainMenu(from, chatId);
-  const draft = session.draft || {};
-  if (session.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
-  if (session.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
-  if (session.state === 'await_client_query') return runClientSearch(from, chatId, text);
-  // Ввод в мастер: сообщение пользователя убираем, ответ — в том же экране мастера (ошибка — строкой сверху).
-  if (session.state === 'await_quantity') {
+  // Шаг мастера ждёт нажатия кнопки, а пришёл текст — подсказываем в том же экране.
+  if (['choose_kind', 'choose_mode', 'confirm'].includes(session.state) && draft.msgId) {
     await deleteMessage(chatId, message.message_id).catch(() => {});
-    const quantity = Number(text);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — нужно целое число от 1 до 500.`; return renderWizard(from, chatId, 'await_quantity', draft); }
-    draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
+    draft.error = 'Выберите вариант кнопкой ниже.';
+    return renderWizard(from, chatId, session.state, draft);
   }
-  if (session.state === 'await_code') {
-    await deleteMessage(chatId, message.message_id).catch(() => {});
-    const length = draft.category === 'box' ? 10 : 11;
-    if (!new RegExp(`^\\d{${length}}$`).test(text)) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — номер должен содержать ровно ${length} цифр.`; return renderWizard(from, chatId, 'await_code', draft); }
-    draft.code = text; return requestConfirmation(from, chatId, draft);
-  }
-  return sendMessage(chatId, 'Завершите текущее действие или отправьте /cancel.');
+  if (session.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
+  // Остальное (например, ждём входа через Mini App) — просто меню, без загадочных «завершите действие».
+  await clearSession(from.id);
+  return showMainMenu(from, chatId);
 }
 
 function validWebhookSecret(req) {
@@ -2012,9 +2095,9 @@ async function handleTelegramUpdate(req, res) {
   } catch (error) {
     console.error('Telegram generator bot failed', error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-    if (chatId) await sendMessage(chatId, 'Произошла внутренняя ошибка. Попробуйте позже.', { reply_markup: HOME_KEYBOARD }).catch(() => {});
+    if (chatId) await sendMessage(chatId, 'Произошла внутренняя ошибка. Попробуйте позже.', { reply_markup: MENU_KEYBOARD }).catch(() => {});
   }
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
