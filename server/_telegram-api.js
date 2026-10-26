@@ -29,6 +29,31 @@ async function telegramRequest(method, body) {
   return data.result;
 }
 
+function uploadDescriptor(value, fallbackName, fallbackType) {
+  if (Buffer.isBuffer(value)) return { buffer: value, filename: fallbackName, contentType: fallbackType };
+  if (value && Buffer.isBuffer(value.buffer)) return { buffer: value.buffer, filename: value.filename || fallbackName, contentType: value.contentType || fallbackType };
+  return null;
+}
+
+async function telegramUpload(method, field, chatId, media, options, fallbackName, fallbackType) {
+  const upload = uploadDescriptor(media, fallbackName, fallbackType);
+  if (!upload) return telegramRequest(method, { chat_id: chatId, [field]: media, ...options });
+  const form = new FormData();
+  form.set('chat_id', String(chatId));
+  for (const [key, value] of Object.entries(options || {})) {
+    if (value === undefined || value === null) continue;
+    form.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+  }
+  form.set(field, new Blob([upload.buffer], { type: upload.contentType }), upload.filename);
+  const response = await fetch(`https://api.telegram.org/bot${botToken()}/${method}`, { method: 'POST', body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok !== true) {
+    const error = new Error(data.description || `Telegram API error (${response.status})`);
+    error.status = response.status; error.details = data; throw error;
+  }
+  return data.result;
+}
+
 function proxyMediaUrl(value, relayBase) {
   if (!relayBase || typeof value !== 'string') return value;
   let url;
@@ -81,7 +106,7 @@ function editMessageText(chatId, messageId, text, options = {}) {
 }
 
 function sendPhoto(chatId, photo, options = {}) {
-  return telegramRequest('sendPhoto', { chat_id: chatId, photo, ...options });
+  return telegramUpload('sendPhoto', 'photo', chatId, photo, options, 'sticker.png', 'image/png');
 }
 
 function sendMediaGroup(chatId, urls) {
@@ -92,7 +117,7 @@ function sendMediaGroup(chatId, urls) {
 }
 
 function sendDocument(chatId, document, options = {}) {
-  return telegramRequest('sendDocument', { chat_id: chatId, document, ...options });
+  return telegramUpload('sendDocument', 'document', chatId, document, options, 'stickers.pdf', 'application/pdf');
 }
 
 // Подтверждение нажатия кнопки. Если бот ответил позже ~15 с (медленный WB, сеть), Telegram

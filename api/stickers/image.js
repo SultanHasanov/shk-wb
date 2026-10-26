@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { boxStickerSvg, clientQrPng, stickerSvg } = require('../../server/_stickers');
+const { boxStickerSvg, clientQrPng, newStickerSvg, stickerSvg } = require('../../server/_stickers');
 const { isClientQrText } = require('../../server/_wb-code');
 const { supabaseFetch } = require('../../server/_supabase');
 const { requireUser } = require('../../server/_user-auth');
@@ -19,6 +19,7 @@ module.exports = async function handler(req, res) {
   const token = String(req.query?.token || '');
   const expires = Number(req.query?.expires || 0);
   let variant = String(req.query?.variant || '');
+  const style = String(req.query?.style || '') === 'new' ? 'new' : 'old';
   let prefix = String(req.query?.prefix || 'TRBX').toUpperCase();
   // Режим «голый QR из подписанного текста» — код клиента для Telegram-бота.
   const qrText = String(req.query?.qr || '');
@@ -69,7 +70,7 @@ module.exports = async function handler(req, res) {
       const rows = await supabaseFetch(`${table}?batch_id=eq.${encodeURIComponent(batch)}&code=eq.${encodeURIComponent(code)}&select=code`);
       if (!rows.length) return res.status(404).end();
     }
-    const svg = variant === 'box' ? await boxStickerSvg(prefix, code) : await stickerSvg(code);
+    const svg = variant === 'box' ? await boxStickerSvg(prefix, code) : style === 'new' ? await newStickerSvg(code) : await stickerSvg(code);
     if (String(req.query?.format || '') === 'png') {
       const renderer = new Resvg(embedPreviewFont(svg), {
         font: {

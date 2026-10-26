@@ -78,6 +78,93 @@ function splitCode(code) {
   return text.length > 7 ? [text.slice(0, -4), text.slice(-4)] : [text, ''];
 }
 
+// Code 128 patterns, expressed as alternating black/white module widths. The
+// new WB label uses a compact vertical linear barcode alongside the main QR.
+const CODE128_PATTERNS = [
+  '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212',
+  '112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131',
+  '311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321',
+  '112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121',
+  '313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+  '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114',
+  '122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212',
+  '124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113',
+  '114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112',
+];
+
+function code128Values(value) {
+  const text = String(value);
+  if (!/^[\x20-\x7e]+$/.test(text)) throw new Error('Invalid Code 128 value');
+  let start = 104;
+  let data;
+  if (/^\d+$/.test(text) && text.length >= 4) {
+    if (text.length % 2 === 0) {
+      start = 105;
+      data = text.match(/\d{2}/g).map(Number);
+    } else {
+      // One digit in set B, then switch to the denser set C for digit pairs.
+      data = [text.charCodeAt(0) - 32, 99, ...text.slice(1).match(/\d{2}/g).map(Number)];
+    }
+  } else data = [...text].map(char => char.charCodeAt(0) - 32);
+  const checksum = (start + data.reduce((sum, item, index) => sum + item * (index + 1), 0)) % 103;
+  return [start, ...data, checksum, 106];
+}
+
+function code128Bars(value) {
+  const widths = code128Values(value).flatMap(index => [...CODE128_PATTERNS[index]].map(Number));
+  const bars = [];
+  let module = 0;
+  widths.forEach((width, index) => {
+    if (index % 2 === 0) bars.push({ module, width });
+    module += width;
+  });
+  return { bars, modules: module };
+}
+
+function newStickerDesign(code) {
+  const normalized = String(code);
+  if (!/^\d{1,12}$/.test(normalized)) throw new Error('Invalid sticker code');
+  return {
+    payload: encodeWbPayload(normalized),
+    width: 600,
+    height: 600,
+    qr: { x: 125, y: 8, size: 463 },
+    cornerSize: 92,
+    corners: [{ x: 10, y: 10 }, { x: 10, y: 498 }, { x: 498, y: 498 }],
+    barcode: { x: 10, y: 125, width: 92, height: 330, ...code128Bars(normalized) },
+    codeParts: splitCode(normalized),
+  };
+}
+
+async function newStickerSvg(code) {
+  const design = newStickerDesign(code);
+  const [largeQr, smallQr] = await Promise.all([
+    QRCode.toString(design.payload, { type: 'svg', width: design.qr.size, margin: 0, errorCorrectionLevel: 'M' }),
+    QRCode.toString(design.payload, { type: 'svg', width: design.cornerSize, margin: 1, errorCorrectionLevel: 'M' }),
+  ]);
+  const largeQrBase64 = Buffer.from(largeQr).toString('base64');
+  const smallQrBase64 = Buffer.from(smallQr).toString('base64');
+  const barcode = design.barcode.bars.map(bar => {
+    const y = design.barcode.y + bar.module * design.barcode.height / design.barcode.modules;
+    const height = bar.width * design.barcode.height / design.barcode.modules;
+    return `<rect x="${design.barcode.x}" y="${y.toFixed(3)}" width="${design.barcode.width}" height="${height.toFixed(3)}" fill="#111"/>`;
+  }).join('');
+  const corners = design.corners.map(corner =>
+    `<image href="data:image/svg+xml;base64,${smallQrBase64}" x="${corner.x}" y="${corner.y}" width="${design.cornerSize}" height="${design.cornerSize}"/>`
+  ).join('');
+  const [top, bottom] = design.codeParts;
+  const codeMarkup = bottom
+    ? `<text x="498" y="520" class="top">${top}</text><text x="498" y="590" class="bottom">${bottom}</text>`
+    : `<text x="300" y="580" class="bottom">${top}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 600 600">
+    <rect width="600" height="600" fill="white"/>
+    <image href="data:image/svg+xml;base64,${largeQrBase64}" x="${design.qr.x}" y="${design.qr.y}" width="${design.qr.size}" height="${design.qr.size}" image-rendering="pixelated"/>
+    ${barcode}${corners}
+    <style>text{text-anchor:end;font-family:Arial,sans-serif;fill:#111;font-weight:700}.top{font-size:32px;letter-spacing:1px}.bottom{font-size:78px;letter-spacing:8px}</style>
+    ${codeMarkup}
+  </svg>`;
+}
+
 function makeRng(seedText) {
   let seed = 0;
   for (let index = 0; index < seedText.length; index += 1) {
@@ -200,4 +287,4 @@ async function boxStickerSvg(prefix, code) {
   </svg>`;
 }
 
-module.exports = { boxStickerSvg, clientQrPng, encodeWbPayload, qrPng, qrTextPng, requesterHash, returnStickerDesign, returnStickerSvg, splitCode, stickerDecorations, stickerSvg };
+module.exports = { boxStickerSvg, clientQrPng, code128Bars, code128Values, encodeWbPayload, newStickerDesign, newStickerSvg, qrPng, qrTextPng, requesterHash, returnStickerDesign, returnStickerSvg, splitCode, stickerDecorations, stickerSvg };

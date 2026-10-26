@@ -1,6 +1,6 @@
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const crypto = require('crypto');
-const { qrPng, qrTextPng, returnStickerDesign, stickerDecorations, splitCode } = require('../../server/_stickers');
+const { newStickerDesign, qrPng, qrTextPng, returnStickerDesign, stickerDecorations, splitCode } = require('../../server/_stickers');
 const { supabaseFetch } = require('../../server/_supabase');
 const { requireUser } = require('../../server/_user-auth');
 
@@ -77,6 +77,51 @@ function drawProductSticker(page,font,code,qr,slot,layout){
   if(parts[1]){centered(parts[0],123,11*fontScale);centered(parts[1],49,17*fontScale)}else centered(parts[0],69,16*fontScale);
 }
 
+function drawNewProductSticker(page,font,codeFont,code,qr,slot,layout){
+  const {columns:COLUMNS,cellWidth:CELL_WIDTH,cellHeight:CELL_HEIGHT,stickerWidth:STICKER_WIDTH}=layout;
+  const column=slot%COLUMNS,row=Math.floor(slot/COLUMNS),originX=MARGIN+column*(CELL_WIDTH+GAP)+(CELL_WIDTH-STICKER_WIDTH)/2,cellBottom=A4_HEIGHT-MARGIN-(row+1)*CELL_HEIGHT-row*GAP;
+  const productHeight=STICKER_WIDTH,originY=cellBottom+(CELL_HEIGHT-productHeight)/2,s=STICKER_WIDTH/600,design=newStickerDesign(code);
+  page.drawRectangle({x:originX,y:originY,width:STICKER_WIDTH,height:productHeight,color:rgb(1,1,1),borderColor:rgb(.86,.86,.88),borderWidth:.4});
+  page.drawImage(qr,{x:originX+design.qr.x*s,y:originY+productHeight-(design.qr.y+design.qr.size)*s,width:design.qr.size*s,height:design.qr.size*s});
+  for(const bar of design.barcode.bars){
+    page.drawRectangle({
+      x:originX+design.barcode.x*s,
+      y:originY+productHeight-(design.barcode.y+(bar.module+bar.width)*design.barcode.height/design.barcode.modules)*s,
+      width:design.barcode.width*s,height:bar.width*design.barcode.height/design.barcode.modules*s,color:rgb(.07,.07,.07),
+    });
+  }
+  design.corners.forEach(corner=>page.drawImage(qr,{x:originX+corner.x*s,y:originY+productHeight-(corner.y+design.cornerSize)*s,width:design.cornerSize*s,height:design.cornerSize*s}));
+  const fontScale=STICKER_WIDTH/BASE_STICKER_WIDTH;
+  const rightAligned=(text,x,y,size,spacing=0)=>{
+    const width=font.widthOfTextAtSize(text,size)+Math.max(0,text.length-1)*spacing;
+    page.drawText(text,{x:originX+x*s-width,y:originY+y*s,size,font,color:rgb(.07,.07,.07),characterSpacing:spacing});
+  };
+  const [top,bottom]=design.codeParts;
+  if(bottom){rightAligned(top,498,80,8.5*fontScale,.25*fontScale);rightAligned(bottom,498,10,20*fontScale,1.8*fontScale);}
+  else rightAligned(top,498,20,20*fontScale,1.2*fontScale);
+}
+
+async function buildStickerPdf(rows,{boxMode=false,prefix='TRBX',columns=DEFAULT_COLUMNS,style='old'}={}){
+  const layout=layoutFor(columns);
+  const pdf=await PDFDocument.create();
+  const font=await pdf.embedFont(StandardFonts.HelveticaBold);
+  const codeFont=await pdf.embedFont(StandardFonts.CourierBold);
+  for(let pageStart=0;pageStart<rows.length;pageStart+=layout.perPage){
+    const page=pdf.addPage([A4_WIDTH,A4_HEIGHT]);
+    const pageRows=rows.slice(pageStart,pageStart+layout.perPage);
+    const qrBuffers=await Promise.all(pageRows.map((row)=>boxMode?qrTextPng(prefix+row.code,504,1):qrPng(row.code,504,style==='new'?0:1)));
+    for(let slot=0;slot<pageRows.length;slot+=1){
+      // Uint8Array.from also normalizes Buffers created in another JS realm
+      // (Vitest workers and some serverless runtimes use separate realms).
+      const qr=await pdf.embedPng(Uint8Array.from(qrBuffers[slot]));
+      if(boxMode)drawBoxSticker(page,font,codeFont,String(pageRows[slot].code),prefix,qr,slot,layout);
+      else if(style==='new')drawNewProductSticker(page,font,codeFont,String(pageRows[slot].code),qr,slot,layout);
+      else drawProductSticker(page,font,String(pageRows[slot].code),qr,slot,layout);
+    }
+  }
+  return Buffer.from(await pdf.save());
+}
+
 module.exports = async function handler(req,res){
   if(req.method!=='GET')return res.status(405).end();
   const batch=String(req.query?.batch||''),historyId=String(req.query?.history||''),customCode=String(req.query?.code||''),individualId=String(req.query?.individual||''),individualPart=Number(req.query?.part||0);
@@ -85,9 +130,9 @@ module.exports = async function handler(req,res){
   if(individualId&&(!/^[0-9a-f-]{36}$/i.test(individualId)||!Number.isInteger(individualPart)||individualPart<0||individualPart>19))return res.status(400).end();
   if(historyId&&!/^\d+$/.test(historyId))return res.status(400).end();
   let boxMode=String(req.query?.variant||'')==='box',prefix=String(req.query?.prefix||'TRBX').toUpperCase();
+  const style=String(req.query?.style||'')==='new'?'new':'old';
   const requestedColumns=Number(req.query?.columns||DEFAULT_COLUMNS);
   if(!Number.isInteger(requestedColumns)||requestedColumns<1||requestedColumns>MAX_COLUMNS)return res.status(400).end();
-  const layout=layoutFor(requestedColumns);
   // Печатать можно часть пачки: из 200 стикеров человеку сейчас нужны 10.
   // Список приходит явными кодами, чтобы выбор не зависел от порядка на клиенте.
   const requestedCodes=String(req.query?.codes||'').split(',').map(value=>value.trim()).filter(Boolean);
@@ -131,25 +176,13 @@ module.exports = async function handler(req,res){
     if(boxMode&&!/^[A-Z0-9_-]{1,12}$/.test(prefix))return res.status(400).end();
     const rows=selected?all.filter(row=>selected.has(String(row.code))):all;
     if(!rows.length)return res.status(404).end(); if(rows.length>500)return res.status(413).end();
-    const pdf=await PDFDocument.create();
-    const font=await pdf.embedFont(StandardFonts.HelveticaBold);
-    const codeFont=await pdf.embedFont(StandardFonts.CourierBold);
-    let page;
-    for(let pageStart=0;pageStart<rows.length;pageStart+=layout.perPage){
-      page=pdf.addPage([A4_WIDTH,A4_HEIGHT]);
-      const pageRows=rows.slice(pageStart,pageStart+layout.perPage);
-      const qrBuffers=await Promise.all(pageRows.map((row)=>boxMode?qrTextPng(prefix+row.code,504,1):qrPng(row.code,504,1)));
-      for(let slot=0;slot<pageRows.length;slot+=1){
-        const qr=await pdf.embedPng(qrBuffers[slot]);
-        if(boxMode)drawBoxSticker(page,font,codeFont,String(pageRows[slot].code),prefix,qr,slot,layout);
-        else drawProductSticker(page,font,String(pageRows[slot].code),qr,slot,layout);
-      }
-    }
-    const bytes=await pdf.save(); res.setHeader('Content-Type','application/pdf');
+    const bytes=await buildStickerPdf(rows,{boxMode,prefix,columns:requestedColumns,style}); res.setHeader('Content-Type','application/pdf');
     // inline — для кнопки «Печать»: браузер открывает готовый лист в своём
     // просмотрщике, откуда печать идёт ровно тем же макетом, что и скачивание.
     const inline=String(req.query?.inline||'')==='1';
     res.setHeader('Content-Disposition',`${inline?'inline':'attachment'}; filename="shk-wb.pdf"`);
-    res.setHeader('Cache-Control','private, no-store'); return res.status(200).send(Buffer.from(bytes));
+    res.setHeader('Cache-Control','private, no-store'); return res.status(200).send(bytes);
   }catch(error){console.error(error);return res.status(502).end()}
 };
+
+module.exports.buildStickerPdf=buildStickerPdf;

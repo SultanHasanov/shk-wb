@@ -13,6 +13,7 @@ const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { isTechnicalTelegramUser } = require('./_telegram-account');
 const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
+const { newStickerSvg, stickerSvg } = require('./_stickers');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -846,8 +847,9 @@ async function buyGenerationsWithWallet(draft) {
   return { ok: true, accessCode: result.order.access_code, balanceKopecks: result.balanceKopecks };
 }
 
-function absoluteAssetUrl(relative, png = false) {
-  const suffix = png ? `${relative.includes('?') ? '&' : '?'}format=png` : '';
+function absoluteAssetUrl(relative, png = false, style = 'old') {
+  const params = [png ? 'format=png' : '', style === 'new' ? 'style=new' : ''].filter(Boolean).join('&');
+  const suffix = params ? `${relative.includes('?') ? '&' : '?'}${params}` : '';
   return publicUrl(`${relative}${suffix}`);
 }
 
@@ -855,19 +857,56 @@ function resultItems(result) {
   return result.items || (result.imageUrl ? [{ code: result.code, imageUrl: result.imageUrl }] : []);
 }
 
-function pageKeyboard(requestId, page, totalPages) {
+function pageKeyboard(requestId, page, totalPages, style = 'old') {
   const row = [];
-  if (page > 0) row.push({ text: '⬅️ Назад', callback_data: `gen:page:${requestId}:${page - 1}` });
-  if (page + 1 < totalPages) row.push({ text: 'Далее ➡️', callback_data: `gen:page:${requestId}:${page + 1}` });
-  return choiceKeyboard([row, [{ text: '➕ Создать ещё', callback_data: 'gen:start' }, ...MENU_ROW]].filter(items => items.length));
+  if (page > 0) row.push({ text: '⬅️ Назад', callback_data: `gen:page:${style}:${requestId}:${page - 1}` });
+  if (page + 1 < totalPages) row.push({ text: 'Далее ➡️', callback_data: `gen:page:${style}:${requestId}:${page + 1}` });
+  return choiceKeyboard([row, [
+    { text: style === 'new' ? 'Старый формат' : 'Новый формат', callback_data: `gen:format:${style === 'new' ? 'old' : 'new'}:${requestId}` },
+    { text: '➕ Создать ещё', callback_data: 'gen:start' },
+  ], MENU_ROW].filter(items => items.length));
 }
 
-async function sendPreview(chatId, requestId, result, page = 0) {
+async function localStickerPng(code, style) {
+  const { Resvg } = require('@resvg/resvg-js');
+  const svg = style === 'new' ? await newStickerSvg(code) : await stickerSvg(code);
+  const renderer = new Resvg(svg, {
+    font: { fontFiles: [path.join(process.cwd(), 'server', 'assets', 'InterVariable.ttf')], loadSystemFonts: false, defaultFontFamily: 'Inter' },
+  });
+  return Buffer.from(renderer.render().asPng());
+}
+
+async function localStickerPdf(result, style) {
+  const { buildStickerPdf } = require('../api/stickers/pdf');
+  return buildStickerPdf(resultItems(result).map(item => ({ code: String(item.code) })), { style });
+}
+
+async function sendPreview(chatId, requestId, result, page = 0, style = 'old') {
   const items = resultItems(result), totalPages = Math.ceil(items.length / 4), safePage = Math.max(0, Math.min(page, totalPages - 1));
-  const urls = items.slice(safePage * 4, safePage * 4 + 4).map(item => absoluteAssetUrl(item.imageUrl, true));
-  if (urls.length === 1) await sendPhoto(chatId, urls[0]);
-  else if (urls.length > 1) await sendMediaGroup(chatId, urls);
-  await sendMessage(chatId, `Предпросмотр ${safePage + 1} из ${totalPages} · показано ${Math.min(items.length, safePage * 4 + 4)} из ${items.length}`, { reply_markup: pageKeyboard(requestId, safePage, totalPages) });
+  const pageItems = items.slice(safePage * 4, safePage * 4 + 4);
+  if (process.env.TELEGRAM_LOCAL_POLLING === '1' && result.variant !== 'box') {
+    for (const item of pageItems) await sendPhoto(chatId, { buffer: await localStickerPng(item.code, style), filename: `sticker-${item.code}-${style}.png` });
+  } else {
+    const urls = pageItems.map(item => absoluteAssetUrl(item.imageUrl, true, style));
+    if (urls.length === 1) await sendPhoto(chatId, urls[0]);
+    else if (urls.length > 1) await sendMediaGroup(chatId, urls);
+  }
+  await sendMessage(chatId, `Предпросмотр ${safePage + 1} из ${totalPages} · показано ${Math.min(items.length, safePage * 4 + 4)} из ${items.length}`, { reply_markup: pageKeyboard(requestId, safePage, totalPages, style) });
+}
+
+function formatKeyboard(requestId) {
+  return choiceKeyboard([
+    [{ text: 'Старые стикеры', callback_data: `gen:format:old:${requestId}` }, { text: 'Новые стикеры', callback_data: `gen:format:new:${requestId}` }],
+    [{ text: '➕ Создать ещё', callback_data: 'gen:start' }, ...MENU_ROW],
+  ]);
+}
+
+async function deliverGeneration(chatId, requestId, result, style = 'old') {
+  await sendPreview(chatId, requestId, result, 0, style);
+  const document = process.env.TELEGRAM_LOCAL_POLLING === '1' && result.variant !== 'box'
+    ? { buffer: await localStickerPdf(result, style), filename: `stickers-${style}.pdf` }
+    : absoluteAssetUrl(result.pdfUrl, false, style);
+  await sendDocument(chatId, document, { caption: result.botCaption || `Готово: ${result.quantity || 1} шт.` });
 }
 
 async function claimGenerationRequest(requestId, from, chatId, draft) {
@@ -920,6 +959,7 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
   try {
     const requesterHash = telegramRequesterHash(from.id);
     result = await generateStickers({ ...draft, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
+    result.botCaption = paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}`;
     await completeGenerationRequest(requestId, result);
     await clearSession(from.id);
   } catch (error) {
@@ -930,10 +970,13 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
     await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
-  // Стикеры уже созданы и списаны — если Telegram не принял файл, не пишем «не удалось создать», а даём ссылку.
+  if (result.variant !== 'box') {
+    await sendMessage(chatId, `${result.botCaption}\n\nКакие стикеры подготовить?`, { reply_markup: formatKeyboard(requestId) });
+    return;
+  }
+  // QR коробок не менялись: сразу отправляем прежний макет.
   try {
-    await sendPreview(chatId, requestId, result, 0);
-    await sendDocument(chatId, absoluteAssetUrl(result.pdfUrl), { caption: paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}` });
+    await deliverGeneration(chatId, requestId, result, 'old');
   } catch (error) {
     console.warn('Telegram sticker delivery failed', error.message);
     await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard([
@@ -1923,8 +1966,20 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'account:continue') { await answerCallbackQuery(callback.id); await showMainMenu(from, chatId); return; }
-  const pageMatch = data.match(/^gen:page:([^:]+:\d+):(\d+)$/);
-  if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[1], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[1], result, Number(pageMatch[2])); return; }
+  const formatMatch = data.match(/^gen:format:(old|new):([^:]+:\d+)$/);
+  if (formatMatch) {
+    await answerCallbackQuery(callback.id, 'Готовлю файлы…');
+    const result = await loadGenerationRequest(formatMatch[2], from.id);
+    if (!result) return sendMessage(chatId, 'Результат больше недоступен.');
+    try { await deliverGeneration(chatId, formatMatch[2], result, formatMatch[1]); }
+    catch (error) {
+      console.warn('Telegram sticker delivery failed', error.message);
+      await sendMessage(chatId, 'Стикеры созданы, но Telegram не принял файл. Нажмите формат ещё раз — повторно платить не нужно.', { reply_markup: formatKeyboard(formatMatch[2]) });
+    }
+    return;
+  }
+  const pageMatch = data.match(/^gen:page:(old|new):([^:]+:\d+):(\d+)$/);
+  if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
   const session = await getSession(from.id);
   if (!session) {
     await answerCallbackQuery(callback.id, 'Сессия истекла');
