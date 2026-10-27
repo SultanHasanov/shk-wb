@@ -143,7 +143,15 @@ module.exports = async function handler(req, res) {
           : cellKinds.includes(requestedKind)
             ? requestedKind
             : 'stickers';
-      if (productKind === 'stickers') {
+      // A guest cannot own the shared wallet, but may still pay for the exact
+      // generation they are about to make. Fulfil it through the existing
+      // ownerless access-code flow so no account or new persistent identity is
+      // created. Signed-in customers keep using the wallet flow below.
+      const guestGenerationMode = !user && productKind === 'stickers'
+        ? String(req.body?.guestGenerationMode || '')
+        : '';
+      const isGuestGeneration = ['custom', 'batch'].includes(guestGenerationMode);
+      if (productKind === 'stickers' && !isGuestGeneration) {
         return res.status(400).json({ error: 'Пакеты генераций больше не продаются. Пополните баланс и оплатите генерацию при создании.', code: 'PACKAGES_DISABLED' });
       }
       // Пул генераций общий, поэтому форма присылает одно число. Старый двухпакетный
@@ -153,8 +161,9 @@ module.exports = async function handler(req, res) {
         Number(req.body?.rangeQuantity || 0),
         Number(req.body?.customQuantity || 0),
       ].filter(Boolean);
-      const stickerPacks =
-        Number(req.body?.quantity) > 0 ? [Number(req.body.quantity)] : legacyPacks;
+      const stickerPacks = isGuestGeneration
+        ? [guestGenerationMode === 'batch' ? 50 : 1]
+        : Number(req.body?.quantity) > 0 ? [Number(req.body.quantity)] : legacyPacks;
       const licenseIterations = Number(req.body?.licenseIterations || 0);
       const cellDays = Number(req.body?.durationDays || 0),
         deviceLimit = Number(req.body?.deviceLimit || 0),
@@ -334,6 +343,17 @@ module.exports = async function handler(req, res) {
                   (productKind === 'cell_print_program'
                     ? 0
                     : Math.round(CELL_PRINT_PRICES[cellDays][deviceLimit]*(marketplaceScope==='both'?1.8:1))),
+              }
+          : isGuestGeneration
+            ? {
+                packs: [{
+                  quantity: guestGenerationMode === 'batch' ? 50 : 1,
+                  unit: guestGenerationMode === 'batch' ? 0.4 : 7.5,
+                  total: guestGenerationMode === 'batch' ? 20 : 7.5,
+                }],
+                units: guestGenerationMode === 'batch' ? 50 : 1,
+                total: guestGenerationMode === 'batch' ? 20 : 7.5,
+                guestGenerationMode,
               }
             : await pricing(stickerPacks);
       if (cellKinds.includes(productKind) && promoCode) {

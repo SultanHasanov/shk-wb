@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { observer } from 'mobx-react-lite';
 import { Link, useLocation } from 'react-router-dom';
 import { CircleCheck } from 'lucide-react';
-import { Alert, Button, Checkbox, Field, Input, Modal } from '../ui';
+import { Alert, Button, Card, Checkbox, Field, Input, Modal } from '../ui';
 import {
   formatTotal as formatRub,
   getPack,
@@ -255,8 +255,40 @@ export const PackPurchase = observer(() => {
   );
 });
 
-export function PricingPacks() {
+export const PricingPacks = observer(() => {
   const t = useT();
+  const lp = useLocalePath();
+  const { auth, generator } = useStores();
+  const [selectedMode, setSelectedMode] = useState<'custom' | 'batch' | null>(null);
+  const [accepted, setAccepted] = useState(false);
+  const selectedPrice = selectedMode === 'batch' ? 20 : 7.5;
+  const checkout = useMutation({
+    mutationFn: () => api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        productKind: 'stickers',
+        guestGenerationMode: selectedMode,
+        accepted,
+        returnTo: 'public',
+      }),
+    }),
+    onSuccess: data => {
+      rememberPendingOrder(localStorage, data.token);
+      window.location.assign(data.confirmationUrl);
+    },
+  });
+
+  const choose = (mode: 'custom' | 'batch') => {
+    generator.setMode(mode === 'batch' ? 'range' : 'custom');
+    setAccepted(false);
+    setSelectedMode(mode);
+  };
+
+  const goToGenerator = () => {
+    setSelectedMode(null);
+    document.getElementById('generator')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <Section
       id="packages"
@@ -269,10 +301,50 @@ export function PricingPacks() {
       )}
     >
       <div className={s.grid}>
-        <div className={s.pack}><strong>7,50 ₽</strong><span>{t('По конкретному номеру', 'Нақты нөмір бойынша')}</span></div>
-        <div className={s.pack}><strong>20 ₽</strong><span>{t('Пачка из 50 кодов · один PDF', '50 кодтан тұратын пакет · бір PDF')}</span></div>
+        <button type="button" className={s.pack} onClick={() => choose('custom')}><strong>7,50 ₽</strong><span>{t('По конкретному номеру', 'Нақты нөмір бойынша')}</span></button>
+        <button type="button" className={s.pack} onClick={() => choose('batch')}><strong>20 ₽</strong><span>{t('Пачка из 50 кодов · один PDF', '50 кодтан тұратын пакет · бір PDF')}</span></button>
       </div>
-      <div className={s.checkout}><Link to="/cabinet/packages"><Button size="lg">{t('Пополнить баланс', 'Балансты толықтыру')}</Button></Link></div>
+      {auth.isAuthenticated && <div className={s.checkout}><Link to="/cabinet/packages"><Button size="lg">{t('Пополнить баланс', 'Балансты толықтыру')}</Button></Link></div>}
+
+      <Modal
+        open={selectedMode !== null}
+        onOpenChange={open => { if (!open) setSelectedMode(null); }}
+        title={t('Способ оплаты', 'Төлем тәсілі')}
+        description={selectedMode === 'batch'
+          ? t('50 кодов одним PDF за 20 ₽', '50 код бір PDF-те 20 ₽')
+          : t('Один код по конкретному номеру за 7,50 ₽', 'Нақты нөмір бойынша бір код 7,50 ₽')}
+      >
+        <div className="stack">
+          <div className={s.confirmRow}>
+            <span className="muted">{t('К оплате', 'Төлеуге')}</span>
+            <span className={s.confirmTotal}>{formatRub(selectedPrice)}</span>
+          </div>
+
+          {auth.isAuthenticated ? (
+            <>
+              <Alert tone="info">{t('Сумма спишется с общего баланса при создании QR-кода.', 'QR-код жасаған кезде сома ортақ баланстан есептен шығарылады.')}</Alert>
+              <Button onClick={goToGenerator}>{t('Оплатить с баланса', 'Баланстан төлеу')}</Button>
+            </>
+          ) : (
+            <>
+              <Card>
+                <strong>{t('Банковская карта или СБП', 'Банк картасы немесе СБП')}</strong>
+                <span className="muted">{t('Безопасная оплата через ЮKassa', 'ЮKassa арқылы қауіпсіз төлем')}</span>
+              </Card>
+              <Checkbox checked={accepted} onChange={event => setAccepted(event.target.checked)}>
+                {t('Принимаю', 'Қабылдаймын')}{' '}
+                <Link className="accent" to={lp('/offer')}>{t('оферту', 'офертаны')}</Link>{' '}
+                {t('и', 'және')}{' '}
+                <Link className="accent" to={lp('/privacy')}>{t('политику конфиденциальности', 'құпиялылық саясатын')}</Link>
+              </Checkbox>
+              <Button disabled={!accepted} loading={checkout.isPending} onClick={() => checkout.mutate()}>
+                {t('Перейти к оплате', 'Төлемге өту')}
+              </Button>
+              {checkout.isError && <Alert tone="error">{checkout.error.message}</Alert>}
+            </>
+          )}
+        </div>
+      </Modal>
     </Section>
   );
-}
+});

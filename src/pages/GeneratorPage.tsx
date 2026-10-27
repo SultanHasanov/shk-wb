@@ -20,6 +20,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Field,
   Input,
   Modal,
@@ -32,6 +33,7 @@ import s from './GeneratorPage.module.css';
 import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
 import { useMoney } from '../lib/currency';
 import { type T, useT } from '../i18n';
+import { rememberPendingOrder } from '../lib/pending-orders';
 
 /** Остаток по коду один на все виды генерации: тип и режим ниже выбирают, что
  *  печатать, а не из какого лимита списывать. */
@@ -232,6 +234,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   // Генерация расходует оплаченные штуки и выдаёт номера безвозвратно, поэтому
   // подтверждаем состав пачки до запуска, а не показываем результат постфактум.
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [guestAccepted, setGuestAccepted] = useState(false);
   // Термопринтер печатает по одному стикеру в ряд, обычный принтер — сеткой.
   const [printColumns, setPrintColumns] = useState(4);
   // Пусто — печатаем всю пачку; иначе первые N из неё.
@@ -285,12 +288,14 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               quantity: 50,
               prefix: box ? g.prefix : undefined,
               requestId: crypto.randomUUID(),
+              accessCode: auth.isAuthenticated ? undefined : g.accessCode,
             }
           : {
               mode: box ? 'box_custom' : 'custom',
               code: g.code,
               prefix: box ? g.prefix : undefined,
               requestId: crypto.randomUUID(),
+              accessCode: auth.isAuthenticated ? undefined : g.accessCode,
             };
       return api<Generated>('/api/stickers/generate', {
         method: 'POST',
@@ -303,6 +308,22 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
       const generatedItems = data.items ?? data.stickers ?? (data.imageUrl ? [data.imageUrl] : []);
       setPreviewCount(Math.min(4, generatedItems.length));
       queryClient.invalidateQueries({ queryKey: ['cabinet', 'bootstrap'] });
+    },
+  });
+
+  const guestCheckout = useMutation({
+    mutationFn: () => api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        productKind: 'stickers',
+        guestGenerationMode: g.mode === 'range' ? 'batch' : 'custom',
+        accepted: guestAccepted,
+        returnTo: 'public',
+      }),
+    }),
+    onSuccess: data => {
+      rememberPendingOrder(localStorage, data.token);
+      window.location.assign(data.confirmationUrl);
     },
   });
 
@@ -412,7 +433,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 {cabinet.data?.wallet.discountAvailable && <> · {t('На эту генерацию доступна разовая скидка 20%.', 'Осы генерацияға бір реттік 20% жеңілдік бар.')}</>}
               </>
             ) : (
-              <>{t('Для генерации и оплаты с общего баланса войдите в аккаунт.', 'Генерация және ортақ баланстан төлеу үшін аккаунтқа кіріңіз.')} <Link to="/login">{t('Войти', 'Кіру')}</Link></>
+              <>{t('Генерацию можно купить без регистрации. Или войдите, чтобы оплатить её с общего баланса.', 'Генерацияны тіркелусіз сатып алуға болады. Немесе ортақ баланстан төлеу үшін кіріңіз.')} <Link to="/login">{t('Войти', 'Кіру')}</Link></>
             )}
           </Alert>
 
@@ -535,7 +556,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             size="lg"
             block
             loading={mutation.isPending}
-            disabled={!auth.isAuthenticated || invalidCustomCode || invalidQuantity}
+            disabled={invalidCustomCode || invalidQuantity}
             onClick={() => setConfirmOpen(true)}
           >
             {mutation.isPending ? t('Генерируем…', 'Генерациялап жатырмыз…') : t('Сгенерировать', 'Генерациялау')}
@@ -782,21 +803,36 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             </Alert>
           )}
 
+          {!auth.isAuthenticated && !g.accessCode && (
+            <Checkbox checked={guestAccepted} onChange={event => setGuestAccepted(event.target.checked)}>
+              {t('Принимаю', 'Қабылдаймын')}{' '}
+              <Link className="accent" to="/offer">{t('оферту', 'офертаны')}</Link>{' '}
+              {t('и', 'және')}{' '}
+              <Link className="accent" to="/privacy">{t('политику конфиденциальности', 'құпиялылық саясатын')}</Link>
+            </Checkbox>
+          )}
+
           <div className="row">
             <Button
-              loading={mutation.isPending}
-              disabled={!auth.isAuthenticated || notEnough || invalidCustomCode || invalidQuantity}
+              loading={mutation.isPending || guestCheckout.isPending}
+              disabled={notEnough || invalidCustomCode || invalidQuantity || (!auth.isAuthenticated && !g.accessCode && !guestAccepted)}
               onClick={() => {
-                setConfirmOpen(false);
-                mutation.mutate();
+                if (!auth.isAuthenticated && !g.accessCode) guestCheckout.mutate();
+                else {
+                  setConfirmOpen(false);
+                  mutation.mutate();
+                }
               }}
             >
-              {t('Создать', 'Жасау')}
+              {!auth.isAuthenticated && !g.accessCode
+                ? t('Перейти к оплате', 'Төлемге өту')
+                : t('Создать', 'Жасау')}
             </Button>
             <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
               {t('Отмена', 'Болдырмау')}
             </Button>
           </div>
+          {guestCheckout.isError && <Alert tone="error">{guestCheckout.error.message}</Alert>}
         </div>
       </Modal>
     </div>
@@ -844,7 +880,7 @@ export const GeneratorPage = observer(() => {
         <Steps steps={steps(t)} />
       </Section>
 
-      <div className="page">
+      <div className="page" id="generator">
         <GeneratorWorkspace onNeedPackages={goToPackages} />
         <div className="section">
           <TelegramBotPromo />

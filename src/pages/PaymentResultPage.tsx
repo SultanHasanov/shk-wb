@@ -83,7 +83,7 @@ export const PaymentResultPage = observer(() => {
   // Без start-параметра: Telegram просто открывает уже существующий чат и не
   // отправляет от имени пользователя видимую команду /start.
   const botUrl = BOT_URL;
-  const { auth } = useStores();
+  const { auth, generator } = useStores();
   const queryClient = useQueryClient();
   // Тот же экран показывается и в кабинете: там свой заголовок и свои выходы,
   // чтобы покупка из кабинета не выбрасывала человека на публичную главную.
@@ -119,12 +119,13 @@ export const PaymentResultPage = observer(() => {
   // вознаграждение пригласившего, ведь заказ так и оставался ничьим.
   useEffect(() => {
     if (data?.status !== 'succeeded' || !data.accessCode) return;
+    generator.accessCode = data.accessCode;
     try {
       localStorage.setItem('sticker_access_code', data.accessCode);
     } catch {
       // Приватный режим и запрет на хранение не должны ломать страницу оплаты.
     }
-  }, [data?.status, data?.accessCode]);
+  }, [data?.status, data?.accessCode, generator]);
 
   // Кабинет держит купленное в общем bootstrap-запросе с 30-секундным кэшем:
   // без сброса свежий пакет не появлялся ни в «Пакетах», ни в поле кода доступа
