@@ -45,6 +45,9 @@ type Generated = {
   pdfUrl?: string;
   imageUrl?: string;
   access?: Access['access'];
+  priceKopecks?: number;
+  discountApplied?: boolean;
+  balanceKopecks?: number;
 };
 
 function stickerFileName(code: string) {
@@ -79,14 +82,14 @@ async function shareSticker(item: { code: string; imageUrl: string }) {
   await downloadSticker(item);
 }
 
-const trustItems = (t: T, perUnit: string) => [
-  t(`От ${perUnit} за штуку`, `Данасы ${perUnit} бастап`),
+const trustItems = (t: T, _perUnit: string) => [
+  t('По номеру — 7,50 ₽', 'Нөмір бойынша — 7,50 ₽'),
   t('Оплата через ЮKassa', 'ЮKassa арқылы төлем'),
   t('Готовый PDF для печати', 'Басып шығаруға дайын PDF'),
   t('Без регистрации', 'Тіркелусіз'),
 ];
 
-const QUANTITY_PRESETS = [10, 50, 100] as const;
+const QUANTITY_PRESETS = [50] as const;
 
 /** Снимки реальных наклеек — те же, что на боевом сайте. */
 const kindOptions = (t: T) => [
@@ -242,6 +245,9 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     queryFn: () => api<CabinetBootstrap>('/api/cabinet/bootstrap'),
     enabled: auth.isAuthenticated,
   });
+  useEffect(() => {
+    if (g.mode === 'range') g.quantity = 50;
+  }, [g, g.mode]);
   // Код доступа лежит в localStorage, чтобы аноним не вводил его при каждом заходе.
   // Раньше сохранённый код имел приоритет над кабинетом («if (g.accessCode) return»),
   // и во втором аккаунте того же браузера подставлялся пакет первого — генерация
@@ -266,7 +272,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     queryKey: ['access', g.accessCode],
     queryFn: () =>
       api<Access>('/api/stickers/generate?accessCode=' + encodeURIComponent(g.accessCode)),
-    enabled: /^(?:\d{6}|STK-[A-F0-9]{32})$/.test(g.accessCode),
+    enabled: false,
   });
 
   const mutation = useMutation({
@@ -276,15 +282,15 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
         g.mode === 'range'
           ? {
               mode: box ? 'box_range' : 'range',
-              quantity: g.quantity,
+              quantity: 50,
               prefix: box ? g.prefix : undefined,
-              accessCode: g.accessCode,
+              requestId: crypto.randomUUID(),
             }
           : {
               mode: box ? 'box_custom' : 'custom',
               code: g.code,
               prefix: box ? g.prefix : undefined,
-              accessCode: g.accessCode,
+              requestId: crypto.randomUUID(),
             };
       return api<Generated>('/api/stickers/generate', {
         method: 'POST',
@@ -296,11 +302,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     onSuccess: data => {
       const generatedItems = data.items ?? data.stickers ?? (data.imageUrl ? [data.imageUrl] : []);
       setPreviewCount(Math.min(4, generatedItems.length));
-      if (data.access) queryClient.setQueryData(['access', g.accessCode], { access: data.access });
+      queryClient.invalidateQueries({ queryKey: ['cabinet', 'bootstrap'] });
     },
   });
 
-  const remaining = access.data?.access?.remaining;
+  const remaining = undefined;
 
   const items = mutation.data?.items ?? mutation.data?.stickers ?? [];
   const previewItems = items.length
@@ -323,18 +329,17 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     cabinet.data?.profile.preferences.thermalPrintSettings?.size ?? '',
   );
 
-  const outOfQuota = remaining === 0;
-  const lowQuota = remaining !== undefined && remaining > 0 && remaining <= 5;
+  const outOfQuota = false;
+  const lowQuota = false;
   const quotaBlocked = mutation.isError && isQuotaError(mutation.error);
   // Чужой код виден и до нажатия «Сгенерировать» — проверка владельца стоит и в
   // запросе остатка, но раньше его ошибка нигде не показывалась.
-  const ownerBlocked = isOwnerError(mutation.error) || isOwnerError(access.error);
+  const ownerBlocked = mutation.isError && isOwnerError(mutation.error);
   const codeLength = CUSTOM_CODE_LENGTH[g.kind];
   const invalidCustomCode = g.mode === 'custom' && g.code.length !== codeLength;
   // Пустое поле количества — это 0 в сторе: нажатие ловило бы 400 от API.
-  const invalidQuantity = g.mode === 'range' && g.quantity < 1;
-  const bulkCustomMode =
-    g.kind === 'product' && g.mode === 'custom' && customInputMode === 'list';
+  const invalidQuantity = false;
+  const bulkCustomMode = false;
 
   // Печать и скачивание идут одним и тем же PDF: раньше «Печать» звала
   // window.print(), и в кабинете выходил пустой лист — печатные стили прячут
@@ -363,7 +368,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     : t('стикеры товаров', 'тауар стикерлері');
   const modeLabel = g.mode === 'range' ? t('Массово', 'Көптеп') : t('По номеру', 'Нөмір бойынша');
   const numberLabel = g.kind === 'box' ? t('Номер коробки', 'Қорап нөмірі') : t('Номер ШК', 'ШК нөмірі');
-  const plannedCount = g.mode === 'range' ? Math.max(1, Number(g.quantity) || 1) : 1;
+  const plannedCount = g.mode === 'range' ? 50 : 1;
   const leftAfter = remaining === undefined ? undefined : Math.max(0, remaining - plannedCount);
   const notEnough = remaining !== undefined && remaining < plannedCount;
 
@@ -399,7 +404,19 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             ]}
           />
 
-          {g.kind === 'product' && g.mode === 'custom' && (
+          <Alert tone={auth.isAuthenticated ? 'info' : 'warning'}>
+            {auth.isAuthenticated ? (
+              <>
+                {t('Стоимость:', 'Бағасы:')} <strong>{g.mode === 'range' ? '20 ₽' : '7,50 ₽'}</strong>
+                {' · '}{t('Баланс:', 'Баланс:')} <strong>{((cabinet.data?.wallet.balanceKopecks ?? 0) / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>
+                {cabinet.data?.wallet.discountAvailable && <> · {t('На эту генерацию доступна разовая скидка 20%.', 'Осы генерацияға бір реттік 20% жеңілдік бар.')}</>}
+              </>
+            ) : (
+              <>{t('Для генерации и оплаты с общего баланса войдите в аккаунт.', 'Генерация және ортақ баланстан төлеу үшін аккаунтқа кіріңіз.')} <Link to="/login">{t('Войти', 'Кіру')}</Link></>
+            )}
+          </Alert>
+
+          {false && g.kind === 'product' && g.mode === 'custom' && (
             <Segmented
               label={t('Количество своих номеров', 'Өз нөмірлеріңіздің саны')}
               value={customInputMode}
@@ -415,26 +432,14 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             <div>
               <Field
                 label={g.kind === 'box' ? t('Количество QR', 'QR саны') : t('Количество стикеров', 'Стикерлер саны')}
-                help={
-                  quantityCapped
-                    ? t(`За раз выдаём не больше ${MAX_BATCH_QUANTITY} — оставили ${MAX_BATCH_QUANTITY}.`, `Бір реттен ${MAX_BATCH_QUANTITY}-ден артық бермейміз — ${MAX_BATCH_QUANTITY} қалдырдық.`)
-                    : t(`От 1 до ${MAX_BATCH_QUANTITY} за один раз.`, `Бір реттен 1-ден ${MAX_BATCH_QUANTITY}-ге дейін.`)
-                }
+                help={t('Фиксированная пачка: ровно 50 кодов одним PDF за 20 ₽.', 'Бекітілген пакет: бір PDF ішінде дәл 50 код, бағасы 20 ₽.')}
               >
                 {/* Не type="number": браузер отдаёт пустую строку на «1e5» и
                     «--», и перехватить ввод надёжно нельзя. */}
                 <Input
                   inputMode="numeric"
-                  value={g.quantity ? String(g.quantity) : ''}
-                  onChange={e => {
-                    const digits = e.target.value.replace(/\D/g, '').replace(/^0+/, '');
-                    const typed = Number(digits || 0);
-                    setQuantityCapped(typed > MAX_BATCH_QUANTITY);
-                    g.quantity = Math.min(typed, MAX_BATCH_QUANTITY);
-                    // MobX не перерисует поле, когда число не изменилось: «0500»
-                    // и «500» дают одно значение, а в DOM оставался ведущий ноль.
-                    e.target.value = g.quantity ? String(g.quantity) : '';
-                  }}
+                  value="50"
+                  readOnly
                 />
               </Field>
               <div className={s.presets}>
@@ -473,6 +478,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             </Field>
           )}
 
+          <div className={s.confirmRow}>
+            <span className="muted">{t('К списанию с баланса', 'Баланстан есептен шығару')}</span>
+            <strong>{g.mode === 'range' ? (cabinet.data?.wallet.discountAvailable ? '16 ₽' : '20 ₽') : (cabinet.data?.wallet.discountAvailable ? '6 ₽' : '7,50 ₽')}</strong>
+          </div>
+
           {g.kind === 'box' && (
             <Field label={t('Префикс', 'Префикс')}>
               <Input
@@ -485,7 +495,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
           {/* Код доступа обязателен: генерация без него не проходит на сервере,
               поэтому поле показывается сразу, а не прячется за ссылкой. */}
-          {!bulkCustomMode && <><Field label={t('Код доступа', 'Қолжетімділік коды')} help={t('Код из личного кабинета или со страницы оплаты', 'Жеке кабинеттегі немесе төлем бетіндегі код')}>
+          {false && !bulkCustomMode && <><Field label={t('Код доступа', 'Қолжетімділік коды')} help={t('Код из личного кабинета или со страницы оплаты', 'Жеке кабинеттегі немесе төлем бетіндегі код')}>
             <Input
               maxLength={36}
               value={g.accessCode}
@@ -506,7 +516,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             )}
             {(lowQuota || !g.accessCode) && (
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                {g.accessCode ? t('Пополнить', 'Толықтыру') : t('Купить пакет генераций', 'Генерациялар пакетін сатып алу')}
+                {t('Пополнить баланс', 'Балансты толықтыру')}
               </button>
             )}
           </div>
@@ -516,7 +526,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             <Alert tone="warning">
               {t('Генерации по этому коду закончились.', 'Бұл код бойынша генерациялар таусылды.')}{' '}
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                {t('Выбрать пакет', 'Пакет таңдау')}
+                {t('Пополнить баланс', 'Балансты толықтыру')}
               </button>
             </Alert>
           )}
@@ -525,7 +535,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             size="lg"
             block
             loading={mutation.isPending}
-            disabled={!g.accessCode || invalidCustomCode || invalidQuantity}
+            disabled={!auth.isAuthenticated || invalidCustomCode || invalidQuantity}
             onClick={() => setConfirmOpen(true)}
           >
             {mutation.isPending ? t('Генерируем…', 'Генерациялап жатырмыз…') : t('Сгенерировать', 'Генерациялау')}
@@ -555,7 +565,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             <Alert tone="warning">
               {t(mutation.error.message, 'Бұл код бойынша генерациялар жеткіліксіз.')}{' '}
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
-                {t('Выбрать пакет', 'Пакет таңдау')}
+                {t('Пополнить баланс', 'Балансты толықтыру')}
               </button>
             </Alert>
           ) : ownerBlocked ? (
@@ -586,7 +596,15 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               <h2>{t('Готово', 'Дайын')}</h2>
             </div>
 
-            {previewItems.length > 0 && (
+            {mutation.data.priceKopecks != null && mutation.data.balanceKopecks != null && (
+              <Alert tone="success">
+                {t('Списано', 'Есептен шығарылды')}: <strong>{(mutation.data.priceKopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>.
+                {' '}{t('Остаток', 'Қалдық')}: <strong>{(mutation.data.balanceKopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>.
+                {mutation.data.discountApplied && <> {' '}{t('Применена разовая скидка 20%.', 'Бір реттік 20% жеңілдік қолданылды.')}</>}
+              </Alert>
+            )}
+
+            {g.mode === 'custom' && previewItems.length > 0 && (
               <div className={s.previewSection}>
                 <div className={s.previewControls}>
                   <strong>{t('Сгенерированные стикеры', 'Генерацияланған стикерлер')}</strong>
@@ -698,7 +716,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 <span>{t('Нужно больше стикеров?', 'Көбірек стикер керек пе?')}</span>
               )}
               <Button variant="ghost" size="sm" onClick={onNeedPackages}>
-                {t(`Пакеты от ${formatPerUnit(MIN_PER_UNIT)}`, `Пакеттер ${formatPerUnit(MIN_PER_UNIT)} бастап`)}
+                {t('Пачка 50 — 20 ₽', '50 кодтық пакет — 20 ₽')}
                 <ArrowRight size={16} />
               </Button>
             </div>
@@ -767,7 +785,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           <div className="row">
             <Button
               loading={mutation.isPending}
-              disabled={!g.accessCode || notEnough || invalidCustomCode || invalidQuantity}
+              disabled={!auth.isAuthenticated || notEnough || invalidCustomCode || invalidQuantity}
               onClick={() => {
                 setConfirmOpen(false);
                 mutation.mutate();
@@ -794,7 +812,7 @@ export const GeneratorPage = observer(() => {
   useDocumentMeta(
     t('Генератор ШК ВБ — возвратные стикеры и QR коробок', 'ШК ВБ генераторы — WB қайтару стикерлері мен қорап QR-кодтары'),
     t(
-      'Генератор ШК Wildberries: возвратные стикеры товаров и QR-коды коробок онлайн. Готовый PDF для печати, пакеты генераций от 0,27 ₽ за штуку.',
+      'Генератор ШК Wildberries: по номеру за 7,50 ₽ или пачкой 50 кодов за 20 ₽. Готовый PDF для печати.',
       'Wildberries ШК генераторы: тауарлардың қайтару стикерлері мен қораптардың QR-кодтары онлайн. Басып шығаруға дайын PDF, генерация пакеттері қолжетімді бағамен.',
     ),
   );
@@ -815,8 +833,8 @@ export const GeneratorPage = observer(() => {
               'Создавайте возвратные ШК (штрихкоды) Wildberries для товаров и QR-коды коробок по номеру. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или термопринтер. Генерации покупаются пакетами —',
               'Тауарларға арналған Wildberries қайтару ШК-ларын (штрихкодтарын) және нөмір бойынша қорап QR-кодтарын жасаңыз. Дайын PDF-ті жүктеп алыңыз немесе заттаңбаларды бірден кәдімгі не термопринтерге жіберіңіз. Генерациялар пакетпен сатылады —',
             )}{' '}
-            <strong>{t(`от ${formatPerUnit(MIN_PER_UNIT)}`, `данасы ${formatPerUnit(MIN_PER_UNIT)}`)}</strong>{' '}
-            {t('за штуку.', 'бастап.')}
+            <strong>{t('7,50 ₽ по номеру', 'Нөмір бойынша 7,50 ₽')}</strong>{' '}
+            {t('или 50 кодов за 20 ₽.', 'немесе 50 код 20 ₽.')}
           </>
         }
         trust={trustItems(t, formatPerUnit(MIN_PER_UNIT))}

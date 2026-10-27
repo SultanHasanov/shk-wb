@@ -1,53 +1,53 @@
+const crypto = require('crypto');
 const { requesterHash } = require('../../server/_stickers');
 const { sendApiError } = require('../../server/_supabase');
-const { optionalUser } = require('../../server/_user-auth');
-const { isAccessCode, normalizeAccessCode } = require('../../server/_access-code');
+const { requireUser } = require('../../server/_user-auth');
 const { enforceRateLimit } = require('../../server/_rate-limit');
-const { assertAccessOwner, generateStickers, getAccessStatus, selectAccessCode } = require('../../server/_sticker-generation');
-const { supabaseFetch } = require('../../server/_supabase');
-
-// Вошедший без кода: сначала квота стикеров тарифа Про (код текущего месяца),
-// затем свои пакеты генераций. Так программа печатает без ввода кода.
-async function accountAccessCode(userId, quantity) {
-  const quotaCode = await supabaseFetch('rpc/app_sticker_quota_code', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
-  if (quotaCode) {
-    const status = await getAccessStatus(String(quotaCode));
-    if (status && status.remaining >= quantity) return String(quotaCode);
-  }
-  return selectAccessCode(userId, quantity);
-}
+const { generateStickers } = require('../../server/_sticker-generation');
+const { BATCH_QUANTITY, finalizeGeneration, refundGeneration, reserveGeneration } = require('../../server/_generation-billing');
 
 module.exports = async function handler(req, res) {
   if (!await enforceRateLimit(req, res, { scope: 'sticker-generation', limit: 60, windowSeconds: 60 })) return;
-  const accessCode = normalizeAccessCode(req.method === 'GET' ? req.query?.accessCode : req.body?.accessCode);
-  if (accessCode && !isAccessCode(accessCode)) return res.status(400).json({ error: 'Некорректный код доступа' });
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let charge = null;
   try {
-    const user = await optionalUser(req);
-    if (req.method === 'GET') {
-      if (!accessCode) return res.status(400).json({ error: 'Invalid access code' });
-      await assertAccessOwner(accessCode, user?.id || null);
-      const access = await getAccessStatus(accessCode);
-      if (!access) return res.status(404).json({ error: 'Access code not found', code: 'INVALID_ACCESS_CODE' });
-      return res.status(200).json({ access });
-    }
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const rawMode = req.body?.mode;
+    if (!['range', 'custom', 'box_range', 'box_custom'].includes(rawMode)) {
+      return res.status(400).json({ error: 'Выберите генерацию по номеру или пачку 50', code: 'VALIDATION_ERROR' });
+    }
     const isCustom = rawMode === 'custom' || rawMode === 'box_custom';
-    const effectiveCode = accessCode || (user ? await accountAccessCode(user.id, isCustom ? 1 : Math.max(1, Number(req.body?.quantity) || 1)) : null);
+    const category = rawMode === 'box_range' || rawMode === 'box_custom' ? 'box' : 'product';
+    if (!isCustom && Number(req.body?.quantity) !== BATCH_QUANTITY) {
+      return res.status(400).json({ error: 'Пачка содержит ровно 50 кодов', code: 'VALIDATION_ERROR' });
+    }
+    const requestKey = String(req.body?.requestId || req.headers['idempotency-key'] || crypto.randomUUID());
+    charge = await reserveGeneration({ userId: user.id, requestKey, mode: isCustom ? 'custom' : 'batch', category });
+    if (charge.duplicate && charge.status === 'completed' && charge.result) {
+      return res.status(200).json(charge.result);
+    }
+    if (charge.duplicate) {
+      return res.status(409).json({ error: 'Запрос уже обрабатывается', code: 'GENERATION_BUSY' });
+    }
     const result = await generateStickers({
-      userId: user?.id || null,
-      accessCode: effectiveCode || null,
+      userId: user.id,
+      chargeId: charge.chargeId,
       requesterHash: requesterHash(req),
-      category: rawMode === 'box_range' || rawMode === 'box_custom' ? 'box' : 'product',
+      category,
       mode: isCustom ? 'custom' : 'range',
-      quantity: req.body?.quantity,
+      quantity: isCustom ? 1 : BATCH_QUANTITY,
       code: req.body?.code,
       prefix: req.body?.prefix,
       channel: req.headers['x-app-version'] ? 'app' : 'web',
-      email: user?.email?.endsWith('@users.invalid') ? null : user?.email || null,
+      clientEntryId: `paid:${charge.chargeId}`,
+      email: user.email?.endsWith('@users.invalid') ? null : user.email || null,
     });
-    return res.status(201).json(result);
+    const response = { ...result, priceKopecks: charge.priceKopecks, discountApplied: charge.discountApplied, balanceKopecks: charge.balanceKopecks };
+    await finalizeGeneration(charge.chargeId, response);
+    return res.status(201).json(response);
   } catch (error) {
+    if (charge?.chargeId) await refundGeneration(charge.chargeId).catch(() => {});
     if (error.code) return res.status(error.status || 400).json({ error: error.message, code: error.code });
     const host = String(req.headers?.host || '');
     if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) return res.status(502).json({ error: 'Database request failed', details: error.details || error.message });

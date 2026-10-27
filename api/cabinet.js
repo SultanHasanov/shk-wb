@@ -13,6 +13,7 @@ const {
 const { createNotification } = require('../server/_notifications');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const partners = require('../server/_partners');
+const { walletSummary } = require('../server/_wallet');
 
 // Реферальная ссылка публичная и должна переживать каждый Vercel-деплой.
 // VERCEL_URL здесь использовать нельзя: он содержит технический адрес сборки.
@@ -302,7 +303,7 @@ async function getOrders(userId, count = 25, cursor = '') {
 async function bootstrap(req, res, user) {
   await ensureAccount(user);
   await maybeBindReferral(req, user);
-  const [profile, assets, orders, notifications, unread, referral, partner] = await Promise.all([
+  const [profile, assets, orders, notifications, unread, referral, partner, wallet, discounts] = await Promise.all([
     getProfile(user),
     getAssets(user.id),
     getOrders(user.id, 5),
@@ -313,6 +314,8 @@ async function bootstrap(req, res, user) {
     getReferral(user.id),
     // До применения миграции 20261015 таблицы нет — кабинет не должен падать.
     partners.getPartnerByUser(user.id).catch(() => null),
+    walletSummary(user.id),
+    supabaseFetch(`sticker_generation_discounts?user_id=eq.${q(user.id)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []),
   ]);
   const stickerAssets = assets.filter(x => x.type === 'sticker');
   const remaining = stickerAssets.reduce(
@@ -337,6 +340,7 @@ async function bootstrap(req, res, user) {
     unreadNotifications: unread.length,
     referral,
     partner: partner ? { name: partner.name, active: partner.active } : null,
+    wallet: { ...wallet, discountAvailable: discounts.length > 0 },
     overview: {
       activeKeys: assets.filter(x => x.active).length,
       stickersLeft: remaining,

@@ -76,9 +76,9 @@ describe('единый пул генераций', () => {
     expect(generationService).toContain('remaining: Math.max(0, total - used)');
   });
 
-  it('не позволяет применять привязанный код без аккаунта владельца', () => {
-    expect(generate).toContain('assertAccessOwner(accessCode');
-    expect(generationService).toContain("select=owner_user_id");
-    expect(generationService).toContain('ACCESS_CODE_OWNER_REQUIRED');
+  it('требует аккаунт и оплачивает новые генерации с баланса', () => {
+    expect(generate).toContain('requireUser(req, res)');
+    expect(generate).toContain('reserveGeneration({ userId: user.id');
+    expect(generate).not.toContain('accountAccessCode');
   });
 });

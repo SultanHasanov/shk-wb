@@ -22,7 +22,7 @@ export const PACKAGE_PRICES: Readonly<Record<number, number>> = Object.freeze({
  * Пополнение баланса из Telegram-бота. Источник — server/_wallet.js (MIN_TOPUP, MAX_TOPUP,
  * TOPUP_BONUS_STEPS), сверяется спеком pricing.test.ts.
  */
-export const MIN_TOPUP = 25;
+export const MIN_TOPUP = 20;
 export const MAX_TOPUP = 50000;
 export const TOPUP_BONUS_STEPS: ReadonlyArray<readonly [number, number]> = [[1000, 10], [500, 5]];
 

@@ -4,6 +4,7 @@ const path = require('path');
 const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
+const { BATCH_QUANTITY, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
 const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
@@ -597,15 +598,14 @@ function wizardView(state, draft) {
   }
   if (state === 'choose_mode') {
     return { text: `${trail}${error}<b>Выберите режим</b>`, rows: [
-      [{ text: 'Пачка по количеству', callback_data: 'gen:mode:range' }],
-      [{ text: 'По конкретному номеру', callback_data: 'gen:mode:custom' }],
+      [{ text: 'Пачка 50 — 20 ₽', callback_data: 'gen:mode:range' }],
+      [{ text: 'По конкретному номеру — 7,50 ₽', callback_data: 'gen:mode:custom' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
   if (state === 'await_quantity') {
-    return { text: `${trail}${error}<b>Сколько создать?</b>\nВыберите или отправьте число от 1 до 500 сообщением.`, rows: [
-      [1, 10, 50].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
-      [100, 250, 500].map(value => ({ text: String(value), callback_data: `gen:qty:${value}` })),
+    return { text: `${trail}${error}<b>Пачка содержит ровно 50 кодов</b>\nСтоимость — 20 ₽, результат придёт одним PDF-файлом.`, rows: [
+      [{ text: 'Продолжить — 50 шт.', callback_data: `gen:qty:${BATCH_QUANTITY}` }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
@@ -626,7 +626,7 @@ function wizardView(state, draft) {
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
-  // Генераций на кодах нет — платим с баланса по таблице пакетов.
+  // Новые генерации всегда оплачиваются с общего рублёвого баланса.
   const cost = Number(draft.walletCost || 0), balance = Number(draft.balanceKopecks || 0) / 100;
   if (balance >= cost) {
     return { text: `${trail}${error}<b>Проверьте параметры</b>\nСпишется <b>${wallet.formatRub(cost)}</b> с баланса — останется ${wallet.formatRub(balance - cost)}.`, rows: [
@@ -792,20 +792,13 @@ function telegramRequesterHash(telegramId) {
 /** Подтверждение: сначала генерации на кодах доступа, если их нет — оплата с баланса. */
 async function requestConfirmation(from, chatId, draft, messageId) {
   const units = requiredUnits(draft);
-  if (unlimitedName(from.id)) {
-    // Безлимит: свой код без оплаты, лимит которого бот поднимает сам перед каждой генерацией.
-    draft.unlimited = unlimitedName(from.id);
-    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks;
-    return renderWizard(from, chatId, 'confirm', draft, messageId);
-  }
   delete draft.unlimited;
-  const accessCode = await selectAccessCode(draft.userId, units);
-  if (accessCode) { draft.accessCode = accessCode; delete draft.walletCost; delete draft.balanceKopecks; }
-  else {
-    delete draft.accessCode;
-    draft.walletCost = wallet.generationCost(units);
-    draft.balanceKopecks = await wallet.getBalanceKopecks(draft.userId);
-  }
+  delete draft.accessCode;
+  const discounts = await supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(draft.userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []);
+  const discounted = discounts.length > 0;
+  draft.discountAvailable = discounted;
+  draft.walletCost = draft.mode === 'range' ? (discounted ? 16 : 20) : (discounted ? 6 : 7.5);
+  draft.balanceKopecks = await wallet.getBalanceKopecks(draft.userId);
   await renderWizard(from, chatId, 'confirm', draft, messageId);
 }
 
@@ -834,17 +827,20 @@ async function unlimitedAccessCode(userId, units) {
 
 /** Купить с баланса ровно нужное число генераций; возвращает код, на который они легли. */
 async function buyGenerationsWithWallet(draft) {
-  const units = requiredUnits(draft);
-  const target = await ownTopupCode(draft.userId);
-  const result = await wallet.payWithWallet({
-    userId: draft.userId,
-    productKind: 'stickers',
-    fields: { range_quantity: units, sticker_target: draft.category === 'box' ? 'box' : 'product', ...(target ? { renewal_target_key: target } : {}) },
-    priceRub: wallet.generationCost(units),
-    snapshot: { packs: [], units, total: wallet.generationCost(units), source: 'telegram-wallet' },
-  });
-  if (!result.ok) return result;
-  return { ok: true, accessCode: result.order.access_code, balanceKopecks: result.balanceKopecks };
+  try {
+    const charge = await reserveGeneration({
+      userId: draft.userId,
+      requestKey: draft.billingRequestKey,
+      mode: draft.mode === 'range' ? 'batch' : 'custom',
+      category: draft.category === 'box' ? 'box' : 'product',
+    });
+    return { ok: true, charge };
+  } catch (error) {
+    if (error.code === 'INSUFFICIENT_BALANCE') {
+      return { ok: false, error: 'INSUFFICIENT', balanceKopecks: await wallet.getBalanceKopecks(draft.userId) };
+    }
+    throw error;
+  }
 }
 
 function absoluteAssetUrl(relative, png = false, style = 'old') {
@@ -902,7 +898,7 @@ function formatKeyboard(requestId) {
 }
 
 async function deliverGeneration(chatId, requestId, result, style = 'old') {
-  await sendPreview(chatId, requestId, result, 0, style);
+  if (Number(result.quantity || 1) !== BATCH_QUANTITY) await sendPreview(chatId, requestId, result, 0, style);
   const document = process.env.TELEGRAM_LOCAL_POLLING === '1' && result.variant !== 'box'
     ? { buffer: await localStickerPdf(result, style), filename: `stickers-${style}.pdf` }
     : absoluteAssetUrl(result.pdfUrl, false, style);
@@ -936,12 +932,10 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
   const requestId = `${from.id}:${messageId}${draft.nonce || ''}`;
   if (!await claimGenerationRequest(requestId, from, chatId, draft)) { await onDuplicate(); return; }
   let paidLine = '';
-  if (draft.unlimited) {
-    draft.accessCode = await unlimitedAccessCode(draft.userId, requiredUnits(draft));
-    paidLine = ` У вас, ${escapeHtml(draft.unlimited)}, безлимитный тариф.`;
-  } else if (!draft.accessCode) {
-    // Генераций на кодах нет — докупаем ровно нужное с баланса и генерируем этим кодом.
-    const bought = await buyGenerationsWithWallet(draft);
+  draft.billingRequestKey = `telegram:${requestId}`;
+  let bought;
+  try {
+    bought = await buyGenerationsWithWallet(draft);
     if (!bought.ok) {
       // Деньги не списаны: освобождаем запрос, чтобы после пополнения можно было нажать «Подтвердить» снова.
       await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
@@ -950,24 +944,28 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
       await renderWizard(from, chatId, 'confirm', draft, messageId);
       return;
     }
-    draft.accessCode = bought.accessCode;
-    paidLine = ` Списано ${wallet.formatRub(wallet.generationCost(requiredUnits(draft)))}, на балансе ${wallet.formatRub(bought.balanceKopecks / 100)}.`;
+    draft.chargeId = bought.charge.chargeId;
+    paidLine = ` Списано ${wallet.formatRub(bought.charge.priceKopecks / 100)}${bought.charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(bought.charge.balanceKopecks / 100)}.`;
+  } catch (error) {
+    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
+    throw error;
   }
   await saveSession(from, chatId, 'generating', draft);
   await showScreen(chatId, messageId, `${wizardTrail(draft)}⏳ Генерирую и подготавливаю PDF…`);
   let result;
   try {
     const requesterHash = telegramRequesterHash(from.id);
-    result = await generateStickers({ ...draft, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
-    result.botCaption = paidLine ? `Готово: ${result.quantity || 1} шт.${paidLine}` : `Готово: ${result.quantity || 1} шт. Осталось генераций на коде: ${result.access?.remaining ?? '—'}`;
+    result = await generateStickers({ ...draft, quantity: draft.mode === 'range' ? BATCH_QUANTITY : 1, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
+    result = { ...result, priceKopecks: bought.charge.priceKopecks, discountApplied: bought.charge.discountApplied, balanceKopecks: bought.charge.balanceKopecks };
+    result.botCaption = `Готово: ${result.quantity || 1} шт.${paidLine}`;
+    await finalizeGeneration(draft.chargeId, result);
     await completeGenerationRequest(requestId, result);
     await clearSession(from.id);
   } catch (error) {
+    if (draft.chargeId) await refundGeneration(draft.chargeId).catch(() => {});
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     await clearSession(from.id);
-    // Если генерации уже куплены с баланса, они остались на коде — следующая попытка возьмёт их без оплаты.
-    const kept = paidLine && !draft.unlimited ? '\n\nОплаченные генерации остались на вашем счёте — попробуйте ещё раз, повторно платить не нужно.' : '';
-    await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}\n\nОплата возвращена на баланс.`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
   // Файл должен прийти сразу после списания. Для товарных стикеров отправляем
@@ -1472,7 +1470,7 @@ async function askTopupAmount(from, chatId, messageId, error) {
 
 async function acceptTopupAmount(from, chatId, session, message, text) {
   await deleteMessage(chatId, message.message_id).catch(() => {});
-  const amount = Number(String(text).replace(/[\s₽р.]/gi, ''));
+  const amount = Number(String(text).replace(',', '.').replace(/[^\d.]/g, ''));
   const msgId = session.draft?.msgId;
   if (!wallet.validTopup(amount)) return askTopupAmount(from, chatId, msgId, `«${escapeHtml(String(text).slice(0, 20))}» — нужна сумма от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`);
   await clearSession(from.id);
@@ -2010,7 +2008,7 @@ async function handleCallback(callback) {
   if (data.startsWith('gen:qty:') && session.state === 'await_quantity') {
     const quantity = Number(data.slice('gen:qty:'.length));
     // gen:qty:manual — кнопка «Ввести другое количество» из старых сообщений.
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { await answerCallbackQuery(callback.id, 'Отправьте число от 1 до 500 сообщением'); return; }
+    if (quantity !== BATCH_QUANTITY) { await answerCallbackQuery(callback.id, 'Пачка содержит ровно 50 кодов'); return; }
     await answerCallbackQuery(callback.id);
     draft.quantity = quantity; await requestConfirmation(from, chatId, draft, messageId); return;
   }
@@ -2072,7 +2070,7 @@ async function handleMessage(message) {
   if (session?.state === 'await_quantity') {
     await deleteMessage(chatId, message.message_id).catch(() => {});
     const quantity = Number(text);
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — нужно целое число от 1 до 500.`; return renderWizard(from, chatId, 'await_quantity', draft); }
+    if (quantity !== BATCH_QUANTITY) { draft.error = 'Пачка содержит ровно 50 кодов.'; return renderWizard(from, chatId, 'await_quantity', draft); }
     draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
   }
   if (session?.state === 'await_code') {

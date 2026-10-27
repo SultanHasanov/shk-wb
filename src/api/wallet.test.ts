@@ -32,9 +32,10 @@ describe('баланс в Telegram-боте', () => {
 
   it('бонус к пополнению и границы суммы', () => {
     expect([100, 499, 500, 999, 1000, 2000].map(wallet.topupBonus)).toEqual([0, 0, 25, 49, 100, 200]);
-    expect(wallet.validTopup(24)).toBe(false);
-    expect(wallet.validTopup(25)).toBe(true);
-    expect(wallet.validTopup(150.5)).toBe(false);
+    expect(wallet.validTopup(19.99)).toBe(false);
+    expect(wallet.validTopup(20)).toBe(true);
+    expect(wallet.validTopup(20.5)).toBe(true);
+    expect(wallet.validTopup(20.555)).toBe(false);
     expect(wallet.validTopup(50001)).toBe(false);
   });
 

@@ -3,118 +3,51 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ToastProvider } from '../../ui';
 import { PackagesPage } from './PackagesPage';
 
 const bootstrap = {
-  profile: {
-    userId: 'user-1',
-    email: 'user@example.com',
-    telegramOnly: false,
-    displayName: '',
-    phone: '',
-    payerStatus: 'individual',
-    registeredAt: '2026-08-01T00:00:00Z',
-    lastSignInAt: null,
-    telegram: null,
-    preferences: {
-      thermalPrintSettings: {},
-      notifyOrderStatus: true,
-      notifyKeyExpiry: true,
-      notifyLowBalance: false,
-      notifyProductNews: true,
-      historyImportedAt: null,
-      historyImportedCount: 0,
-      historyImportNoticeDismissedAt: null,
-    },
-  },
-  assets: [
-    {
-      type: 'sticker',
-      key: '481902',
-      label: 'Пакет генераций',
-      active: true,
-      createdAt: '2026-08-01T00:00:00Z',
-      limits: { used: 10, total: 200 },
-    },
-  ],
-  orders: [],
-  notifications: [],
-  unreadNotifications: 0,
-  referral: {
-    code: 'CODE',
-    link: '',
-    availableKopecks: 0,
-    reservedKopecks: 0,
-    earnedKopecks: 0,
-    paidKopecks: 0,
-    invited: 0,
-    events: [],
-    withdrawals: [],
-  },
-  overview: { activeKeys: 1, stickersLeft: 190, stickersTotal: 200, needsAttention: 0 },
+  profile: { userId: 'user-1', email: 'user@example.com', telegramOnly: false, displayName: '', phone: '', payerStatus: 'individual', registeredAt: '2026-08-01T00:00:00Z', lastSignInAt: null, telegram: null, preferences: { thermalPrintSettings: {}, notifyOrderStatus: true, notifyKeyExpiry: true, notifyLowBalance: false, notifyProductNews: true, historyImportedAt: null, historyImportedCount: 0, historyImportNoticeDismissedAt: null } },
+  assets: [], orders: [], notifications: [], unreadNotifications: 0,
+  referral: { code: 'CODE', link: '', availableKopecks: 0, reservedKopecks: 0, earnedKopecks: 0, paidKopecks: 0, invited: 0, events: [], withdrawals: [] },
+  overview: { activeKeys: 0, stickersLeft: 0, stickersTotal: 0, needsAttention: 0 },
+  wallet: { balanceKopecks: 8150, discountAvailable: true, ledger: [{ kind: 'admin', amountKopecks: 8100, orderId: null, note: 'legacy_stickers_conversion', createdAt: '2026-11-01T00:00:00Z' }] },
 };
 
 let paymentBody: Record<string, unknown> | null;
-function json(data: unknown, status = 200) {
-  return Promise.resolve(
-    new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }),
-  );
-}
+const json = (data: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }));
 
 beforeEach(() => {
   paymentBody = null;
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).includes('/api/payments/create')) {
-        paymentBody = JSON.parse(String(init?.body));
-        return json({ error: 'Тестовая остановка перед переходом в ЮKassa' }, 400);
-      }
-      return json(bootstrap);
-    }),
-  );
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/api/payments/create')) {
+      paymentBody = JSON.parse(String(init?.body));
+      return json({ error: 'stop before redirect' }, 400);
+    }
+    return json(bootstrap);
+  }));
 });
 
 function renderPage() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <ToastProvider>
-          <PackagesPage />
-        </ToastProvider>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(<QueryClientProvider client={client}><MemoryRouter><PackagesPage /></MemoryRouter></QueryClientProvider>);
 }
 
-describe('пакеты генераций в кабинете', () => {
-  it('показывает один общий остаток без разбивки по типам', async () => {
+describe('баланс генератора в кабинете', () => {
+  it('показывает баланс, конвертацию и разовую скидку', async () => {
     renderPage();
-    expect(await screen.findByText('190')).toBeInTheDocument();
-    expect(screen.getByText('10 из 200')).toBeInTheDocument();
-    expect(screen.queryByText('Стикеры товаров · массово')).toBeNull();
-    expect(screen.queryByText('QR коробок · массово')).toBeNull();
+    expect(await screen.findByText('81,50 ₽')).toBeInTheDocument();
+    expect(screen.getByText('Конвертация старого пакета')).toBeInTheDocument();
+    expect(screen.getByText(/разовую скидку 20%/)).toBeInTheDocument();
   });
 
-  /* Пополнение кладёт генерации в тот же код: без него постоянный покупатель
-     копит отдельные коды с остатками. */
-  it('передаёт серверу код пополнения и возврат в кабинет', async () => {
+  it('принимает пополнение с копейками от 20 рублей', async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole('button', { name: 'Пополнить' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Количество генераций' }), '100');
-    await user.click(screen.getByRole('checkbox', { name: /Принимаю/ }));
-    await user.click(screen.getByRole('button', { name: 'Перейти к оплате' }));
+    const input = await screen.findByRole('textbox', { name: 'Сумма пополнения, ₽' });
+    await user.clear(input);
+    await user.type(input, '20,50');
+    await user.click(screen.getByRole('button', { name: 'Пополнить баланс' }));
     await waitFor(() => expect(paymentBody).not.toBeNull());
-    expect(paymentBody).toMatchObject({
-      productKind: 'stickers',
-      renewalTargetKey: '481902',
-      quantity: 100,
-      returnTo: 'cabinet',
-    });
+    expect(paymentBody).toMatchObject({ productKind: 'wallet_topup', walletAmount: 20.5, returnTo: 'cabinet' });
   });
 });

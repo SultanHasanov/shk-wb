@@ -143,6 +143,17 @@ export type CabinetOverview = {
   stickersTotal: number;
   needsAttention: number;
 };
+export type WalletSummary = {
+  balanceKopecks: number;
+  discountAvailable: boolean;
+  ledger: Array<{
+    kind: 'topup' | 'bonus' | 'spend' | 'refund' | 'admin';
+    amountKopecks: number;
+    orderId: string | null;
+    note: string | null;
+    createdAt: string;
+  }>;
+};
 export type CabinetBootstrap = {
   profile: UserProfile;
   assets: UserAsset[];
@@ -152,6 +163,7 @@ export type CabinetBootstrap = {
   referral: ReferralSummary;
   /** Есть, если аккаунт назначен партнёром (см. раздел «Партнёр»). */
   partner?: { name: string; active: boolean } | null;
+  wallet: WalletSummary;
   overview: CabinetOverview;
 };
 export type CursorPage<T> = { items: T[]; nextCursor: string | null };

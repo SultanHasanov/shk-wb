@@ -62,23 +62,36 @@ async function generateStickers(options) {
   try {
     if (mode === 'range') {
       const quantity = Number(options.quantity);
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 500) throw generationError('VALIDATION_ERROR', 'Количество должно быть от 1 до 500');
-      const rows = await supabaseFetch(boxMode ? 'rpc/allocate_return_box_codes' : 'rpc/allocate_return_stickers', { method: 'POST', body: JSON.stringify({ p_quantity: quantity, p_requester_hash: options.requesterHash, p_access_code: options.accessCode || null, ...(boxMode ? { p_prefix: prefix } : {}) }) });
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) throw generationError('VALIDATION_ERROR', 'Количество должно быть от 1 до 50');
+      if (options.chargeId && quantity !== 50) throw generationError('VALIDATION_ERROR', 'Платная пачка содержит ровно 50 кодов');
+      const paidPath = boxMode ? 'rpc/allocate_paid_return_box_codes' : 'rpc/allocate_paid_return_stickers';
+      const legacyPath = boxMode ? 'rpc/allocate_return_box_codes' : 'rpc/allocate_return_stickers';
+      const rows = await supabaseFetch(options.chargeId ? paidPath : legacyPath, {
+        method: 'POST',
+        body: JSON.stringify(options.chargeId
+          ? { p_charge: options.chargeId, p_user: options.userId, p_requester_hash: options.requesterHash, ...(boxMode ? { p_prefix: prefix } : {}) }
+          : { p_quantity: quantity, p_requester_hash: options.requesterHash, p_access_code: options.accessCode || null, ...(boxMode ? { p_prefix: prefix } : {}) }),
+      });
       if (!Array.isArray(rows) || rows.length !== quantity) throw new Error('Unexpected allocation result');
       const batchId = rows[0].batch_id, access = options.accessCode ? await getAccessStatus(options.accessCode) : null;
       const result = { batchId, quantity, variant: category, prefix: boxMode ? prefix : null, access, items: rows.map(row => ({ code: String(row.code), imageUrl: `/api/stickers/image?batch=${encodeURIComponent(batchId)}&code=${encodeURIComponent(row.code)}${boxMode ? `&variant=box&prefix=${encodeURIComponent(prefix)}` : ''}` })), pdfUrl: `/api/stickers/pdf?batch=${encodeURIComponent(batchId)}${boxMode ? `&variant=box&prefix=${encodeURIComponent(prefix)}` : ''}` };
-      await recordGeneration({ ...options, clientEntryId: options.clientEntryId || `server:${batchId}`, mode, category, prefix, quantity, codes: result.items.map(item => item.code), batchId, access });
+      await recordGeneration({ ...options, clientEntryId: options.clientEntryId || `server:${batchId}`, mode, category, prefix, quantity, codes: result.items.map(item => item.code), batchId, access }).catch(() => {});
       return result;
     }
     const code = String(options.code || '').trim(), codeLength = boxMode ? 10 : 11;
     if (!new RegExp(`^\\d{${codeLength}}$`).test(code)) throw generationError('VALIDATION_ERROR', `Номер должен содержать ровно ${codeLength} цифр`);
-    await supabaseFetch(boxMode ? 'rpc/authorize_box_custom_sticker' : 'rpc/authorize_custom_sticker', { method: 'POST', body: JSON.stringify({ p_requester_hash: options.requesterHash, p_access_code: options.accessCode || null }) });
+    await supabaseFetch(options.chargeId ? 'rpc/authorize_paid_custom_sticker' : (boxMode ? 'rpc/authorize_box_custom_sticker' : 'rpc/authorize_custom_sticker'), {
+      method: 'POST',
+      body: JSON.stringify(options.chargeId
+        ? { p_charge: options.chargeId, p_user: options.userId, p_requester_hash: options.requesterHash, p_category: category, p_prefix: prefix || 'TRBX' }
+        : { p_requester_hash: options.requesterHash, p_access_code: options.accessCode || null }),
+    });
     const expires = Math.floor(Date.now() / 1000) + 3600, signedValue = `${boxMode ? `${prefix}:${code}` : code}:${expires}`;
     const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
     const access = options.accessCode ? await getAccessStatus(options.accessCode) : null;
     const signedQuery = `code=${encodeURIComponent(code)}&token=${encodeURIComponent(token)}&expires=${expires}${boxMode ? `&variant=box&prefix=${encodeURIComponent(prefix)}` : ''}`;
     const result = { code, quantity: 1, prefix: boxMode ? prefix : null, variant: category, access, imageUrl: `/api/stickers/image?${signedQuery}`, pdfUrl: `/api/stickers/pdf?${signedQuery}` };
-    await recordGeneration({ ...options, clientEntryId: options.clientEntryId || `server:${crypto.randomUUID()}`, mode, category, prefix, quantity: 1, code, access });
+    await recordGeneration({ ...options, clientEntryId: options.clientEntryId || `server:${crypto.randomUUID()}`, mode, category, prefix, quantity: 1, code, access }).catch(() => {});
     return result;
   } catch (error) { throw mapDatabaseError(error, boxMode); }
 }

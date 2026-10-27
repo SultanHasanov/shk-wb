@@ -1,29 +1,74 @@
 import { useState } from 'react';
-import { Copy,Package,RefreshCw } from 'lucide-react';
-import { PackPurchase } from '../../components/PricingPacks';
-import { LicenseCheckoutModal } from './LicenseCheckoutModal';
-import { Badge,Button,Card,EmptyState,Field,Input,Progress,Stat,useToast } from '../../ui';
-import { CabinetError,CabinetLoading } from '../../components/CabinetState';
-import { useCabinet,useCabinetMutation } from '../../api/cabinet';
+import { useMutation } from '@tanstack/react-query';
+import { WalletCards } from 'lucide-react';
+import { api } from '../../api/client';
+import { useCabinet } from '../../api/cabinet';
+import { rememberPendingOrder } from '../../lib/pending-orders';
 import { useDocumentMeta } from '../../lib/seo';
+import { Alert, Button, Card, EmptyState, Field, Input, Stat, Table } from '../../ui';
+import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { useT } from '../../i18n';
 
-/* Счётчик на коде один на все виды генерации. Раньше здесь была разбивка по
-   четырём лимитам — она существовала только потому, что пакет нельзя было
-   потратить не на свой тип стикера. */
-export function PackagesPage(){
-  const t=useT();
-  useDocumentMeta(t('Пакеты и код доступа — кабинет','Пакеттер мен қолжетімділік коды — кабинет'));const query=useCabinet();const toast=useToast();const [claim,setClaim]=useState('');const [topUp,setTopUp]=useState<string|null>(null);const mutation=useCabinetMutation<{kind:'sticker';value:string}>('/api/cabinet/assets/claim');
-  if(query.isPending)return <div className="page"><CabinetLoading/></div>;if(query.isError)return <div className="page"><CabinetError error={query.error} retry={()=>query.refetch()}/></div>;
-  const codes=query.data.assets.filter(a=>a.type==='sticker');
-  return <div className="page"><header className="page-head"><h1>{t('Пакеты и код доступа','Пакеттер мен қолжетімділік коды')}</h1><p>{t('Все принадлежащие вам пакеты генераций. Генерация — это один стикер товара или один QR коробки.','Сізге тиесілі барлық генерация пакеттері. Бір генерация — бұл бір тауар стикері немесе бір қорап QR-коды.')}</p></header>
-    <Card><div className="row"><Field label={t('Добавить старый шестизначный код','Ескі алты таңбалы кодты қосу')}><Input inputMode="numeric" maxLength={6} value={claim} onChange={e=>setClaim(e.target.value.replace(/\D/g,''))}/></Field><Button variant="secondary" disabled={claim.length!==6} onClick={()=>mutation.mutate({kind:'sticker',value:claim},{onSuccess:()=>{setClaim('');toast(t('Пакет добавлен','Пакет қосылды'),'success')}})}>{t('Добавить','Қосу')}</Button></div></Card>
-    <div className="stack-lg section">{codes.length?codes.map(c=>{const {used,total}=c.limits;return <Card key={c.key} accent>
-      <div className="row"><div><div className="muted">{t('Код доступа','Қолжетімділік коды')}</div><strong className="mono">{c.key}</strong></div><Button variant="ghost" onClick={()=>{navigator.clipboard?.writeText(c.key);toast(t('Код скопирован','Код көшірілді'),'success')}}><Copy size={16}/>{t('Копировать','Көшіру')}</Button>{c.active&&<Button variant="secondary" onClick={()=>setTopUp(c.key)}><RefreshCw size={16}/>{t('Пополнить','Толықтыру')}</Button>}<Badge tone={c.active?'success':'error'}>{c.active?t('Активен','Белсенді'):t('Отключён','Өшірілген')}</Badge></div>
-      <div className="grid grid-2 section"><Stat value={Math.max(0,total-used)} label={t('генераций осталось','генерация қалды')} icon={<Package size={20}/>}/><Progress value={used} max={Math.max(1,total)} label={<><span>{t('Использовано','Пайдаланылды')}</span><strong>{t(`${used} из ${total}`,`${total} ішінен ${used}`)}</strong></>}/></div>
-    </Card>}):<Card><EmptyState icon={<Package/>} title={t('Пакетов пока нет','Әзірге пакеттер жоқ')} text={t('Купите пакет или добавьте ранее приобретённый код.','Пакет сатып алыңыз немесе бұрын алынған кодты қосыңыз.')}/></Card>}</div>
-    <section className="section"><h2>{t('Купить новый пакет','Жаңа пакет сатып алу')}</h2><PackPurchase/></section>
-    {/* key сбрасывает состояние модалки между разными кодами. */}
-    {topUp&&<LicenseCheckoutModal key={topUp} checkout={{kind:'stickers',targetKey:topUp}} availableKopecks={query.data.referral.availableKopecks} onClose={()=>setTopUp(null)}/>}
+const rub = (kopecks: number) => `${(kopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽`;
+
+export function PackagesPage() {
+  const t = useT();
+  useDocumentMeta(t('Баланс генератора — кабинет', 'Генератор балансы — кабинет'));
+  const query = useCabinet();
+  const [amount, setAmount] = useState('20');
+  const value = Number(amount.replace(',', '.'));
+  const kopecks = Math.round(value * 100);
+  const valid = Number.isFinite(value) && value >= 20 && value <= 50000 && Math.abs(kopecks - value * 100) < 1e-6;
+  const checkout = useMutation({
+    mutationFn: () => api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
+      method: 'POST',
+      body: JSON.stringify({ productKind: 'wallet_topup', walletAmount: value, accepted: true, returnTo: 'cabinet' }),
+    }),
+    onSuccess: data => {
+      rememberPendingOrder(localStorage, data.token);
+      location.assign(data.confirmationUrl);
+    },
+  });
+
+  if (query.isPending) return <div className="page"><CabinetLoading /></div>;
+  if (query.isError) return <div className="page"><CabinetError error={query.error} retry={() => query.refetch()} /></div>;
+  const wallet = query.data.wallet ?? { balanceKopecks: 0, discountAvailable: false, ledger: [] };
+
+  return <div className="page">
+    <header className="page-head">
+      <h1>{t('Баланс генератора', 'Генератор балансы')}</h1>
+      <p>{t('Один баланс для сайта и Telegram-бота. По номеру — 7,50 ₽, пачка из 50 кодов одним PDF — 20 ₽.', 'Сайт пен Telegram-ботқа ортақ баланс. Нөмір бойынша — 7,50 ₽, 50 кодтан тұратын PDF — 20 ₽.')}</p>
+    </header>
+
+    <Card accent>
+      <div className="grid grid-2">
+        <Stat icon={<WalletCards size={20} />} value={rub(wallet.balanceKopecks)} label={t('доступно', 'қолжетімді')} />
+        <div className="stack">
+          <Field label={t('Сумма пополнения, ₽', 'Толықтыру сомасы, ₽')} help={t('От 20 до 50 000 ₽, можно указать копейки.', '20-дан 50 000 ₽-ге дейін, тиындарды көрсетуге болады.')}>
+            <Input inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value.replace(/[^0-9.,]/g, ''))} />
+          </Field>
+          <div className="row">
+            {[20, 100, 300, 500, 1000].map(sum => <Button key={sum} type="button" size="sm" variant="secondary" onClick={() => setAmount(String(sum))}>{sum} ₽</Button>)}
+          </div>
+          <Button disabled={!valid} loading={checkout.isPending} onClick={() => checkout.mutate()}>{t('Пополнить баланс', 'Балансты толықтыру')}</Button>
+          {!valid && <Alert tone="warning">{t('Введите сумму от 20 до 50 000 ₽, не более двух знаков после запятой.', '20-дан 50 000 ₽-ге дейінгі соманы енгізіңіз, үтірден кейін екі таңбадан аспасын.')}</Alert>}
+          {checkout.isError && <Alert tone="error">{checkout.error.message}</Alert>}
+        </div>
+      </div>
+    </Card>
+
+    {wallet.discountAvailable && <Alert tone="success">{t('Ваша следующая генерация получит разовую скидку 20%: 6 ₽ по номеру или 16 ₽ за пачку.', 'Келесі генерацияңызға бір реттік 20% жеңілдік беріледі: нөмір бойынша 6 ₽ немесе пакетке 16 ₽.')}</Alert>}
+
+    <section className="section stack">
+      <h2>{t('История баланса', 'Баланс тарихы')}</h2>
+      {wallet.ledger.length ? <Table>
+        <thead><tr><th>{t('Дата', 'Күні')}</th><th>{t('Операция', 'Операция')}</th><th>{t('Сумма', 'Сома')}</th></tr></thead>
+        <tbody>{wallet.ledger.map((entry, index) => <tr key={`${entry.createdAt}-${index}`}>
+          <td>{new Date(entry.createdAt).toLocaleString('ru-RU')}</td>
+          <td>{entry.note === 'legacy_stickers_conversion' ? t('Конвертация старого пакета', 'Ескі пакетті айырбастау') : ({ topup: t('Пополнение', 'Толықтыру'), bonus: t('Бонус', 'Бонус'), spend: t('Списание', 'Есептен шығару'), refund: t('Возврат', 'Қайтару'), admin: t('Корректировка', 'Түзету') }[entry.kind])}</td>
+          <td><strong>{entry.amountKopecks > 0 ? '+' : ''}{rub(entry.amountKopecks)}</strong></td>
+        </tr>)}</tbody>
+      </Table> : <Card><EmptyState icon={<WalletCards />} title={t('Операций пока нет', 'Әзірге операциялар жоқ')} text={t('После пополнения или генерации запись появится здесь.', 'Толықтырудан немесе генерациядан кейін жазба осында пайда болады.')} /></Card>}
+    </section>
   </div>;
 }

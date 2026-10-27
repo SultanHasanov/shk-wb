@@ -9,7 +9,7 @@ export type GenerationMode = 'range' | 'custom';
  * и в allocate_return_stickers — расхождение между слоями уже приводило к 502:
  * форма пропускала количество, которое отвергала база.
  */
-export const MAX_BATCH_QUANTITY = 500;
+export const MAX_BATCH_QUANTITY = 50;
 
 /** Длина номера при генерации по номеру: у коробок 10 цифр, у товаров 11. */
 export const CUSTOM_CODE_LENGTH: Readonly<Record<StickerKind, number>> = Object.freeze({

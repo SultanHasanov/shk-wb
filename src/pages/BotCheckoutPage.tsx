@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { TelegramLogin } from '../auth/TelegramLogin';
-import { getPack, MAX_TOPUP, MIN_TOPUP, PACKAGE_PRICES, topupBonus } from '../lib/pricing';
+import { MAX_TOPUP, MIN_TOPUP, topupBonus } from '../lib/pricing';
 import { rememberPendingOrder } from '../lib/pending-orders';
 import { useStores } from '../stores/root-store';
 import { Alert, Button, Card, Spinner } from '../ui';
@@ -14,17 +14,14 @@ export const BotCheckoutPage = observer(() => {
   const started = useRef(false);
   const [error, setError] = useState('');
   const [paymentUrl, setPaymentUrl] = useState('');
-  const quantity = Number(params.get('quantity'));
   // ?kind=topup&amount=N — пополнение баланса из бота, иначе пакет генераций стикеров (?quantity=N).
   const topup = params.get('kind') === 'topup';
   const amount = Number(params.get('amount'));
   // «Пополнить и купить»: что бот купит сам после оплаты и какой экран обновит (проверяет сервер).
   const then = params.get('then') || '';
   const screen = Number(params.get('m') || 0);
-  const valid = topup
-    ? Number.isInteger(amount) && amount >= MIN_TOPUP && amount <= MAX_TOPUP
-    : Number.isInteger(quantity) && PACKAGE_PRICES[quantity] !== undefined;
-  const pack = valid && !topup ? getPack(quantity) : null;
+  const kopecks = Math.round(amount * 100);
+  const valid = topup && Number.isFinite(amount) && Math.abs(kopecks - amount * 100) < 1e-6 && amount >= MIN_TOPUP && amount <= MAX_TOPUP;
   const bonus = topup && valid ? topupBonus(amount) : 0;
 
   useEffect(() => {
@@ -35,7 +32,7 @@ export const BotCheckoutPage = observer(() => {
       body: JSON.stringify(
         topup
           ? { productKind: 'wallet_topup', walletAmount: amount, walletThen: then || undefined, walletMessage: screen || undefined, accepted: true, returnTo: 'telegram' }
-          : { productKind: 'stickers', quantity, accepted: true, returnTo: 'telegram' },
+          : {},
       ),
     }).then(data => {
       rememberPendingOrder(localStorage, data.token);
@@ -44,13 +41,12 @@ export const BotCheckoutPage = observer(() => {
       started.current = false;
       setError(reason instanceof Error ? reason.message : 'Не удалось открыть оплату');
     });
-  }, [amount, auth.isAuthenticated, quantity, screen, then, topup, valid]);
+  }, [amount, auth.isAuthenticated, screen, then, topup, valid]);
 
   return (
     <Card>
       <div className="stack" style={{ textAlign: 'center' }}>
         <h1 style={{ margin: 0 }}>{topup ? 'Пополнение баланса' : 'Оплата пакета'}</h1>
-        {pack && <p style={{ margin: 0 }}>{pack.quantity} шт. — <strong>{pack.total} ₽</strong></p>}
         {topup && valid && (
           <p style={{ margin: 0 }}>
             Оплата <strong>{amount} ₽</strong> — на баланс зачислим <strong>{amount + bonus} ₽</strong>

@@ -143,6 +143,9 @@ module.exports = async function handler(req, res) {
           : cellKinds.includes(requestedKind)
             ? requestedKind
             : 'stickers';
+      if (productKind === 'stickers') {
+        return res.status(400).json({ error: 'Пакеты генераций больше не продаются. Пополните баланс и оплатите генерацию при создании.', code: 'PACKAGES_DISABLED' });
+      }
       // Пул генераций общий, поэтому форма присылает одно число. Старый двухпакетный
       // формат ещё принимаем: вкладка со старым бандлом может оформить заказ уже
       // после деплоя, и такой заказ должен пройти, а не упасть на валидации.
@@ -209,7 +212,7 @@ module.exports = async function handler(req, res) {
       if (productKind === 'wallet_topup') {
         if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы пополнить баланс' });
         if (!validTopup(walletAmount))
-          return res.status(400).json({ error: 'Сумма пополнения — целое число от 25 до 50 000 ₽' });
+          return res.status(400).json({ error: 'Сумма пополнения — от 20 до 50 000 ₽, не более двух знаков после запятой' });
       }
       let individualOrder = null;
       if (productKind === 'individual_stickers') {
@@ -378,7 +381,7 @@ module.exports = async function handler(req, res) {
         orderPayload.individual_sticker_order_id = individualOrder.id;
       if (productKind === 'program_license') orderPayload.license_iterations = licenseIterations;
       if (productKind === 'wallet_topup')
-        orderPayload.wallet_topup_kopecks = (walletAmount + topupBonus(walletAmount)) * 100;
+        orderPayload.wallet_topup_kopecks = Math.round((walletAmount + topupBonus(walletAmount)) * 100);
       if (productKind === 'app_subscription') {
         orderPayload.app_plan = appPlan;
         orderPayload.app_term_months = appTerm;
