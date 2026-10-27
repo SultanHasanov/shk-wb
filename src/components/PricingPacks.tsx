@@ -20,6 +20,14 @@ import { useCabinet } from '../api/cabinet';
 import { useMoney } from '../lib/currency';
 import { useLocalePath, useT } from '../i18n';
 
+function formatCheckoutRub(value: number) {
+  const fractionDigits = Number.isInteger(value) ? 0 : 2;
+  return `${value.toLocaleString('ru-RU', {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })} ₽`;
+}
+
 /** Блок покупки пакетов через действующий серверный платёжный API. */
 
 /** Пул генераций на коде общий: одна генерация — это один стикер товара или один
@@ -317,7 +325,7 @@ export const PricingPacks = observer(() => {
         <div className="stack">
           <div className={s.confirmRow}>
             <span className="muted">{t('К оплате', 'Төлеуге')}</span>
-            <span className={s.confirmTotal}>{formatRub(selectedPrice)}</span>
+            <span className={s.confirmTotal}>{formatCheckoutRub(selectedPrice)}</span>
           </div>
 
           {auth.isAuthenticated ? (

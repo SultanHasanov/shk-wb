@@ -28,6 +28,7 @@ describe('тарифы генерации', () => {
     renderBlock();
     await user.click(screen.getByRole('button', { name: /7,50/ }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Способ оплаты');
+    expect(screen.getByRole('dialog')).toHaveTextContent('7,50 ₽');
     expect(screen.getByText('Банковская карта или СБП')).toBeInTheDocument();
   });
 });
