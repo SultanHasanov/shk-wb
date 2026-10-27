@@ -77,7 +77,9 @@ describe('единый пул генераций', () => {
   });
 
   it('требует аккаунт и оплачивает новые генерации с баланса', () => {
-    expect(generate).toContain('requireUser(req, res)');
+    expect(generate).toContain('optionalUser(req)');
+    expect(generate).toContain("else if (!accessCode)");
+    expect(generate).toContain('accessCode: user ? null : accessCode');
     expect(generate).toContain('reserveGeneration({ userId: user.id');
     expect(generate).not.toContain('accountAccessCode');
   });
