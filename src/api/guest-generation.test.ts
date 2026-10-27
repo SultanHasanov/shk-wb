@@ -18,4 +18,10 @@ describe('покупка QR-генерации без авторизации', (
     expect(generate).toContain("else if (!accessCode)");
     expect(generate).toContain('accessCode: user ? null : accessCode');
   });
+
+  it('показывает гостю поле для купленного кода', () => {
+    const page = read('src/pages/GeneratorPage.tsx');
+    expect(page).toContain("!auth.isAuthenticated && <Field label={t('Код доступа'");
+    expect(page).not.toContain('false && !bulkCustomMode');
+  });
 });

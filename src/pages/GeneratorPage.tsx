@@ -516,7 +516,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
 
           {/* Код доступа обязателен: генерация без него не проходит на сервере,
               поэтому поле показывается сразу, а не прячется за ссылкой. */}
-          {false && !bulkCustomMode && <><Field label={t('Код доступа', 'Қолжетімділік коды')} help={t('Код из личного кабинета или со страницы оплаты', 'Жеке кабинеттегі немесе төлем бетіндегі код')}>
+          {!bulkCustomMode && <>{!auth.isAuthenticated && <Field label={t('Код доступа', 'Қолжетімділік коды')} help={t('Код из личного кабинета или со страницы оплаты', 'Жеке кабинеттегі немесе төлем бетіндегі код')}>
             <Input
               maxLength={36}
               value={g.accessCode}
@@ -526,7 +526,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 localStorage.setItem('sticker_access_code', g.accessCode);
               }}
             />
-          </Field>
+          </Field>}
 
           <div className={s.remaining}>
             {access.isLoading && <Skeleton width="180px" />}
