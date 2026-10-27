@@ -970,22 +970,21 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
     await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}${kept}`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
-  if (result.variant !== 'box') {
-    await sendMessage(chatId, `${result.botCaption}\n\nКакие стикеры подготовить?`, { reply_markup: formatKeyboard(requestId) });
-    return;
-  }
-  // QR коробок не менялись: сразу отправляем прежний макет.
+  // Файл должен прийти сразу после списания. Для товарных стикеров отправляем
+  // прежний формат по умолчанию, а новый остаётся доступен кнопкой в предпросмотре.
+  // Раньше между списанием и выдачей был отдельный вопрос о формате: если Telegram
+  // не принимал это сообщение, пользователь оставался на экране «Генерирую…».
   try {
     await deliverGeneration(chatId, requestId, result, 'old');
   } catch (error) {
     console.warn('Telegram sticker delivery failed', error.message);
-    await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard([
-      [{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }],
-      [{ text: '🌐 История в кабинете', web_app: { url: publicUrl('/cabinet/history') } }],
-      MENU_ROW,
-    ]) }).catch(() => {});
+    const retryRows = result.variant === 'box'
+      ? [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], [{ text: '🌐 История в кабинете', web_app: { url: publicUrl('/cabinet/history') } }], MENU_ROW]
+      : [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], ...formatKeyboard(requestId).inline_keyboard];
+    await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard(retryRows) }).catch(() => {});
     return;
   }
+  if (result.variant !== 'box') return;
   // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
   if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) }).catch(() => {});
 }
