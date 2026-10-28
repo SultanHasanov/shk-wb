@@ -18,9 +18,22 @@
  * автоматически из отрендеренного аккордеона, поэтому не может разойтись с тем,
  * что видит посетитель.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
 export const ORIGIN = 'https://shk-wb.ru';
 
 export const SITE_NAME = 'ШК ВБ';
+
+/**
+ * Версии программ — единый источник src/data/releases.json (тот же файл читают
+ * страницы через src/data/releases.ts). Раньше softwareVersion в @graph был
+ * вшит константами и отставал от релизов; теперь берётся отсюда.
+ */
+const RELEASES = JSON.parse(
+  readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'src/data/releases.json'), 'utf8'),
+);
 
 /** Префикс казахской версии: /kz, /kz/program… (см. src/i18n/index.ts). */
 export const KZ_PREFIX = '/kz';
@@ -176,8 +189,7 @@ export const PUBLIC_PAGES = {
         url: `${ORIGIN}/program`,
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Windows 10, Windows 11',
-        // Держать в согласии с downloads/version.json
-        softwareVersion: '1.4.2',
+        softwareVersion: RELEASES.pvzHelper,
         inLanguage: 'ru-RU',
         description:
           'Программа для сотрудников ПВЗ: подбор кода клиента по номеру ячейки, ячейки и товары «В пути», отзывы, досье клиента, стикеры и учёт сотрудников.',
@@ -212,8 +224,7 @@ export const PUBLIC_PAGES = {
         url: `${ORIGIN}/cell-print`,
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Windows 10, Windows 11',
-        // Последний релиз: коммит 08f6c8c
-        softwareVersion: '1.1.1',
+        softwareVersion: RELEASES.cellPrint,
         inLanguage: 'ru-RU',
         description:
           'Программа для ПВЗ: работает в фоне вместе с WB_PVZ, находит ячейку после сканирования товара и отправляет этикетку на термопринтер.',
@@ -230,6 +241,28 @@ export const PUBLIC_PAGES = {
         },
       },
       breadcrumbs('/cell-print', 'Печать ячеек'),
+    ],
+  },
+
+  '/tarify': {
+    fallback: {
+      title: 'Тарифы и цены — генератор, Помощник ПВЗ, Печать ячеек — ШК ВБ',
+      description:
+        'Цены на генератор возвратных ШК и стикеров, тарифы программы «Помощник ПВЗ» и матрица лицензий «Печать ячеек». Оплата картой или СБП, скачивание бесплатное.',
+    },
+    ogType: 'website',
+    image: OG_GENERATOR,
+    graph: [
+      {
+        '@type': 'WebPage',
+        '@id': `${ORIGIN}/tarify#page`,
+        url: `${ORIGIN}/tarify`,
+        name: 'Тарифы и цены',
+        description:
+          'Цены генератора ШК и стикеров, тарифы «Помощника ПВЗ» и лицензий «Печати ячеек».',
+        inLanguage: 'ru-RU',
+      },
+      breadcrumbs('/tarify', 'Тарифы'),
     ],
   },
 
