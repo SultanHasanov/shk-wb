@@ -53,24 +53,35 @@ export function KeysPage() {
   const [params, setParams] = useSearchParams();
   const renewKey = (params.get('renew') || '').trim().toUpperCase();
   const renewClaimed = useRef('');
+  const [renewConfirm, setRenewConfirm] = useState('');
   const renewCellPrint = (asset: CellPrintAsset) => setCheckout({ kind: 'cell_print_license', targetKey: asset.key, deviceLimit: asset.deviceLimit, activeDevices: asset.devices.length, marketplaceScope: asset.marketplaceScope === 'ozon' || asset.marketplaceScope === 'both' ? asset.marketplaceScope : 'wb' });
   const assetsData = query.data?.assets;
+  const dropRenewParam = () => setParams(next => { next.delete('renew'); return next; }, { replace: true });
   useEffect(() => {
     if (!renewKey || !assetsData) return;
-    const dropParam = () => setParams(next => { next.delete('renew'); return next; }, { replace: true });
     const own = assetsData.find((asset): asset is CellPrintAsset => asset.type === 'cell_print' && asset.key === renewKey);
     if (own) {
       if (own.active) renewCellPrint(own);
       else toast(t('Ключ отключён — продлить его нельзя', 'Кілт өшірілген — оны ұзарту мүмкін емес'), 'error');
-      dropParam();
+      dropRenewParam();
       return;
     }
-    if (!renewKey.startsWith('CP-') || renewClaimed.current === renewKey) { dropParam(); return; }
-    renewClaimed.current = renewKey;
-    claimMutation.mutate({ kind: 'cell_print', value: renewKey }, {
-      onError: error => { toast(error.message || t('Не удалось добавить ключ', 'Кілтті қосу мүмкін болмады'), 'error'); dropParam(); },
-    });
+    // Ключа нет в аккаунте. Привязать чужой или ничейный ключ можно только по
+    // явному подтверждению в модалке — иначе ссылка вида ?renew=CP-… молча
+    // привязала бы произвольный ключ к аккаунту того, кто её открыл. После
+    // подтверждённой привязки эффект повторится уже с «own» и откроет продление.
+    if (!renewKey.startsWith('CP-') || renewClaimed.current === renewKey) { dropRenewParam(); return; }
+    setRenewConfirm(renewKey);
   }, [renewKey, assetsData]);
+  const confirmRenew = () => {
+    const key = renewConfirm;
+    setRenewConfirm('');
+    renewClaimed.current = key;
+    claimMutation.mutate({ kind: 'cell_print', value: key }, {
+      onError: error => { toast(error.message || t('Не удалось добавить ключ', 'Кілтті қосу мүмкін болмады'), 'error'); dropRenewParam(); },
+    });
+  };
+  const cancelRenew = () => { setRenewConfirm(''); dropRenewParam(); };
 
   if (query.isPending) return <div className="page"><CabinetLoading /></div>;
   if (query.isError) return <div className="page"><CabinetError error={query.error} retry={() => query.refetch()} /></div>;
@@ -132,6 +143,17 @@ export function KeysPage() {
 
     <Modal open={Boolean(devices)} onOpenChange={open => !open && setDevices(null)} title={t('Устройства ключа', 'Кілт құрылғылары')}>
       {devices?.devices.length ? <Table><thead><tr><th>{t('Устройство', 'Құрылғы')}</th><th>{t('Последняя активность', 'Соңғы белсенділік')}</th><th /></tr></thead><tbody>{devices.devices.map(device => <tr key={device.id}><td>{device.name}</td><td>{dateTime(device.lastSeenAt)}</td><td><DetachDeviceButton id={device.id} onDone={() => setDevices(null)} /></td></tr>)}</tbody></Table> : <EmptyState title={t('Устройств нет', 'Құрылғылар жоқ')} text={t('Они появятся после активации программы.', 'Олар бағдарлама белсендірілгеннен кейін пайда болады.')} />}
+    </Modal>
+
+    <Modal open={Boolean(renewConfirm)} onOpenChange={open => !open && cancelRenew()} title={t('Привязать ключ к аккаунту?', 'Кілтті аккаунтқа байланыстыру керек пе?')}>
+      <div className="stack">
+        <p>{t(`Ключ ${maskKey(renewConfirm)} ещё не привязан к вашему аккаунту. Привязать его к этому аккаунту и продлить?`, `${maskKey(renewConfirm)} кілті әлі аккаунтыңызға байланыспаған. Оны осы аккаунтқа байланыстырып, ұзарту керек пе?`)}</p>
+        <p className="muted">{t('Привязывайте только собственный ключ. Чужой ключ после привязки станет частью вашего аккаунта.', 'Тек өз кілтіңізді байланыстырыңыз. Бөтен кілт байланысқаннан кейін аккаунтыңыздың бөлігі болады.')}</p>
+        <div className="row">
+          <Button onClick={confirmRenew}>{t('Привязать и продлить', 'Байланыстырып, ұзарту')}</Button>
+          <Button variant="secondary" onClick={cancelRenew}>{t('Отмена', 'Болдырмау')}</Button>
+        </div>
+      </div>
     </Modal>
 
     {checkout && <LicenseCheckoutModal key={`${checkout.kind}:${'targetKey' in checkout ? checkout.targetKey ?? 'new' : 'software'}`} checkout={checkout} availableKopecks={query.data.referral.availableKopecks} onClose={() => setCheckout(null)} />}
