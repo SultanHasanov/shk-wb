@@ -76,6 +76,7 @@ async function accountAction(action,req,res){
   const user=await requireUser(req,res);
   if(!user)return;
   if(action==='keys'&&req.method==='GET'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-keys',limit:120,windowSeconds:600,key:user.id}))return;
     const device=String(req.query.device||'').toLowerCase();
     const rows=await supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(user.id)}&select=key,marketplace_scope,expires_at,duration_days,device_limit,active,activated_at,created_at,cell_print_activations(device_hash)&order=created_at.desc`);
     const email=String(user.email||'');
@@ -89,13 +90,22 @@ async function accountAction(action,req,res){
     });
   }
   if(action==='claim'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-claim',limit:20,windowSeconds:600,key:user.id}))return;
     const key=String(body.key||'').trim().toUpperCase();
     if(!/^CP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key))return res.status(400).json({error:'Проверьте ключ',code:'VALIDATION_ERROR'});
     try{await supabaseFetch('rpc/claim_user_asset',{method:'POST',body:JSON.stringify({p_user_id:user.id,p_kind:'cell_print',p_value:key})});}
-    catch(error){return res.status(409).json({error:'Ключ уже привязан к другому аккаунту',code:'KEY_TAKEN'});}
+    catch(error){
+      // Полный 12-значный ключ не перебирается, поэтому «чужой» и «не найден»
+      // различаем честно — это полезная подсказка пользователю, а не оракул.
+      const msg=activationMessage(error);
+      if(msg.includes('belongs to another'))return res.status(409).json({error:'Этот ключ привязан к другому аккаунту. Если он ваш — напишите в поддержку.',code:'KEY_OWNED'});
+      if(msg.includes('Asset not found'))return res.status(404).json({error:'Ключ не найден. Проверьте символы ключа.',code:'KEY_NOT_FOUND'});
+      return res.status(409).json({error:'Не удалось добавить ключ',code:'KEY_TAKEN'});
+    }
     return res.json({ok:true});
   }
   if(action==='logout'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-logout',limit:30,windowSeconds:600,key:user.id}))return;
     await account.logout(user._accessToken);
     return res.status(204).end();
   }

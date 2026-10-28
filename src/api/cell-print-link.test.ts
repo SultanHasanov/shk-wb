@@ -240,4 +240,42 @@ describe('привязка «Печати ячеек» к аккаунту', () 
     expect(res.statusCode).toBe(401);
     expect(res.body.code).toBe('DEVICE_REVOKED');
   });
+
+  function claimReq(key: string) {
+    return {
+      method: 'POST', query: { action: 'claim' },
+      body: { key },
+      headers: { authorization: 'Bearer tkn' }, socket: { remoteAddress: '127.0.0.1' },
+    };
+  }
+
+  it('claim чужого ключа → 409 KEY_OWNED', async () => {
+    mock({ claim_user_asset: { status: 400, body: { message: 'Asset belongs to another user' } } });
+    const res = response();
+    await handler(claimReq('CP-SOME-ONEE-LSE0'), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('KEY_OWNED');
+  });
+
+  it('claim несуществующего ключа → 404 KEY_NOT_FOUND', async () => {
+    mock({ claim_user_asset: { status: 400, body: { message: 'Asset not found' } } });
+    const res = response();
+    await handler(claimReq('CP-NONE-NONE-NONE'), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.code).toBe('KEY_NOT_FOUND');
+  });
+
+  it('claim при превышении лимита → 429, запрос к базе не идёт', async () => {
+    let claimCalled = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'u1' }), { status: 200 });
+      if (url.includes('consume_api_rate_limit')) return new Response('false', { status: 200 });
+      if (url.includes('claim_user_asset')) { claimCalled = true; return new Response('{}', { status: 200 }); }
+      return new Response('null', { status: 404 });
+    }));
+    const res = response();
+    await handler(claimReq('CP-AAAA-BBBB-CCCC'), res);
+    expect(res.statusCode).toBe(429);
+    expect(claimCalled).toBe(false);
+  });
 });
