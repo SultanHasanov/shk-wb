@@ -9,6 +9,15 @@ import { useDocumentMeta } from '../../lib/seo';
 import { LicenseCheckoutModal, type LicenseCheckout } from './LicenseCheckoutModal';
 import { type T, useT } from '../../i18n';
 
+/** Маска ключа для интерфейса: первый и последний сегменты видны, середина — точки.
+ *  CP-AAAA-BBBB-CCCC → CP-••••-••••-CCCC. Полный ключ остаётся у кнопки «Копировать»
+ *  (API не меняется — от полного ключа зависят программы). */
+function maskKey(key: string) {
+  const parts = key.split('-');
+  if (parts.length < 3) return key;
+  return [parts[0], ...parts.slice(1, -1).map(() => '••••'), parts[parts.length - 1]].join('-');
+}
+
 function assetStatus(asset: UserAsset, t: T) {
   if (!asset.active) return { label: t('Отключён', 'Өшірілген'), tone: 'error' as const };
   if (asset.type === 'cell_print' && asset.expiresAt && new Date(asset.expiresAt) < new Date()) {
@@ -92,6 +101,11 @@ export function KeysPage() {
       </div></Card>
     </div>
 
+    <p className="muted section" style={{ marginBottom: 0 }}>{t(
+      'Как войти в программу: откройте её → «Войти через сайт» → подтвердите вход на открывшейся странице. Либо войдите в программе почтой и паролем от этого кабинета.',
+      'Бағдарламаға кіру: оны ашыңыз → «Сайт арқылы кіру» → ашылған бетте кіруді растаңыз. Немесе бағдарламада осы кабинеттің поштасы мен құпиясөзімен кіріңіз.',
+    )}</p>
+
     <Card className="section"><div className="row">
       <Field label={t('Добавить ранее купленный ключ', 'Бұрын сатып алынған кілтті қосу')}><Input value={claim} onChange={event => setClaim(event.target.value.toUpperCase())} placeholder="CP-… или WBPK-…" /></Field>
       <Button variant="secondary" disabled={!claim} onClick={() => submitClaim(claim.startsWith('CP-') ? 'cell_print' : 'program')}>{t('Добавить', 'Қосу')}</Button>
@@ -102,7 +116,7 @@ export function KeysPage() {
       const used = asset.type === 'program' ? asset.used : asset.devices.length;
       const total = asset.type === 'program' ? asset.total : asset.deviceLimit;
       return <Card key={`${asset.type}:${asset.key}`}>
-        <div className="row"><strong className="mono">{asset.key}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast(t('Ключ скопирован', 'Кілт көшірілді'), 'success'); }}><Copy size={15} />{t('Копировать', 'Көшіру')}</Button><Badge>{asset.label}</Badge>{asset.type === 'cell_print' && <Badge>{marketplaceLabel(asset.marketplaceScope)}</Badge>}<Badge tone={status.tone}>{status.label}</Badge></div>
+        <div className="row"><strong className="mono">{maskKey(asset.key)}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast(t('Ключ скопирован', 'Кілт көшірілді'), 'success'); }}><Copy size={15} />{t('Копировать', 'Көшіру')}</Button><Badge>{asset.label}</Badge>{asset.type === 'cell_print' && <Badge>{marketplaceLabel(asset.marketplaceScope)}</Badge>}<Badge tone={status.tone}>{status.label}</Badge></div>
         <div className="grid grid-3 section">
           <div><strong>{asset.type === 'cell_print' ? t(`${asset.durationDays} дней`, `${asset.durationDays} күн`) : t('Без срока', 'Мерзімсіз')}</strong><div className="muted">{t('срок ключа', 'кілт мерзімі')}</div></div>
           <div><strong>{asset.type === 'cell_print' ? asset.expiresAt ? dateTime(asset.expiresAt) : t('После первой активации', 'Алғашқы белсендіруден кейін') : t(`${Math.max(0, asset.total - asset.used)} итераций`, `${Math.max(0, asset.total - asset.used)} итерация`)}</strong><div className="muted">{t('остаток / окончание', 'қалдық / аяқталуы')}</div></div>

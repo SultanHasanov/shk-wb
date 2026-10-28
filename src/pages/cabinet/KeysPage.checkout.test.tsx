@@ -62,6 +62,14 @@ describe('покупка и продление ключей в кабинете'
     expect(screen.getAllByRole('button', { name: /Купить (пакет|новый ключ)/ }).length).toBeGreaterThan(0);
   });
 
+  it('ключи в интерфейсе маскированы, полный ключ не показывается', async () => {
+    renderPage();
+    expect(await screen.findByText('CP-••••-••••-FFFF')).toBeInTheDocument();
+    expect(screen.getByText('WBPK-••••-••••-CCCC')).toBeInTheDocument();
+    expect(screen.queryByText('CP-DDDD-EEEE-FFFF')).not.toBeInTheDocument();
+    expect(screen.queryByText('WBPK-AAAA-BBBB-CCCC')).not.toBeInTheDocument();
+  });
+
   it('передаёт серверу ключ пополнения и возврат в кабинет', async () => {
     const user = userEvent.setup();
     renderPage();
