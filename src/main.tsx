@@ -9,6 +9,11 @@ import { initMetrika } from './lib/metrika';
 // Подключает все сабсеты Inter, включая кириллицу; браузер скачает только нужный
 // благодаря unicode-range в @font-face.
 import '@fontsource-variable/inter';
+// Моноширинный для кодов, номеров ячеек и сумм (--font-mono). Имя семейства —
+// «JetBrains Mono», совпадает с токеном; кириллица грузится по unicode-range.
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/600.css';
 import './styles/tokens.css';
 import './styles/global.css';
 const queryClient = new QueryClient({
