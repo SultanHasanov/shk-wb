@@ -2,14 +2,12 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import {
-  Check,
   CircleCheck,
   Download,
   KeyRound,
   LayoutGrid,
   Laptop,
   MessagesSquare,
-  Minus,
   Printer,
   Search,
   Send,
@@ -18,14 +16,16 @@ import {
   Users,
 } from 'lucide-react';
 import { api } from '../api/client';
-import { type AppPlans, useAppPlans } from '../api/app';
+import { useAppPlans } from '../api/app';
 import { Hero } from '../components/Hero';
 import { Section } from '../components/Section';
 import { Steps } from '../components/Steps';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { SpecList } from '../components/SpecList';
+import { AppPlansTable } from '../components/AppPlansTable';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
-import { Accordion, Alert, Button, Card, Checkbox, Segmented, Stat } from '../ui';
+import { Accordion, Alert, Button, Card, Checkbox, ScreenshotSlot, Stat } from '../ui';
+import { RELEASES } from '../data/releases';
 import {
   getLicensePack,
   iterationWord,
@@ -41,8 +41,8 @@ import { type T, useLocale, useLocalePath, useT } from '../i18n';
 
 type Payment = { confirmationUrl: string };
 
-/** Версия на странице — держать в согласии с downloads/version.json. */
-const APP_VERSION = '1.4.2';
+/** Витринный номер версии — из общего src/data/releases.json. */
+const APP_VERSION = RELEASES.pvzHelper;
 
 const features = (t: T) => [
   {
@@ -164,75 +164,6 @@ function scrollTo(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function monthsWord(n: number, t: T) {
-  if (n === 1) return t('1 месяц', '1 ай');
-  if (n < 5) return t(`${n} месяца`, `${n} ай`);
-  return t(`${n} месяцев`, `${n} ай`);
-}
-
-function PlanCards({ plans }: { plans: AppPlans }) {
-  const t = useT();
-  const lp = useLocalePath();
-  const { formatTotal } = useMoney();
-  const [months, setMonths] = useState(1);
-
-  return (
-    <>
-      <div className={s.plansHead}>
-        <Segmented
-          label={t('Срок подписки', 'Жазылым мерзімі')}
-          value={String(months)}
-          onChange={v => setMonths(Number(v))}
-          options={plans.terms.map(term => ({
-            value: String(term.months),
-            label: term.discountPercent ? `${monthsWord(term.months, t)} −${term.discountPercent}%` : monthsWord(term.months, t),
-          }))}
-        />
-      </div>
-      <div className={s.plans}>
-        {plans.plans.map(plan => {
-          const price = plan.prices[String(months)];
-          const popular = plan.id === 'standard';
-          return (
-            <div key={plan.id} className={`${s.plan} ${popular ? s.planPopular : ''}`}>
-              {popular && <span className={s.ribbon}>{t('Чаще всего берут', 'Ең жиі алады')}</span>}
-              <h3 className={s.planName}>{plan.title}</h3>
-              <p className="muted" style={{ margin: 0 }}>{plan.summary}</p>
-              <div>
-                <div className={s.planPrice}>{formatTotal(price)}</div>
-                <div className={s.planPer}>
-                  {months > 1
-                    ? t(`за ${monthsWord(months, t)} · ${formatTotal(Math.round(price / months))} в месяц`, `${monthsWord(months, t)} · айына ${formatTotal(Math.round(price / months))}`)
-                    : t('в месяц', 'айына')}
-                </div>
-              </div>
-              <ul className={s.limits}>
-                <li>{t(`${plan.codes} подборов кода в месяц`, `Айына ${plan.codes} код іріктеу`)}</li>
-                {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров в месяц`, `Айына ${plan.stickers} стикер`)}</li>}
-                <li>{plan.devices === 1 ? t('1 компьютер', '1 компьютер') : t(`До ${plan.devices} компьютеров`, `${plan.devices} компьютерге дейін`)}</li>
-              </ul>
-              <ul className={s.planFeatures}>
-                {Object.entries(plans.features).map(([id, title]) => {
-                  const on = plan.features.includes(id);
-                  return (
-                    <li key={id} className={on ? '' : s.off}>
-                      {on ? <Check size={16} className={s.featureCheck} /> : <Minus size={16} />}
-                      {title}
-                    </li>
-                  );
-                })}
-              </ul>
-              <Link className={s.planAction} to={lp('/cabinet/subscription')}>
-                <Button variant={popular ? 'primary' : 'secondary'}>{t('Оформить', 'Рәсімдеу')}</Button>
-              </Link>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
 export function ProgramPage() {
   const { formatTotal, formatPerUnit } = useMoney();
   const t = useT();
@@ -332,6 +263,14 @@ export function ProgramPage() {
         </div>
       </div>
 
+      <Section eyebrow={t('Как выглядит', 'Қалай көрінеді')} title={t('Всё на одном экране', 'Бәрі бір экранда')}>
+        <ScreenshotSlot
+          alt={t('Главное окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының басты терезесі')}
+          caption={t('Ячейки, товары «В пути» и поиск клиента в одном окне', 'Ұяшықтар, «Жолдағы» тауарлар және клиентті іздеу бір терезеде')}
+          ratio="16 / 9"
+        />
+      </Section>
+
       <Section
         tone="band"
         eyebrow={t('Возможности', 'Мүмкіндіктер')}
@@ -363,25 +302,7 @@ export function ProgramPage() {
           'Лимиттер ай сайын жаңарады, бірнеше айға алдын ала төлегенде де. Тарифті кез келген уақытта көтеруге болады — қалған күндер қайта есептеледі.',
         )}
       >
-        {plans.data?.freeMode && (
-          <Alert tone="success">
-            {t(
-              'Сейчас все функции программы бесплатны: скачайте её и войдите аккаунтом сайта — тариф Про включится сам, подборы не списываются.',
-              'Қазір бағдарламаның барлық функциялары тегін: оны жүктеп алып, сайт аккаунтымен кіріңіз — Про тарифі өзі қосылады, іріктеулер есептелмейді.',
-            )}
-          </Alert>
-        )}
-        {plans.data ? (
-          <PlanCards plans={plans.data} />
-        ) : plans.isError ? (
-          <Alert tone="error">
-            {t('Не удалось загрузить тарифы. Их можно посмотреть в ', 'Тарифтерді жүктеу мүмкін болмады. Оларды ')}
-            <Link className="accent" to={lp('/cabinet/subscription')}>{t('кабинете', 'кабинеттен')}</Link>
-            {t('.', ' көруге болады.')}
-          </Alert>
-        ) : (
-          <p className="muted">{t('Загружаем тарифы…', 'Тарифтер жүктелуде…')}</p>
-        )}
+        <AppPlansTable />
       </Section>
 
       <Section
