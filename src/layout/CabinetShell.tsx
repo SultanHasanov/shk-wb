@@ -196,7 +196,9 @@ export const CabinetShell = observer(() => {
         } catch (error) {
           if (
             error instanceof ApiError &&
-            (error.code === 'ASSET_OWNED' || error.code === 'ASSET_NOT_FOUND')
+            (error.code === 'ASSET_UNAVAILABLE' ||
+              error.code === 'ASSET_OWNED' ||
+              error.code === 'ASSET_NOT_FOUND')
           ) {
             if (!cancelled) markProcessed(code);
             return false;

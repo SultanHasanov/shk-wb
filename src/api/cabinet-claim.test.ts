@@ -54,24 +54,39 @@ describe('анти-перебор при добавлении ключа (claim)
     expect(consume).toHaveLength(0);
   });
 
-  it('чужой ключ → ASSET_OWNED и расход лимита по IP и пользователю', async () => {
+  it('чужой ключ → ASSET_UNAVAILABLE (не раскрываем существование) и расход лимита', async () => {
     const consume: any[] = [];
     mock(true, { message: 'Asset belongs to another user' }, consume);
     const res = response();
     await handler(claimReq({ kind: 'cell_print', value: 'CP-SOME-ONEE-LSE0' }), res);
-    expect(res.statusCode).toBe(409);
-    expect(res.body.code).toBe('ASSET_OWNED');
+    expect(res.statusCode).toBe(404);
+    expect(res.body.code).toBe('ASSET_UNAVAILABLE');
     expect(consume.map(c => c.p_scope).sort()).toEqual(['claim-ip', 'claim-user']);
   });
 
-  it('6-значный код: неудача расходует отдельный лимит claim-code', async () => {
+  it('6-значный код: «не найден» тоже ASSET_UNAVAILABLE и отдельный лимит claim-code', async () => {
     const consume: any[] = [];
     mock(true, { message: 'Asset not found' }, consume);
     const res = response();
     await handler(claimReq({ kind: 'sticker', value: '123456' }), res);
     expect(res.statusCode).toBe(404);
-    expect(res.body.code).toBe('ASSET_NOT_FOUND');
+    expect(res.body.code).toBe('ASSET_UNAVAILABLE');
     expect(consume.map(c => c.p_scope).sort()).toEqual(['claim-code', 'claim-ip', 'claim-user']);
+  });
+
+  it('заказ: коды остаются различимыми (привязка гостевых заказов в CabinetShell)', async () => {
+    const owned: any[] = [];
+    mock(true, { message: 'Asset belongs to another user' }, owned);
+    let res = response();
+    await handler(claimReq({ kind: 'order', value: 'tok-foreign' }), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('ASSET_OWNED');
+
+    mock(true, { message: 'Asset not found' }, []);
+    res = response();
+    await handler(claimReq({ kind: 'order', value: 'tok-missing' }), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.code).toBe('ASSET_NOT_FOUND');
   });
 
   it('превышение лимита → 429 TOO_MANY_ATTEMPTS, запрос к claim не идёт', async () => {

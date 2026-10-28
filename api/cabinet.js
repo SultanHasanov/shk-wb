@@ -987,9 +987,23 @@ module.exports = async function handler(req, res) {
           }),
         });
       } catch (error) {
-        // Неудача (чужой/не найден/не подтверждён) расходует лимит; ответ клиенту
-        // формирует прежний внешний catch — коды ASSET_OWNED/ASSET_NOT_FOUND те же.
+        // Неудача (чужой/не найден/не подтверждён) расходует лимит; успех — нет.
         await recordFailures(req, dims);
+        // Ключи и коды подбираемы: «чужой» и «не найден» отдаём ОДНИМ ответом
+        // ASSET_UNAVAILABLE, иначе по разнице кодов можно перебором узнавать, какие
+        // ключи существуют. Заказ опознаётся по непубличному UUID-токену (перебор
+        // невозможен), и привязка гостевых заказов в CabinetShell различает «чужой»
+        // (выбросить) и «ещё не оплачен» (повторить) — для него коды прежние.
+        const info = JSON.stringify(error.details || '');
+        if (
+          parsed.data.kind !== 'order' &&
+          (info.includes('belongs to another') || info.includes('Asset not found'))
+        )
+          return res.status(404).json({
+            error:
+              'Код или ключ не найден или уже используется другим аккаунтом. Если это ваш ключ — напишите в поддержку.',
+            code: 'ASSET_UNAVAILABLE',
+          });
         throw error;
       }
       return res.status(201).json(result);
