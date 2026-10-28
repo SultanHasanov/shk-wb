@@ -18,6 +18,16 @@ export const PACKAGE_PRICES: Readonly<Record<number, number>> = Object.freeze({
   500: 135,
 });
 
+/** Пакеты генераций по конкретному номеру. Сверяются с server/_payments.js тестом. */
+export const CUSTOM_GENERATION_PACKAGES: Readonly<Record<number, number>> = Object.freeze({
+  1: 7.5,
+  10: 50,
+  20: 90,
+  30: 120,
+  50: 175,
+  100: 300,
+});
+
 /**
  * Пополнение баланса из Telegram-бота. Источник — server/_wallet.js (MIN_TOPUP, MAX_TOPUP,
  * TOPUP_BONUS_STEPS), сверяется спеком pricing.test.ts.

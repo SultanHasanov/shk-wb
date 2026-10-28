@@ -5,7 +5,7 @@ const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const { generateStickers, selectAccessCode } = require('./_sticker-generation');
 const { BATCH_QUANTITY, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
-const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
+const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
 const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
@@ -600,6 +600,7 @@ function wizardView(state, draft) {
     return { text: `${trail}${error}<b>Выберите режим</b>`, rows: [
       [{ text: 'Пачка 50 — 20 ₽', callback_data: 'gen:mode:range' }],
       [{ text: 'По конкретному номеру — 7,50 ₽', callback_data: 'gen:mode:custom' }],
+      [{ text: '💎 Пакеты по номеру — от 3 ₽/шт.', callback_data: 'shop:gen' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
@@ -1513,6 +1514,17 @@ async function ownLicenseKey(userId) {
  */
 async function resolveShopItem(userId, parts) {
   const [kind, a, b, c, d] = parts;
+  if (kind === 'gen') {
+    const count = Number(a), price = CUSTOM_GENERATION_PACKAGES[count];
+    if (!price || count <= 1) return { error: 'Такого пакета нет.' };
+    const target = await ownTopupCode(userId);
+    return {
+      title: `<b>🏷 ${count} поштучных генераций</b>\nПо ${wallet.formatRub(price / count)} за номер`,
+      priceRub: price, productKind: 'stickers', back: 'shop:gen',
+      fields: { custom_quantity: count, ...(target ? { renewal_target_key: target } : {}) },
+      snapshot: { packs: [{ quantity: count, unit: price / count, total: price }], units: count, total: price },
+    };
+  }
   if (kind === 'helper') {
     const months = Number(b), snap = orderSnapshot(a, months);
     if (!snap) return { error: 'Такого тарифа нет.' };
@@ -1578,9 +1590,21 @@ async function showShop(from, chatId, messageId, parts) {
     return showScreen(chatId, messageId, `<b>🛒 Купить с баланса</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
       [{ text: '🖥 Подписка «Помощник ПВЗ»', callback_data: 'shop:helper' }],
       [{ text: '🖨 Ключ «Печать ячеек»', callback_data: 'shop:cp' }],
+      [{ text: '🏷 Пакеты генераций по номеру', callback_data: 'shop:gen' }],
       [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
       [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
       [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
+    ]) });
+  }
+  if (kind === 'gen' && !a) {
+    const target = await ownTopupCode(userId);
+    const targetLine = target ? `\nПакет добавится к вашему коду <code>${escapeHtml(target)}</code>.` : '\nПосле оплаты получите код доступа.';
+    return showScreen(chatId, messageId, `<b>🏷 Пакеты генераций по конкретному номеру</b>${targetLine}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+      ...Object.entries(CUSTOM_GENERATION_PACKAGES)
+        .map(([count, price]) => [Number(count), price])
+        .filter(([count]) => count > 1)
+        .map(([count, price]) => [{ text: `${count} шт. — ${price} ₽ · по ${wallet.formatRub(price / count)}`, callback_data: `shop:gen:${count}` }]),
+      back('shop:home'),
     ]) });
   }
   if (kind === 'helper' && !a) {
@@ -1704,6 +1728,8 @@ async function payShopItem(from, chatId, messageId, nonce, parts) {
     done = item.renewal
       ? `Ключ <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней.`
       : `Ваш ключ: <code>${escapeHtml(order.cell_print_license_key)}</code>\nСрок пойдёт с первой активации.`;
+  } else if (item.productKind === 'stickers') {
+    done = `+${item.fields.custom_quantity} генераций начислено на код <code>${escapeHtml(order.access_code)}</code>.`;
   } else {
     done = `+${item.fields.license_iterations} подборов — уже в «Помощнике ПВЗ».`;
   }

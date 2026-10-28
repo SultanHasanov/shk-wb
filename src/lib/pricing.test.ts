@@ -36,7 +36,7 @@ function readFlatTable(name: string): Record<string, number> {
   if (!match) throw new Error(`${name} не найдены в server/_payments.js`);
 
   const prices: Record<string, number> = {};
-  for (const [, qty, total] of match[1].matchAll(/(\d+)\s*:\s*(\d+)/g)) {
+  for (const [, qty, total] of match[1].matchAll(/(\d+)\s*:\s*(\d+(?:\.\d+)?)/g)) {
     prices[qty] = Number(total);
   }
   return prices;
@@ -91,6 +91,14 @@ describe('цены пакетов', () => {
 
   it('падает на неизвестном пакете', () => {
     expect(() => getPack(77)).toThrow('Нет пакета на 77 генераций');
+  });
+});
+
+describe('пакеты поштучной генерации', () => {
+  it('совпадают с серверными ценами', async () => {
+    const { CUSTOM_GENERATION_PACKAGES } = await import('./pricing');
+    expect(CUSTOM_GENERATION_PACKAGES).toEqual(readFlatTable('CUSTOM_GENERATION_PACKAGES'));
+    expect(CUSTOM_GENERATION_PACKAGES).toEqual({ 1: 7.5, 10: 50, 20: 90, 30: 120, 50: 175, 100: 300 });
   });
 });
 

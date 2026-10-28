@@ -6,6 +6,9 @@ const { notifyAdminOrder } = require('./_admin-alerts');
 const { ADDONS } = require('./_app-plans');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
+// Поштучная генерация по введённому пользователем номеру. Массовая пачка
+// из 50 автоматически выделенных кодов за 20 ₽ остаётся отдельным продуктом.
+const CUSTOM_GENERATION_PACKAGES = Object.freeze({ 1:7.5, 10:50, 20:90, 30:120, 50:175, 100:300 });
 const LICENSE_PRICES = Object.freeze({ 1:25, 3:40, 5:50, 10:90, 20:150 });
 // «Кто поставил оценку» в Telegram-боте: цена за одного автора, списывается с баланса
 // (сама сумма списания зашита в bot_review_spend, миграция 20261023_wallet.sql — менять вместе).
@@ -151,4 +154,4 @@ async function notifyCompleted(order){
     }
   }
 }
-module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };
+module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, CUSTOM_GENERATION_PACKAGES, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };

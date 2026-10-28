@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { CircleCheck } from 'lucide-react';
 import { Alert, Button, Card, Checkbox, Field, Input, Modal } from '../ui';
 import {
+  CUSTOM_GENERATION_PACKAGES,
   formatTotal as formatRub,
   getPack,
   HEADLINE_PACK_LIST,
@@ -268,14 +269,16 @@ export const PricingPacks = observer(() => {
   const lp = useLocalePath();
   const { auth, generator } = useStores();
   const [selectedMode, setSelectedMode] = useState<'custom' | 'batch' | null>(null);
+  const [selectedQuantity, setSelectedQuantity] = useState(1);
   const [accepted, setAccepted] = useState(false);
-  const selectedPrice = selectedMode === 'batch' ? 20 : 7.5;
+  const selectedPrice = selectedMode === 'batch' ? 20 : CUSTOM_GENERATION_PACKAGES[selectedQuantity];
   const checkout = useMutation({
     mutationFn: () => api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
       method: 'POST',
       body: JSON.stringify({
         productKind: 'stickers',
         guestGenerationMode: selectedMode,
+        guestGenerationQuantity: selectedMode === 'custom' ? selectedQuantity : undefined,
         accepted,
         returnTo: 'public',
       }),
@@ -288,13 +291,9 @@ export const PricingPacks = observer(() => {
 
   const choose = (mode: 'custom' | 'batch') => {
     generator.setMode(mode === 'batch' ? 'range' : 'custom');
+    if (mode === 'custom') setSelectedQuantity(1);
     setAccepted(false);
     setSelectedMode(mode);
-  };
-
-  const goToGenerator = () => {
-    setSelectedMode(null);
-    document.getElementById('generator')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   return (
@@ -302,14 +301,14 @@ export const PricingPacks = observer(() => {
       id="packages"
       align="center"
       eyebrow={t('Тарифы', 'Тарифтер')}
-      title={t('Простые цены без пакетов', 'Пакетсіз қарапайым бағалар')}
+      title={t('Выгоднее пакетами', 'Пакетпен тиімдірек')}
       lead={t(
-        'Пополните общий баланс на любую сумму от 20 ₽ и оплачивайте только нужную генерацию — одинаково на сайте и в Telegram-боте.',
-        'Ортақ балансты 20 ₽-ден бастап кез келген сомаға толтырып, тек қажетті генерация үшін төлеңіз — сайтта да, Telegram-ботта да.',
+        'Поштучная генерация по конкретному номеру — от 3 ₽. Чем больше пакет, тем ниже цена одной генерации.',
+        'Нақты нөмір бойынша генерация — 3 ₽-ден. Пакет неғұрлым үлкен болса, бір генерация соғұрлым арзан.',
       )}
     >
       <div className={s.grid}>
-        <button type="button" className={s.pack} onClick={() => choose('custom')}><strong>7,50 ₽</strong><span>{t('По конкретному номеру', 'Нақты нөмір бойынша')}</span></button>
+        <button type="button" className={s.pack} onClick={() => choose('custom')}><strong>{t('от 3 ₽', '3 ₽-ден')}</strong><span>{t('По конкретному номеру · пакеты до 100', 'Нақты нөмір бойынша · 100-ге дейін')}</span></button>
         <button type="button" className={s.pack} onClick={() => choose('batch')}><strong>20 ₽</strong><span>{t('Пачка из 50 кодов · один PDF', '50 кодтан тұратын пакет · бір PDF')}</span></button>
       </div>
       {auth.isAuthenticated && <div className={s.checkout}><Link to="/cabinet/packages"><Button size="lg">{t('Пополнить баланс', 'Балансты толықтыру')}</Button></Link></div>}
@@ -320,21 +319,38 @@ export const PricingPacks = observer(() => {
         title={t('Способ оплаты', 'Төлем тәсілі')}
         description={selectedMode === 'batch'
           ? t('50 кодов одним PDF за 20 ₽', '50 код бір PDF-те 20 ₽')
-          : t('Один код по конкретному номеру за 7,50 ₽', 'Нақты нөмір бойынша бір код 7,50 ₽')}
+          : t(`${selectedQuantity} генераций по конкретным номерам`, `Нақты нөмірлер бойынша ${selectedQuantity} генерация`)}
       >
         <div className="stack">
+          {selectedMode === 'custom' && (
+            <div className={s.packageTable} role="radiogroup" aria-label={t('Количество генераций', 'Генерациялар саны')}>
+              {Object.entries(CUSTOM_GENERATION_PACKAGES).map(([quantityText, total]) => {
+                const quantity = Number(quantityText);
+                const perUnit = total / quantity;
+                const discount = Math.round((1 - total / (7.5 * quantity)) * 100);
+                return (
+                  <button
+                    key={quantity}
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedQuantity === quantity}
+                    className={[s.packageOption, selectedQuantity === quantity && s.packageOptionActive].filter(Boolean).join(' ')}
+                    onClick={() => setSelectedQuantity(quantity)}
+                  >
+                    <strong>{quantity} шт.</strong>
+                    <span>{formatCheckoutRub(total)}</span>
+                    <small>{formatCheckoutRub(perUnit)} / шт.{discount > 0 ? ` · −${discount}%` : ''}</small>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className={s.confirmRow}>
             <span className="muted">{t('К оплате', 'Төлеуге')}</span>
             <span className={s.confirmTotal}>{formatCheckoutRub(selectedPrice)}</span>
           </div>
 
-          {auth.isAuthenticated ? (
-            <>
-              <Alert tone="info">{t('Сумма спишется с общего баланса при создании QR-кода.', 'QR-код жасаған кезде сома ортақ баланстан есептен шығарылады.')}</Alert>
-              <Button onClick={goToGenerator}>{t('Оплатить с баланса', 'Баланстан төлеу')}</Button>
-            </>
-          ) : (
-            <>
+          <>
               <Card>
                 <strong>{t('Банковская карта или СБП', 'Банк картасы немесе СБП')}</strong>
                 <span className="muted">{t('Безопасная оплата через ЮKassa', 'ЮKassa арқылы қауіпсіз төлем')}</span>
@@ -349,8 +365,7 @@ export const PricingPacks = observer(() => {
                 {t('Перейти к оплате', 'Төлемге өту')}
               </Button>
               {checkout.isError && <Alert tone="error">{checkout.error.message}</Alert>}
-            </>
-          )}
+          </>
         </div>
       </Modal>
     </Section>

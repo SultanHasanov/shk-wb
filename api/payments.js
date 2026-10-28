@@ -6,6 +6,7 @@ const { getKztRate } = require('../server/_partners');
 const {
   CELL_PRINT_PRICES,
   completeOrder,
+  CUSTOM_GENERATION_PACKAGES,
   hasYookassa,
   LICENSE_PRICES,
   PACKAGE_PRICES,
@@ -143,14 +144,18 @@ module.exports = async function handler(req, res) {
           : cellKinds.includes(requestedKind)
             ? requestedKind
             : 'stickers';
-      // A guest cannot own the shared wallet, but may still pay for the exact
-      // generation they are about to make. Fulfil it through the existing
-      // ownerless access-code flow so no account or new persistent identity is
-      // created. Signed-in customers keep using the wallet flow below.
-      const guestGenerationMode = !user && productKind === 'stickers'
+      // Direct generation packages are available both to guests and signed-in
+      // customers. Guests receive an ownerless access code; for an authenticated
+      // checkout the same fulfilment flow attaches the resulting code to them.
+      const guestGenerationMode = productKind === 'stickers'
         ? String(req.body?.guestGenerationMode || '')
         : '';
-      const isGuestGeneration = ['custom', 'batch'].includes(guestGenerationMode);
+      const requestedGuestQuantity = Number(req.body?.guestGenerationQuantity || 1);
+      const guestGenerationQuantity = guestGenerationMode === 'batch' ? 50 : requestedGuestQuantity;
+      const isGuestGeneration = guestGenerationMode === 'batch' || (
+        guestGenerationMode === 'custom' &&
+        Object.prototype.hasOwnProperty.call(CUSTOM_GENERATION_PACKAGES, guestGenerationQuantity)
+      );
       if (productKind === 'stickers' && !isGuestGeneration) {
         return res.status(400).json({ error: 'Пакеты генераций больше не продаются. Пополните баланс и оплатите генерацию при создании.', code: 'PACKAGES_DISABLED' });
       }
@@ -162,7 +167,7 @@ module.exports = async function handler(req, res) {
         Number(req.body?.customQuantity || 0),
       ].filter(Boolean);
       const stickerPacks = isGuestGeneration
-        ? [guestGenerationMode === 'batch' ? 50 : 1]
+        ? [guestGenerationQuantity]
         : Number(req.body?.quantity) > 0 ? [Number(req.body.quantity)] : legacyPacks;
       const licenseIterations = Number(req.body?.licenseIterations || 0);
       const cellDays = Number(req.body?.durationDays || 0),
@@ -240,7 +245,9 @@ module.exports = async function handler(req, res) {
         }
       }
       const allowed = value =>
-        Number.isInteger(value) && Object.prototype.hasOwnProperty.call(PACKAGE_PRICES, value);
+        Number.isInteger(value) && (isGuestGeneration
+          ? value === guestGenerationQuantity
+          : Object.prototype.hasOwnProperty.call(PACKAGE_PRICES, value));
       if (productKind === 'stickers' && (!stickerPacks.length || !stickerPacks.every(allowed)))
         return res.status(400).json({ error: 'Выберите один из доступных пакетов' });
       if (
@@ -347,12 +354,18 @@ module.exports = async function handler(req, res) {
           : isGuestGeneration
             ? {
                 packs: [{
-                  quantity: guestGenerationMode === 'batch' ? 50 : 1,
-                  unit: guestGenerationMode === 'batch' ? 0.4 : 7.5,
-                  total: guestGenerationMode === 'batch' ? 20 : 7.5,
+                  quantity: guestGenerationQuantity,
+                  unit: guestGenerationMode === 'batch'
+                    ? 0.4
+                    : CUSTOM_GENERATION_PACKAGES[guestGenerationQuantity] / guestGenerationQuantity,
+                  total: guestGenerationMode === 'batch'
+                    ? 20
+                    : CUSTOM_GENERATION_PACKAGES[guestGenerationQuantity],
                 }],
-                units: guestGenerationMode === 'batch' ? 50 : 1,
-                total: guestGenerationMode === 'batch' ? 20 : 7.5,
+                units: guestGenerationQuantity,
+                total: guestGenerationMode === 'batch'
+                  ? 20
+                  : CUSTOM_GENERATION_PACKAGES[guestGenerationQuantity],
                 guestGenerationMode,
               }
             : await pricing(stickerPacks);
@@ -385,8 +398,12 @@ module.exports = async function handler(req, res) {
         idempotence = crypto.randomUUID();
       const orderPayload = {
         public_token: token,
-        range_quantity: productKind === 'stickers' ? stickerPacks[0] || 0 : 0,
-        custom_quantity: productKind === 'stickers' ? stickerPacks[1] || 0 : 0,
+        range_quantity: productKind === 'stickers'
+          ? isGuestGeneration ? (guestGenerationMode === 'batch' ? guestGenerationQuantity : 0) : stickerPacks[0] || 0
+          : 0,
+        custom_quantity: productKind === 'stickers'
+          ? isGuestGeneration ? (guestGenerationMode === 'custom' ? guestGenerationQuantity : 0) : stickerPacks[1] || 0
+          : 0,
         amount: calculated.total,
         gross_amount: grossAmount,
         pricing_snapshot: calculated,

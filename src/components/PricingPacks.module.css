@@ -170,3 +170,41 @@
   font-size: var(--fs-24);
   font-weight: 700;
 }
+
+.packageTable {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.packageOption {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.packageOption:hover,
+.packageOptionActive {
+  border-color: var(--accent);
+}
+
+.packageOptionActive {
+  box-shadow: var(--ring);
+}
+
+.packageOption small {
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  .packageTable {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
