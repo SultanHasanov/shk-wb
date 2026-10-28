@@ -1030,6 +1030,29 @@ button.priceCell:hover {
   margin-bottom: var(--sp-4);
 }
 
+/* На телефоне модалка — нижняя шторка: ближе к большому пальцу, привычнее в
+   мобильном приложении. Остаётся тем же Radix Dialog, меняется только раскладка. */
+@media (max-width: 640px) {
+  .dialog {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    transform: none;
+    width: 100%;
+    max-width: none;
+    max-height: 88vh;
+    border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+    padding-bottom: calc(var(--sp-6) + var(--safe-b));
+    animation: sheetUp var(--dur-slow) var(--ease);
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+}
+
 @keyframes fade {
   from {
     opacity: 0;
@@ -1091,4 +1114,142 @@ button.priceCell:hover {
     right: var(--sp-4);
     bottom: var(--sp-4);
   }
+}
+
+/* ============ TileGroup ============ */
+.tileGroup {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  text-align: left;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  min-height: var(--tap);
+  transition: var(--dur) var(--ease);
+}
+
+.tile:hover {
+  border-color: var(--border-strong);
+}
+
+.tileActive {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tileMedia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--sp-2);
+  color: var(--accent);
+}
+
+.tileLabel {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-14);
+  color: var(--text);
+}
+
+.tileActive .tileLabel {
+  color: var(--accent-dark);
+}
+
+.tileDesc {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  line-height: var(--lh-snug);
+}
+
+/* ============ ScreenshotSlot ============ */
+.shot {
+  margin: 0;
+  width: 100%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+}
+
+.shotImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shotPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-4);
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: inherit;
+  color: var(--text-tertiary);
+}
+
+.shotCap {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.shotHint {
+  font-size: var(--fs-11);
+  color: var(--text-tertiary);
+}
+
+.shotCaption {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+/* ============ AnswerBlock ============ */
+.answer {
+  max-width: 70ch;
+}
+
+.answerQ {
+  font-size: var(--fs-20);
+  margin-bottom: var(--sp-2);
+}
+
+.answerA {
+  color: var(--text);
+  line-height: var(--lh-normal);
+  margin-bottom: var(--sp-3);
+}
+
+/* ============ BalanceChip ============ */
+.balanceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  font-size: var(--fs-13);
+}
+
+.balanceLabel {
+  color: var(--text-muted);
+}
+
+.balanceValue {
+  font-weight: var(--fw-bold);
+  color: var(--text);
 }
