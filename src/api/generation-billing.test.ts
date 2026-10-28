@@ -13,6 +13,7 @@ const generateApi = readFileSync(resolve(process.cwd(), 'api/stickers/generate.j
 const generationService = readFileSync(resolve(process.cwd(), 'server/_sticker-generation.js'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261101_generation_wallet_tariffs.sql'), 'utf8');
 const packagePriorityMigration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261102_generation_package_priority.sql'), 'utf8');
+const packageModeBackfill = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261103_generation_package_mode_backfill.sql'), 'utf8');
 
 describe('оплата новых генераций', () => {
   it('фиксирует обычные цены и разовую скидку 20%', () => {
@@ -54,5 +55,8 @@ describe('оплата новых генераций', () => {
     expect(packagePriorityMigration).toContain('(generation_mode=p_mode or generation_mode is null)');
     expect(packagePriorityMigration).toContain("purchase_mode:='custom'");
     expect(packagePriorityMigration).toContain("purchase_mode:='batch'");
+    expect(packageModeBackfill).toContain("when has_custom and not has_batch then 'custom'");
+    expect(packageModeBackfill).toContain("when has_batch and not has_custom then 'batch'");
+    expect(packageModeBackfill).toContain('a.generation_used<a.generation_limit');
   });
 });
