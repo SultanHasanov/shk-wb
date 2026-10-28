@@ -190,4 +190,54 @@ describe('привязка «Печати ячеек» к аккаунту', () 
     // старый путь не передаёт владельца — активация остаётся анонимной
     expect(calls[0]).not.toHaveProperty('p_user');
   });
+
+  const session = { access_token: 'at', refresh_token: 'rt', expires_in: 3600, expires_at: 9999, user: { id: 'u1' } };
+
+  it('вход по паролю с deviceHash регистрирует ПК в реестре аккаунта', async () => {
+    const calls: any[] = [];
+    mock({
+      'token?grant_type=password': { body: session },
+      cell_print_register_device: (b) => { calls.push(b); return { body: { revoked: false } }; },
+    });
+    const res = response();
+    await handler({
+      method: 'POST', query: { action: 'login' },
+      body: { email: 'pvz@shk.ru', password: 'secret12', deviceHash: DEVICE, deviceName: 'ПК Стол', appVersion: '2.2.0' },
+      headers: {}, socket: { remoteAddress: '127.0.0.1' },
+    }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.session.access_token).toBe('at');
+    expect(calls[0]).toMatchObject({ p_user: 'u1', p_name: 'ПК Стол', p_version: '2.2.0' });
+  });
+
+  it('старый клиент без deviceHash входит как раньше, ПК не регистрируется', async () => {
+    const calls: any[] = [];
+    mock({
+      'token?grant_type=password': { body: session },
+      cell_print_register_device: (b) => { calls.push(b); return { body: { revoked: false } }; },
+    });
+    const res = response();
+    await handler({
+      method: 'POST', query: { action: 'login' },
+      body: { email: 'pvz@shk.ru', password: 'secret12' },
+      headers: {}, socket: { remoteAddress: '127.0.0.1' },
+    }, res);
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refresh с deviceHash отозванного ПК → 401 DEVICE_REVOKED', async () => {
+    mock({
+      'token?grant_type=refresh_token': { body: session },
+      cell_print_register_device: { body: { revoked: true } },
+    });
+    const res = response();
+    await handler({
+      method: 'POST', query: { action: 'refresh' },
+      body: { refreshToken: 'rt', deviceHash: DEVICE },
+      headers: {}, socket: { remoteAddress: '127.0.0.1' },
+    }, res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.code).toBe('DEVICE_REVOKED');
+  });
 });

@@ -28,6 +28,16 @@ function accountError(res,error){
   if(error.code&&error.status)return res.status(error.status).json({error:error.message,code:error.code});
   console.error(error);return res.status(502).json({error:'Сервис временно недоступен'});
 }
+// Новые версии «Печати ячеек» присылают deviceHash при входе и refresh. Регистрируем
+// ПК в реестре аккаунта (кабинет его покажет и сможет отозвать); отозванный → 401
+// DEVICE_REVOKED. Старые версии deviceHash не шлют — для них вход не меняется.
+async function registerLoginDevice(session,body){
+  const deviceHash=String(body.deviceHash||'').toLowerCase();
+  if(!HEX64.test(deviceHash))return;
+  const userId=session&&session.user&&session.user.id;
+  if(!userId)return;
+  await cellPrintLink.touchDevice(userId,deviceHash,body.deviceName,body.appVersion);
+}
 async function accountAction(action,req,res){
   const body=req.body&&typeof req.body==='object'?req.body:{};
   if(action==='login'&&req.method==='POST'){
@@ -35,7 +45,9 @@ async function accountAction(action,req,res){
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login)||!body.password)return res.status(400).json({error:'Введите почту и пароль',code:'VALIDATION_ERROR'});
     if(!await enforceRateLimit(req,res,{scope:'cell-login',limit:10,windowSeconds:600}))return;
     if(!await enforceRateLimit(req,res,{scope:'cell-login-email',limit:10,windowSeconds:600,key:login}))return;
-    return res.json({session:account.sessionPayload(await account.passwordLogin(login,String(body.password)))});
+    const session=await account.passwordLogin(login,String(body.password));
+    await registerLoginDevice(session,body);
+    return res.json({session:account.sessionPayload(session)});
   }
   if(action==='login-start'&&req.method==='POST'){
     if(!await enforceRateLimit(req,res,{scope:'cell-login-start',limit:10,windowSeconds:600}))return;
@@ -51,12 +63,15 @@ async function accountAction(action,req,res){
     if(!code||!body.secret)return res.status(400).json({error:'Некорректный запрос',code:'VALIDATION_ERROR'});
     const result=await account.pollBrowserLogin(code,String(body.secret));
     if(result.status==='pending')return res.status(202).json({status:'pending'});
+    await registerLoginDevice(result.session,body);
     return res.json({session:account.sessionPayload(result.session)});
   }
   if(action==='refresh'&&req.method==='POST'){
     if(!await enforceRateLimit(req,res,{scope:'cell-refresh',limit:60,windowSeconds:600}))return;
     if(!body.refreshToken)return res.status(400).json({error:'Нет сессии',code:'VALIDATION_ERROR'});
-    return res.json({session:account.sessionPayload(await account.refreshSession(String(body.refreshToken)))});
+    const session=await account.refreshSession(String(body.refreshToken));
+    await registerLoginDevice(session,body);
+    return res.json({session:account.sessionPayload(session)});
   }
   const user=await requireUser(req,res);
   if(!user)return;
