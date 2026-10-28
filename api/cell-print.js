@@ -3,6 +3,7 @@ const { enforceRateLimit } = require('../server/_rate-limit');
 const { requireUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const account = require('../server/_app-account');
+const cellPrintLink = require('../server/_cell-print-link');
 
 // error.details — это распарсенный ответ PostgREST ({code,message,...}), а не строка.
 // String() от объекта давал «[object Object]», поэтому проверки ниже не срабатывали
@@ -86,6 +87,34 @@ async function accountAction(action,req,res){
   return res.status(404).json({error:'Not found',code:'NOT_FOUND'});
 }
 
+// Привязка ПК к аккаунту: /api/cell-print/account/{link|devices|revoke}. Логика — в
+// server/_cell-print-link.js; здесь только авторизация, лимит и маршрут по sub.
+async function accountLinkAction(req,res){
+  const sub=String(req.query.sub||'');
+  const user=await requireUser(req,res);
+  if(!user)return;
+  const body=req.body&&typeof req.body==='object'?req.body:{};
+  if(sub==='link'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-link',limit:30,windowSeconds:600}))return;
+    if(!versionAtLeast(body.appVersion,'1.5.0'))return res.status(426).json({error:'Требуется обновление программы до версии 1.5.0',code:'UPDATE_REQUIRED'});
+    return res.json(await cellPrintLink.linkDevice({
+      user:user.id,
+      deviceHash:String(body.deviceHash||'').toLowerCase(),
+      legacyHash:body.legacyHash?String(body.legacyHash).toLowerCase():null,
+      key:body.key?String(body.key).trim().toUpperCase():null,
+      deviceName:body.deviceName,
+      appVersion:body.appVersion,
+      buyUrl:`${publicOrigin(req)}/cell-print#key`,
+    }));
+  }
+  if(sub==='devices'&&req.method==='GET')return res.json(await cellPrintLink.listDevices(user.id));
+  if(sub==='revoke'&&req.method==='POST'){
+    await cellPrintLink.revokeDevice(user.id,String(body.deviceHash||'').toLowerCase());
+    return res.json({ok:true});
+  }
+  return res.status(404).json({error:'Not found',code:'NOT_FOUND'});
+}
+
 function versionTuple(value){return String(value||'0').split('.').map(x=>Number(x)||0);}
 function versionAtLeast(value,minimum){const a=versionTuple(value),b=versionTuple(minimum);for(let i=0;i<Math.max(a.length,b.length);i++){if((a[i]||0)!==(b[i]||0))return(a[i]||0)>(b[i]||0);}return true;}
 
@@ -94,6 +123,7 @@ module.exports = async function handler(req,res){
   if(['login','login-start','login-poll','refresh','keys','claim','logout'].includes(action)){
     try{return await accountAction(action,req,res);}catch(error){return accountError(res,error);}
   }
+  if(action==='account'){try{return await accountLinkAction(req,res);}catch(error){return accountError(res,error);}}
   try{
     if(action==='activate'&&req.method==='POST'){
       if(!await enforceRateLimit(req,res,{scope:'cell-activate',limit:20,windowSeconds:300}))return;
