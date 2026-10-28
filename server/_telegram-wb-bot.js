@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
-const { generateStickers, selectAccessCode } = require('./_sticker-generation');
+const { generateStickers, getAccessStatus, selectAccessCode } = require('./_sticker-generation');
 const { BATCH_QUANTITY, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
@@ -598,10 +598,10 @@ function wizardView(state, draft) {
   }
   if (state === 'choose_mode') {
     return { text: `${trail}${error}<b>Выберите режим</b>`, rows: [
-      [{ text: 'Пачка 50 — 20 ₽', callback_data: 'gen:mode:range' }],
-      [{ text: 'По конкретному номеру — 7,50 ₽', callback_data: 'gen:mode:custom' }],
-      [{ text: '💎 Пакеты по номеру — от 3 ₽/шт.', callback_data: 'shop:gen' }],
-      [GEN_BACK, GEN_CANCEL],
+      [{ text: 'Пачка 50', callback_data: 'gen:mode:range' }],
+      [{ text: 'По номеру', callback_data: 'gen:mode:custom' }],
+      [{ text: '💎 Купить пакет по номеру', callback_data: 'shop:gen:wizard' }],
+      [GEN_BACK],
     ] };
   }
   if (state === 'await_quantity') {
@@ -622,23 +622,22 @@ function wizardView(state, draft) {
     ] };
   }
   if (draft.accessCode) {
-    return { text: `${trail}${error}<b>Проверьте параметры</b>\nГенерации спишутся с вашего кода доступа.`, rows: [
-      [{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }],
+    return { text: `${trail}${error}<b>Всё готово</b>\nОплата: пакет генераций\nПосле создания останется: <b>${Number(draft.packageRemaining || 0)}</b>.`, rows: [
+      [{ text: '✅ Создать', callback_data: 'gen:confirm' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
   // Новые генерации всегда оплачиваются с общего рублёвого баланса.
   const cost = Number(draft.walletCost || 0), balance = Number(draft.balanceKopecks || 0) / 100;
   if (balance >= cost) {
-    return { text: `${trail}${error}<b>Проверьте параметры</b>\nСпишется <b>${wallet.formatRub(cost)}</b> с баланса — останется ${wallet.formatRub(balance - cost)}.`, rows: [
-      [{ text: `✅ Подтвердить — ${wallet.formatRub(cost)}`, callback_data: 'gen:confirm' }],
+    return { text: `${trail}${error}<b>Всё готово</b>\nЦена: <b>${wallet.formatRub(cost)}</b>\nОплата: баланс · останется ${wallet.formatRub(balance - cost)}.`, rows: [
+      [{ text: '✅ Создать', callback_data: 'gen:confirm' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
-  return { text: `${trail}${error}<b>Не хватает ${wallet.formatRub(cost - balance)}</b>\nЦена ${wallet.formatRub(cost)}, на балансе ${wallet.formatRub(balance)}. После пополнения стикеры создадутся сами.`, rows: [
+  return { text: `${trail}${error}<b>Нужно пополнить баланс</b>\nЦена: ${wallet.formatRub(cost)} · на балансе: ${wallet.formatRub(balance)}.\nПосле оплаты стикеры создадутся автоматически.`, rows: [
     topupAndBuyRow(cost - balance, 'gen'),
-    [{ text: '🔑 У меня есть код', callback_data: 'code:enter' }],
-    [GEN_BACK, GEN_CANCEL],
+    [GEN_BACK],
   ] };
 }
 
@@ -660,8 +659,8 @@ async function wizardBack(from, chatId, session, messageId) {
     return renderWizard(from, chatId, 'choose_mode', draft, messageId);
   }
   if (state === 'confirm') {
-    delete draft.accessCode; delete draft.walletCost; delete draft.balanceKopecks; delete draft.unlimited;
-    if (draft.mode === 'range') { delete draft.quantity; return renderWizard(from, chatId, 'await_quantity', draft, messageId); }
+    delete draft.accessCode; delete draft.packageRemaining; delete draft.walletCost; delete draft.balanceKopecks; delete draft.unlimited;
+    if (draft.mode === 'range') { delete draft.mode; delete draft.quantity; return renderWizard(from, chatId, 'choose_mode', draft, messageId); }
     delete draft.code;
     return renderWizard(from, chatId, 'await_code', draft, messageId);
   }
@@ -795,6 +794,14 @@ async function requestConfirmation(from, chatId, draft, messageId) {
   const units = requiredUnits(draft);
   delete draft.unlimited;
   delete draft.accessCode;
+  delete draft.packageRemaining;
+  const packageMode = draft.mode === 'range' ? 'batch' : 'custom';
+  const packageCode = await selectAccessCode(draft.userId, units, packageMode);
+  if (packageCode) {
+    const status = await getAccessStatus(packageCode);
+    draft.accessCode = packageCode;
+    draft.packageRemaining = Math.max(0, Number(status?.remaining || 0) - units);
+  }
   const discounts = await supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(draft.userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []);
   const discounted = discounts.length > 0;
   draft.discountAvailable = discounted;
@@ -804,8 +811,8 @@ async function requestConfirmation(from, chatId, draft, messageId) {
 }
 
 /** Свой активный код доступа — на него докупаем генерации с баланса, чтобы не плодить коды. */
-async function ownTopupCode(userId) {
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code&order=created_at.desc&limit=1`);
+async function ownTopupCode(userId, mode = 'custom') {
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&or=(generation_mode.eq.${mode},generation_mode.is.null)&select=code,generation_mode&order=created_at.desc&limit=1`);
   return rows[0]?.code || null;
 }
 
@@ -946,7 +953,9 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
       return;
     }
     draft.chargeId = bought.charge.chargeId;
-    paidLine = ` Списано ${wallet.formatRub(bought.charge.priceKopecks / 100)}${bought.charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(bought.charge.balanceKopecks / 100)}.`;
+    paidLine = bought.charge.paymentSource === 'package'
+      ? ` Из пакета списано ${requiredUnits(draft)}, осталось ${Number(bought.charge.packageRemaining || 0)}.`
+      : ` Списано ${wallet.formatRub(bought.charge.priceKopecks / 100)}${bought.charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(bought.charge.balanceKopecks / 100)}.`;
   } catch (error) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
     throw error;
@@ -1520,7 +1529,7 @@ async function resolveShopItem(userId, parts) {
     const target = await ownTopupCode(userId);
     return {
       title: `<b>🏷 ${count} поштучных генераций</b>\nПо ${wallet.formatRub(price / count)} за номер`,
-      priceRub: price, productKind: 'stickers', back: 'shop:gen',
+      priceRub: price, productKind: 'stickers', back: b === 'wizard' ? 'shop:gen:wizard' : 'shop:gen', returnToGenerator: b === 'wizard',
       fields: { custom_quantity: count, ...(target ? { renewal_target_key: target } : {}) },
       snapshot: { packs: [{ quantity: count, unit: price / count, total: price }], units: count, total: price },
     };
@@ -1596,15 +1605,21 @@ async function showShop(from, chatId, messageId, parts) {
       [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
     ]) });
   }
-  if (kind === 'gen' && !a) {
+  if (kind === 'gen' && (!a || a === 'wizard')) {
+    const fromWizard = a === 'wizard';
     const target = await ownTopupCode(userId);
     const targetLine = target ? `\nПакет добавится к вашему коду <code>${escapeHtml(target)}</code>.` : '\nПосле оплаты получите код доступа.';
-    return showScreen(chatId, messageId, `<b>🏷 Пакеты генераций по конкретному номеру</b>${targetLine}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+    const table = Object.entries(CUSTOM_GENERATION_PACKAGES)
+      .map(([count, price]) => [Number(count), price])
+      .filter(([count]) => count > 1)
+      .map(([count, price]) => `${count} шт. — ${price} ₽ · ${wallet.formatRub(price / count)}/шт.`)
+      .join('\n');
+    return showScreen(chatId, messageId, `<b>🏷 Пакеты по номеру</b>\n${table}${targetLine}\n${balanceLine}`, { reply_markup: choiceKeyboard([
       ...Object.entries(CUSTOM_GENERATION_PACKAGES)
         .map(([count, price]) => [Number(count), price])
         .filter(([count]) => count > 1)
-        .map(([count, price]) => [{ text: `${count} шт. — ${price} ₽ · по ${wallet.formatRub(price / count)}`, callback_data: `shop:gen:${count}` }]),
-      back('shop:home'),
+        .map(([count]) => [{ text: `${count} шт.`, callback_data: `shop:gen:${count}${fromWizard ? ':wizard' : ''}` }]),
+      back(fromWizard ? 'gen:return-mode' : 'shop:home'),
     ]) });
   }
   if (kind === 'helper' && !a) {
@@ -1733,10 +1748,10 @@ async function payShopItem(from, chatId, messageId, nonce, parts) {
   } else {
     done = `+${item.fields.license_iterations} подборов — уже в «Помощнике ПВЗ».`;
   }
-  await showScreen(chatId, messageId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard([
-    [{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }],
-    MENU_ROW,
-  ]) });
+  const doneRows = item.returnToGenerator
+    ? [[{ text: '🏷 Продолжить генерацию', callback_data: 'gen:return-mode' }], MENU_ROW]
+    : [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }], MENU_ROW];
+  await showScreen(chatId, messageId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard(doneRows) });
 }
 
 // ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──
@@ -2016,6 +2031,7 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'gen:back') { await answerCallbackQuery(callback.id); await wizardBack(from, chatId, session, messageId); return; }
+  if (data === 'gen:return-mode') { await answerCallbackQuery(callback.id); await renderWizard(from, chatId, 'choose_mode', draft, messageId); return; }
   // «🔄 Я пополнил» — перечитать баланс и коды и показать подтверждение заново.
   if (data === 'gen:recheck' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await requestConfirmation(from, chatId, draft, messageId); return; }
   if (data.startsWith('gen:kind:') && session.state === 'choose_kind') {
@@ -2028,7 +2044,12 @@ async function handleCallback(callback) {
     await answerCallbackQuery(callback.id);
     draft.mode = data.endsWith(':custom') ? 'custom' : 'range';
     if (draft.category === 'box') draft.prefix = 'TRBX';
-    await renderWizard(from, chatId, draft.mode === 'range' ? 'await_quantity' : 'await_code', draft, messageId);
+    if (draft.mode === 'range') {
+      draft.quantity = BATCH_QUANTITY;
+      await requestConfirmation(from, chatId, draft, messageId);
+    } else {
+      await renderWizard(from, chatId, 'await_code', draft, messageId);
+    }
     return;
   }
   if (data.startsWith('gen:qty:') && session.state === 'await_quantity') {
@@ -2178,4 +2199,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

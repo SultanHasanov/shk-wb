@@ -38,6 +38,8 @@ export type StickerAsset = {
   createdAt: string;
   /** Пул общий: и товарные стикеры, и QR коробок тратятся из одного остатка. */
   limits: { used: number; total: number };
+  /** null — старый пакет, совместимый с обоими режимами. */
+  generationMode?: 'custom' | 'batch' | null;
 };
 export type ProgramAsset = {
   type: 'program';

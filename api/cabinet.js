@@ -175,7 +175,7 @@ function mapPreferences(row) {
 async function getAssets(userId) {
   const [codes, program, cell] = await Promise.all([
     supabaseFetch(
-      `sticker_access_codes?owner_user_id=eq.${q(userId)}&select=code,name,active,created_at,generation_limit,generation_used&order=created_at.desc`,
+      `sticker_access_codes?owner_user_id=eq.${q(userId)}&select=code,name,active,created_at,generation_limit,generation_used,generation_mode&order=created_at.desc`,
     ),
     supabaseFetch(
       `license_keys?owner_user_id=eq.${q(userId)}&select=id,key,usage_limit,used,active,created_at&order=created_at.desc`,
@@ -198,6 +198,7 @@ async function getAssets(userId) {
       active: x.active,
       createdAt: x.created_at,
       limits: { used: Number(x.generation_used || 0), total: Number(x.generation_limit || 0) },
+      generationMode: x.generation_mode || null,
     })),
     ...program.map(x => ({
       type: 'program',

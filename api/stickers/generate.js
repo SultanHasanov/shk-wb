@@ -49,7 +49,14 @@ module.exports = async function handler(req, res) {
       email: user?.email?.endsWith('@users.invalid') ? null : user?.email || null,
     });
     const response = user
-      ? { ...result, priceKopecks: charge.priceKopecks, discountApplied: charge.discountApplied, balanceKopecks: charge.balanceKopecks }
+      ? {
+          ...result,
+          priceKopecks: charge.priceKopecks,
+          discountApplied: charge.discountApplied,
+          balanceKopecks: charge.balanceKopecks,
+          paymentSource: charge.paymentSource,
+          packageRemaining: charge.packageRemaining,
+        }
       : result;
     if (charge?.chargeId) await finalizeGeneration(charge.chargeId, response);
     return res.status(201).json(response);

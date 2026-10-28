@@ -34,11 +34,12 @@ async function assertAccessOwner(accessCode, userId) {
   if (ownerId && ownerId !== userId) throw generationError('ACCESS_CODE_OWNER_REQUIRED', 'Этот код привязан к другому аккаунту. Войдите под владельцем кода.', 403);
 }
 
-async function selectAccessCode(userId, quantity = 1) {
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code,generation_limit,generation_used,created_at&order=created_at.asc`);
+async function selectAccessCode(userId, quantity = 1, mode = '') {
+  const normalizedMode = mode === 'custom' || mode === 'batch' ? mode : '';
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=code,generation_limit,generation_used,generation_mode,created_at&order=created_at.asc`);
   return rows.map(row => ({ ...row, remaining: Number(row.generation_limit || 0) - Number(row.generation_used || 0) }))
-    .filter(row => row.remaining >= quantity)
-    .sort((a, b) => a.remaining - b.remaining || String(a.created_at).localeCompare(String(b.created_at)))[0]?.code || null;
+    .filter(row => row.remaining >= quantity && (!normalizedMode || !row.generation_mode || row.generation_mode === normalizedMode))
+    .sort((a, b) => Number(b.generation_mode === normalizedMode) - Number(a.generation_mode === normalizedMode) || a.remaining - b.remaining || String(a.created_at).localeCompare(String(b.created_at)))[0]?.code || null;
 }
 
 async function recordGeneration(entry) {

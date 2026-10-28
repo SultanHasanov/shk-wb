@@ -19,6 +19,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   reviewText: (review: Record<string, unknown>, position: number, total: number) => string;
   reviewAuthorIds: (review: Record<string, unknown>) => number[];
   findPickupEvents: (goods: Array<Record<string, unknown>>, userIds: number | number[]) => Array<Record<string, unknown>>;
+  wizardView: (state: string, draft: Record<string, unknown>) => { text: string; rows: Array<Array<Record<string, any>>> };
 };
 const generation = require('../../server/_sticker-generation.js') as {
   normalizePrefix: (value: unknown) => string;
@@ -37,6 +38,24 @@ describe('Telegram sticker generator bot', () => {
   it('предлагает ввести код при покупке и в профиле', () => {
     const profile = bot.profileKeyboard().inline_keyboard.flat().map(button => button.callback_data);
     expect(profile).toEqual(expect.arrayContaining(['topup:home', 'shop:home', 'code:enter', 'menu:home']));
+  });
+
+  it('показывает короткий выбор режима без цен и лишней отмены', () => {
+    const view = bot.wizardView('choose_mode', { category: 'product' });
+    expect(view.rows.flat().map(button => button.text)).toEqual([
+      'Пачка 50',
+      'По номеру',
+      '💎 Купить пакет по номеру',
+      '⬅️ Назад',
+    ]);
+  });
+
+  it('на подтверждении показывает источник оплаты без цены на кнопке', () => {
+    const packageView = bot.wizardView('confirm', {
+      category: 'product', mode: 'custom', code: '12345678901', accessCode: '123456', packageRemaining: 9,
+    });
+    expect(packageView.text).toContain('останется: <b>9</b>');
+    expect(packageView.rows[0][0].text).toBe('✅ Создать');
   });
 
   it('считает каждый новый QR того же SID отдельной платной операцией', () => {

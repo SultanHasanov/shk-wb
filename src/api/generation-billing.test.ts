@@ -12,6 +12,7 @@ const billing = require('../../server/_generation-billing.js') as {
 const generateApi = readFileSync(resolve(process.cwd(), 'api/stickers/generate.js'), 'utf8');
 const generationService = readFileSync(resolve(process.cwd(), 'server/_sticker-generation.js'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261101_generation_wallet_tariffs.sql'), 'utf8');
+const packagePriorityMigration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261102_generation_package_priority.sql'), 'utf8');
 
 describe('оплата новых генераций', () => {
   it('фиксирует обычные цены и разовую скидку 20%', () => {
@@ -37,5 +38,21 @@ describe('оплата новых генераций', () => {
     expect(migration).toContain('round(paid::numeric*remaining/bought)');
     expect(migration).toContain('r.large and r.remaining*2>r.bought');
     expect(migration).toContain("'legacy-stickers-conversion:'||r.user_id::text");
+  });
+
+  it('резервирует подходящий пакет раньше баланса и возвращает его при ошибке', () => {
+    const packageLookup = packagePriorityMigration.indexOf('select * into package_row');
+    const walletCharge = packagePriorityMigration.indexOf('select eligible and consumed_at is null');
+    expect(packageLookup).toBeGreaterThan(0);
+    expect(walletCharge).toBeGreaterThan(packageLookup);
+    expect(packagePriorityMigration).toContain("payment_source='package'");
+    expect(packagePriorityMigration).toContain('generation_used=greatest(0,generation_used-c.quantity)');
+  });
+
+  it('разделяет поштучные и пакетные права, сохраняя старые коды совместимыми', () => {
+    expect(packagePriorityMigration).toContain("generation_mode is null or generation_mode in ('custom','batch')");
+    expect(packagePriorityMigration).toContain('(generation_mode=p_mode or generation_mode is null)');
+    expect(packagePriorityMigration).toContain("purchase_mode:='custom'");
+    expect(packagePriorityMigration).toContain("purchase_mode:='batch'");
   });
 });

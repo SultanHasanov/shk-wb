@@ -50,6 +50,8 @@ type Generated = {
   priceKopecks?: number;
   discountApplied?: boolean;
   balanceKopecks?: number;
+  paymentSource?: 'package' | 'wallet';
+  packageRemaining?: number;
 };
 
 function stickerFileName(code: string) {
@@ -327,7 +329,16 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     },
   });
 
-  const remaining = undefined;
+  const plannedCount = g.mode === 'range' ? 50 : 1;
+  const packageMode = g.mode === 'range' ? 'batch' : 'custom';
+  const matchingPackage = auth.isAuthenticated
+    ? cabinet.data?.assets
+      .filter((asset): asset is StickerAsset => asset.type === 'sticker' && asset.active)
+      .map(asset => ({ ...asset, remaining: Math.max(0, asset.limits.total - asset.limits.used) }))
+      .filter(asset => (!asset.generationMode || asset.generationMode === packageMode) && asset.remaining >= plannedCount)
+      .sort((a, b) => Number(b.generationMode === packageMode) - Number(a.generationMode === packageMode) || a.remaining - b.remaining)[0]
+    : undefined;
+  const remaining = matchingPackage?.remaining;
 
   const items = mutation.data?.items ?? mutation.data?.stickers ?? [];
   const previewItems = items.length
@@ -389,9 +400,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     : t('стикеры товаров', 'тауар стикерлері');
   const modeLabel = g.mode === 'range' ? t('Массово', 'Көптеп') : t('По номеру', 'Нөмір бойынша');
   const numberLabel = g.kind === 'box' ? t('Номер коробки', 'Қорап нөмірі') : t('Номер ШК', 'ШК нөмірі');
-  const plannedCount = g.mode === 'range' ? 50 : 1;
   const leftAfter = remaining === undefined ? undefined : Math.max(0, remaining - plannedCount);
-  const notEnough = remaining !== undefined && remaining < plannedCount;
+  const notEnough = !auth.isAuthenticated && remaining !== undefined && remaining < plannedCount;
 
   return (
     <div className={s.layout}>
@@ -428,9 +438,15 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           <Alert tone={auth.isAuthenticated ? 'info' : 'warning'}>
             {auth.isAuthenticated ? (
               <>
-                {t('Стоимость:', 'Бағасы:')} <strong>{g.mode === 'range' ? '20 ₽' : '7,50 ₽'}</strong>
-                {' · '}{t('Баланс:', 'Баланс:')} <strong>{((cabinet.data?.wallet.balanceKopecks ?? 0) / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>
-                {cabinet.data?.wallet.discountAvailable && <> · {t('На эту генерацию доступна разовая скидка 20%.', 'Осы генерацияға бір реттік 20% жеңілдік бар.')}</>}
+                {matchingPackage ? (
+                  <>{t('Оплата из пакета. Доступно:', 'Пакеттен төлем. Қолжетімді:')} <strong>{matchingPackage.remaining}</strong></>
+                ) : (
+                  <>
+                    {t('Стоимость:', 'Бағасы:')} <strong>{g.mode === 'range' ? '20 ₽' : '7,50 ₽'}</strong>
+                    {' · '}{t('Баланс:', 'Баланс:')} <strong>{((cabinet.data?.wallet.balanceKopecks ?? 0) / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>
+                    {cabinet.data?.wallet.discountAvailable && <> · {t('На эту генерацию доступна разовая скидка 20%.', 'Осы генерацияға бір реттік 20% жеңілдік бар.')}</>}
+                  </>
+                )}
               </>
             ) : (
               <>{t('Генерацию можно купить без регистрации. Или войдите, чтобы оплатить её с общего баланса.', 'Генерацияны тіркелусіз сатып алуға болады. Немесе ортақ баланстан төлеу үшін кіріңіз.')} <Link to="/login">{t('Войти', 'Кіру')}</Link></>
@@ -617,7 +633,11 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               <h2>{t('Готово', 'Дайын')}</h2>
             </div>
 
-            {mutation.data.priceKopecks != null && mutation.data.balanceKopecks != null && (
+            {mutation.data.paymentSource === 'package' && mutation.data.packageRemaining != null ? (
+              <Alert tone="success">
+                {t('Генерация списана из пакета. Осталось:', 'Генерация пакеттен алынды. Қалды:')} <strong>{mutation.data.packageRemaining}</strong>.
+              </Alert>
+            ) : mutation.data.priceKopecks != null && mutation.data.balanceKopecks != null && (
               <Alert tone="success">
                 {t('Списано', 'Есептен шығарылды')}: <strong>{(mutation.data.priceKopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>.
                 {' '}{t('Остаток', 'Қалдық')}: <strong>{(mutation.data.balanceKopecks / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} ₽</strong>.
