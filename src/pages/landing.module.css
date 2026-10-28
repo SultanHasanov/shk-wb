@@ -40,6 +40,22 @@
   flex: 1;
 }
 
+/* Лесенка пакетов генерации на /tarify. */
+.ladderCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.ladderQty {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+
+.ladderCta {
+  margin-top: var(--sp-6);
+}
+
 @media (max-width: 767px) {
   .heroActions {
     margin-top: var(--sp-6);
