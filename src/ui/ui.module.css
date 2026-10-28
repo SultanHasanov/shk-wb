@@ -1108,11 +1108,17 @@ button.priceCell:hover {
   }
 }
 
+/* Над нижним таббаром мобильного приложения, иначе тост ложится на навигацию. */
+@media (max-width: 767px) {
+  .toastViewport {
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-3));
+  }
+}
+
 @media (max-width: 479px) {
   .toastViewport {
     left: var(--sp-4);
     right: var(--sp-4);
-    bottom: var(--sp-4);
   }
 }
 

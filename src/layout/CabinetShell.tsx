@@ -22,6 +22,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { Button } from '../ui';
+import { TabBar, type TabItem } from './TabBar';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStores } from '../stores/root-store';
 import s from './CabinetShell.module.css';
@@ -90,6 +91,27 @@ export const CabinetShell = observer(() => {
   const cabinetNav = cabinetNavItems(t);
   const titles = titlesFor(t);
   const email = auth.displayName || t('Пользователь', 'Пайдаланушы');
+
+  // Нижняя навигация кабинета (телефон): частые разделы + «Ещё», открывающее тот
+  // же боковой drawer со всем списком. Бейдж уведомлений переезжает на «Ещё».
+  const unread = cabinet.data?.unreadNotifications ?? 0;
+  const cabinetTabs: TabItem[] = [
+    { key: 'overview', to: '/cabinet', end: true, label: t('Обзор', 'Шолу'), Icon: Home },
+    ...(APP_SUBSCRIPTIONS_LIVE
+      ? [{ key: 'subscription', to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop }]
+      : []),
+    { key: 'packages', to: '/cabinet/packages', label: t('Пакеты', 'Пакеттер'), Icon: Package },
+    { key: 'referrals', to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users },
+    {
+      key: 'more',
+      label: t('Ещё', 'Тағы'),
+      Icon: Menu,
+      onClick: ui.toggleMobile,
+      active: ui.sidebarOpen,
+      badge: unread,
+      ariaLabel: unread > 0 ? t(`Ещё, непрочитанных: ${unread}`, `Тағы, оқылмаған: ${unread}`) : t('Ещё', 'Тағы'),
+    },
+  ];
 
   // Закрывать аккаунт-меню по клику вне и по Escape
   useEffect(() => {
@@ -362,6 +384,8 @@ export const CabinetShell = observer(() => {
           <Outlet />
         </main>
       </div>
+
+      <TabBar items={cabinetTabs} label={t('Навигация кабинета', 'Кабинет навигациясы')} />
     </div>
   );
 });

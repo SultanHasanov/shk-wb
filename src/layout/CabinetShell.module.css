@@ -296,6 +296,8 @@
   .shell,
   .collapsed {
     padding-left: 0;
+    /* Контент не должен прятаться под фиксированным нижним таббаром. */
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 
   .sidebar,

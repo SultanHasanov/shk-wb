@@ -113,7 +113,7 @@
   color: #229ed9;
 }
 
-/* Пилюля бота: в шапке место есть только на широком экране. */
+/* Пилюля бота/канала: в шапке место есть только на широком экране. */
 .tgWide {
   display: none;
 }
@@ -124,10 +124,6 @@
   }
 }
 
-.mobileOnly {
-  display: none;
-}
-
 .switches {
   display: inline-flex;
   gap: var(--sp-2);
@@ -136,15 +132,23 @@
 .switchLabel {
   color: var(--text-muted);
   font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
 }
 
-.burger {
+/* Кнопка «Ещё» открывает мобильную шторку — на десктопе скрыта. */
+.more {
   display: none;
   border: 1px solid var(--border-strong);
   background: var(--surface);
   border-radius: var(--r-sm);
-  padding: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
   color: var(--text);
+}
+
+.more:hover {
+  background: var(--surface-muted);
 }
 
 /* ---- Контент ---- */
@@ -155,8 +159,12 @@
 /* ---- Футер ---- */
 .footer {
   margin-top: auto;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
+  background: var(--footer-bg);
+  color: var(--footer-text);
+}
+
+.footer .brand {
+  color: var(--footer-text);
 }
 
 .footerInner {
@@ -169,7 +177,7 @@
 }
 
 .footerAbout p {
-  color: var(--text-muted);
+  color: var(--footer-muted);
   font-size: var(--fs-13);
   max-width: 42ch;
   margin: var(--sp-3) 0 0;
@@ -181,7 +189,7 @@
   font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
-  color: var(--text-tertiary);
+  color: var(--footer-muted);
   margin-bottom: var(--sp-3);
 }
 
@@ -192,26 +200,119 @@
 }
 
 .footerCol a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
   font-size: var(--fs-13);
-  color: var(--text-muted);
+  color: var(--footer-text);
   width: max-content;
 }
 
 .footerCol a:hover {
-  color: var(--accent-dark);
+  color: var(--text-on-accent);
 }
 
 .footerBottom {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--footer-border);
   padding: var(--sp-5) var(--sp-8);
   max-width: var(--content-wide);
   margin: 0 auto;
   font-size: var(--fs-12);
-  color: var(--text-tertiary);
+  color: var(--footer-muted);
   display: flex;
   gap: var(--sp-4);
   flex-wrap: wrap;
   justify-content: space-between;
+}
+
+/* ---- Мобильная шторка «Ещё» ---- */
+.sheetRoot {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheetScrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.4);
+  animation: fade var(--dur) var(--ease);
+}
+
+.sheet {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+  padding: var(--sp-4) var(--sp-5) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--shadow-lg);
+  animation: sheetUp var(--dur-slow) var(--ease);
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-16);
+  margin-bottom: var(--sp-3);
+}
+
+.sheetClose {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: var(--sp-1);
+  border-radius: var(--r-sm);
+}
+
+.sheetClose:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.sheetLinks {
+  display: flex;
+  flex-direction: column;
+}
+
+.sheetLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--tap);
+  padding: var(--sp-3) var(--sp-2);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.sheetLink:hover {
+  color: var(--accent-dark);
+}
+
+.sheetSwitches {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 /* ---- Адаптив ---- */
@@ -234,55 +335,26 @@
 }
 
 @media (max-width: 767px) {
+  /* Основная навигация переезжает в нижний таббар, вспомогательные ссылки и
+     переключатели — в шторку «Ещё». В шапке остаётся бренд и кнопка «Ещё». */
+  .nav,
+  .wideOnly {
+    display: none;
+  }
+
+  .more {
+    display: inline-flex;
+  }
+
   .headerInner {
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);
     gap: var(--sp-3);
   }
 
-  .burger {
-    display: inline-flex;
-  }
-
-  .wideOnly {
-    display: none;
-  }
-
-  .mobileOnly {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--sp-3);
-  }
-
-  .tg span {
-    display: none;
-  }
-
-  /* Мобильное меню: выпадающая панель под шапкой */
-  .nav {
-    display: none;
-    position: absolute;
-    top: var(--topbar-h);
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-1);
-    margin: 0;
-    padding: var(--sp-3);
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    box-shadow: var(--shadow-md);
-  }
-
-  .navOpen {
-    display: flex;
-  }
-
-  .navLink {
-    padding: var(--sp-3);
-    font-size: var(--fs-16);
+  /* Контент не должен прятаться под фиксированным таббаром. */
+  .shell {
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 
   .footerInner {

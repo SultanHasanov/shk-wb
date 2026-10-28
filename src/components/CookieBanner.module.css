@@ -35,10 +35,16 @@
   .banner {
     left: var(--sp-3);
     right: var(--sp-3);
-    bottom: var(--sp-3);
     flex-direction: column;
     align-items: stretch;
     gap: var(--sp-3);
+  }
+}
+
+/* Нижний таббар мобильного приложения перекрыл бы плашку — поднимаем её над ним. */
+@media (max-width: 767px) {
+  .banner {
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-3));
   }
 }
 
