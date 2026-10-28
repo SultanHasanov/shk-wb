@@ -330,39 +330,92 @@
   }
 }
 
-/* Выбор типа наклейки фотографиями, как на боевом сайте. */
-.kindPicker {
+/* ---- Лендинговые блоки главной (две программы, опоры, поддержка, CTA) ---- */
+.programCards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-5);
 }
 
-.kindCard {
+.programCard {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: var(--sp-3);
+  height: 100%;
+}
+
+.programCard h3 {
+  margin: 0;
+  font-size: var(--fs-20);
+}
+
+.programCard p {
+  margin: 0;
+  flex: 1;
+}
+
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-5);
+}
+
+.pillar {
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-3);
-  font: inherit;
-  color: var(--text-muted);
-  text-align: center;
-  background: var(--surface);
-  border: 1px solid var(--border);
+}
+
+.pillarIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   border-radius: var(--r-md);
-  cursor: pointer;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
-.kindCard img {
-  width: 100%;
-  max-width: 128px;
-  height: 104px;
-  object-fit: contain;
+.pillar h3 {
+  margin: 0;
+  font-size: var(--fs-16);
 }
 
-.kindActive {
-  color: var(--accent);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+.pillar p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+}
+
+.finalCta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.finalCta h2 {
+  margin-bottom: var(--sp-2);
+}
+
+@media (max-width: 1023px) {
+  .pillars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .programCards,
+  .pillars {
+    grid-template-columns: 1fr;
+  }
+
+  .finalCta a,
+  .finalCta button {
+    width: 100%;
+  }
 }
 
 /* Настройки листа перед печатью: сетка и сколько штук из пачки. */

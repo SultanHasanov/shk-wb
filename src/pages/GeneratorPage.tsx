@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { observer } from 'mobx-react-lite';
-import { ArrowRight, Download, Printer as PrinterIcon, Share2 } from 'lucide-react';
+import {
+  ArrowRight,
+  Building2,
+  Download,
+  FileText,
+  LifeBuoy,
+  Printer as PrinterIcon,
+  RefreshCcw,
+  Share2,
+  ShieldCheck,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { api, isOwnerError, isQuotaError } from '../api/client';
 import { CUSTOM_CODE_LENGTH, MAX_BATCH_QUANTITY, useStores } from '../stores/root-store';
@@ -11,12 +21,13 @@ import { Section } from '../components/Section';
 import { Steps } from '../components/Steps';
 import { PricingPacks } from '../components/PricingPacks';
 import { GeneratedCounter } from '../components/GeneratedCounter';
-import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { TelegramBotPromo } from '../components/TelegramBotPromo';
+import { AppPlansTable } from '../components/AppPlansTable';
 import { BulkCustomStickerEditor } from '../components/BulkCustomStickerEditor';
 import {
   Accordion,
   Alert,
+  AnswerBlock,
   Badge,
   Button,
   Card,
@@ -24,8 +35,10 @@ import {
   Field,
   Input,
   Modal,
+  ScreenshotSlot,
   Segmented,
   Skeleton,
+  TileGroup,
 } from '../ui';
 import { MIN_PER_UNIT } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
@@ -407,23 +420,18 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
     <div className={s.layout}>
       <Card className={s.form}>
         <div className="stack">
-          {/* Фотографии вместо иконок: по картинке сразу видно, что печатается —
+          {/* Плитки вида генерации: по картинке сразу видно, что печатается —
               наклейка на пакет с товаром или QR на возвратную коробку. */}
-          <div className={s.kindPicker} role="radiogroup" aria-label={t('Тип стикера', 'Стикер түрі')}>
-            {kindOptions(t).map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={g.kind === option.value}
-                className={`${s.kindCard} ${g.kind === option.value ? s.kindActive : ''}`}
-                onClick={() => g.setKind(option.value)}
-              >
-                <img src={option.image} alt="" loading="lazy" />
-                <span>{option.label}</span>
-              </button>
-            ))}
-          </div>
+          <TileGroup
+            label={t('Тип стикера', 'Стикер түрі')}
+            value={g.kind}
+            onChange={v => g.setKind(v)}
+            options={kindOptions(t).map(option => ({
+              value: option.value,
+              label: option.label,
+              media: <img src={option.image} alt="" loading="lazy" />,
+            }))}
+          />
 
           <Segmented
             label={t('Режим генерации', 'Генерация режимі')}
@@ -896,10 +904,7 @@ export const GeneratorPage = observer(() => {
         trust={trustItems(t, formatPerUnit(MIN_PER_UNIT))}
       />
 
-      <Section id="how" eyebrow={t('Три шага', 'Үш қадам')} title={t('Как это работает', 'Бұл қалай жұмыс істейді')}>
-        <Steps steps={steps(t)} />
-      </Section>
-
+      {/* Сам генератор — сразу под hero: посетитель пришёл печатать, а не читать. */}
       <div className="page" id="generator">
         <GeneratorWorkspace onNeedPackages={goToPackages} />
         <div className="section">
@@ -908,13 +913,184 @@ export const GeneratorPage = observer(() => {
       </div>
 
       <GeneratedCounter />
+
+      {/* «Выгоднее пакетами» — блок #packages внутри. */}
       <PricingPacks />
+
+      {/* Две программы для пункта выдачи — со снимками экрана. */}
+      <Section
+        eyebrow={t('Программы для ПВЗ', 'ПВЗ бағдарламалары')}
+        title={t('Не только генератор', 'Тек генератор ғана емес')}
+        lead={t(
+          'Кроме онлайн-генератора у нас две программы для компьютера пункта выдачи: помощник приёмщика и печать номера ячейки.',
+          'Онлайн-генератордан бөлек бізде беру пунктінің компьютеріне арналған екі бағдарлама бар: қабылдаушы көмекшісі және ұяшық нөмірін басып шығару.',
+        )}
+      >
+        <div className={s.programCards}>
+          <Card>
+            <div className={s.programCard}>
+              <ScreenshotSlot
+                alt={t('Окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының терезесі')}
+                caption={t('Помощник ПВЗ', 'ПВЗ көмекшісі')}
+              />
+              <h3>{t('Помощник ПВЗ', 'ПВЗ көмекшісі')}</h3>
+              <p className="muted">
+                {t(
+                  'Ячейки, товары «В пути», поиск клиента, отзывы и досье в одном окне — читает базу пункта на вашем компьютере.',
+                  'Ұяшықтар, «Жолдағы» тауарлар, клиентті іздеу, пікірлер мен досье бір терезеде — пункт базасын сіздің компьютеріңізден оқиды.',
+                )}
+              </p>
+              <Link to="/program">
+                <Button variant="secondary">
+                  {t('О программе', 'Бағдарлама туралы')}
+                  <ArrowRight size={16} />
+                </Button>
+              </Link>
+            </div>
+          </Card>
+          <Card>
+            <div className={s.programCard}>
+              <ScreenshotSlot
+                src="/images/screenshot-cell-print-v2.webp"
+                alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
+                caption={t('Печать ячеек', 'Ұяшық басып шығару')}
+              />
+              <h3>{t('Печать ячеек', 'Ұяшық басып шығару')}</h3>
+              <p className="muted">
+                {t(
+                  'Сканируете товар — программа печатает номер ячейки на термопринтере. Поддержка TSC и NIIMBOT.',
+                  'Тауарды сканерлейсіз — бағдарлама ұяшық нөмірін термопринтерде басып шығарады. TSC және NIIMBOT қолдауы.',
+                )}
+              </p>
+              <Link to="/cell-print">
+                <Button variant="secondary">
+                  {t('О программе', 'Бағдарлама туралы')}
+                  <ArrowRight size={16} />
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      {/* Четыре опоры — почему этим пользуются. */}
+      <Section tone="band" eyebrow={t('Коротко о главном', 'Қысқаша ең маңыздысы')} title={t('Почему этим удобно пользоваться', 'Неге мұны пайдалану ыңғайлы')}>
+        <div className={s.pillars}>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><ShieldCheck size={22} /></span>
+            <h3>{t('Без регистрации', 'Тіркелусіз')}</h3>
+            <p>{t('Для генерации достаточно кода доступа — он приходит сразу после оплаты пакета.', 'Генерация үшін қолжетімділік коды жеткілікті — ол пакетті төлегеннен кейін бірден келеді.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><FileText size={22} /></span>
+            <h3>{t('Готовый PDF A4', 'Дайын A4 PDF')}</h3>
+            <p>{t('Результат — один документ для обычного офисного принтера. Файл остаётся у вас.', 'Нәтиже — кәдімгі кеңсе принтеріне арналған бір құжат. Файл өзіңізде қалады.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><PrinterIcon size={22} /></span>
+            <h3>{t('Термопечать', 'Термобасу')}</h3>
+            <p>{t('Можно печатать по одной этикетке на TSC или по Bluetooth на совместимых NIIMBOT.', 'Заттаңбаларды TSC-те бір-бірден немесе үйлесімді NIIMBOT-та Bluetooth арқылы басып шығаруға болады.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><RefreshCcw size={22} /></span>
+            <h3>{t('Общий баланс', 'Ортақ баланс')}</h3>
+            <p>{t('Один баланс и история на сайте и в Telegram-боте. Коды и генерации — в личном кабинете.', 'Сайт пен Telegram-ботта бір баланс және тарих. Кодтар мен генерациялар — жеке кабинетте.')}</p>
+          </div>
+        </div>
+      </Section>
+
+      {/* Блок для сети ПВЗ — один AnswerBlock (AEO) с переходом к тарифам. */}
+      <Section>
+        <Card accent>
+          <AnswerBlock
+            question={t('Подходит ли сервис для сети пунктов выдачи?', 'Сервис беру пункттері желісіне жарай ма?')}
+            answer={t(
+              'Да. Генератор и программы работают на любом числе пунктов: баланс и история общие на аккаунт, а в «Помощнике ПВЗ» можно подключить несколько пунктов и компьютеров.',
+              'Иә. Генератор мен бағдарламалар кез келген пункт санында жұмыс істейді: баланс пен тарих аккаунтқа ортақ, ал «ПВЗ көмекшісінде» бірнеше пункт пен компьютерді қосуға болады.',
+            )}
+          >
+            <Link to="/tarify">
+              <Button>
+                {t('Тарифы и возможности', 'Тарифтер мен мүмкіндіктер')}
+                <ArrowRight size={16} />
+              </Button>
+            </Link>
+          </AnswerBlock>
+        </Card>
+      </Section>
+
+      {/* Тарифы «Помощника ПВЗ» — живые цены с сервера. */}
+      <Section
+        id="plans"
+        eyebrow={t('Тарифы «Помощника ПВЗ»', '«ПВЗ көмекшісі» тарифтері')}
+        title={t('Подписка на программу для ПВЗ', 'ПВЗ бағдарламасына жазылым')}
+        lead={t(
+          'Лимиты обновляются ежемесячно. Тариф можно повысить в любой момент — оставшиеся дни пересчитываются.',
+          'Лимиттер ай сайын жаңарады. Тарифті кез келген уақытта көтеруге болады — қалған күндер қайта есептеледі.',
+        )}
+      >
+        <AppPlansTable />
+      </Section>
+
+      {/* Поддержка и обновления. */}
+      <Section eyebrow={t('После покупки', 'Сатып алғаннан кейін')} title={t('Поддержка и обновления', 'Қолдау және жаңартулар')}>
+        <div className="grid grid-2">
+          <Card>
+            <div className={s.programCard}>
+              <span className={s.pillarIcon}><LifeBuoy size={22} /></span>
+              <h3>{t('Поддержка в Telegram', 'Telegram-дағы қолдау')}</h3>
+              <p className="muted">
+                {t(
+                  'Вопросы по оплате, кодам и программам решаем в Telegram — пишите в бот или в канал.',
+                  'Төлем, кодтар мен бағдарламалар жөніндегі сұрақтарды Telegram-да шешеміз — ботқа немесе арнаға жазыңыз.',
+                )}
+              </p>
+            </div>
+          </Card>
+          <Card>
+            <div className={s.programCard}>
+              <span className={s.pillarIcon}><Building2 size={22} /></span>
+              <h3>{t('Обновления включены', 'Жаңартулар қосылған')}</h3>
+              <p className="muted">
+                {t(
+                  'Программы обновляются сами и с подписью. Новые версии приходят без переустановки.',
+                  'Бағдарламалар өздері әрі қолтаңбамен жаңарады. Жаңа нұсқалар қайта орнатусыз келеді.',
+                )}
+              </p>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section id="how" eyebrow={t('Три шага', 'Үш қадам')} title={t('Как это работает', 'Бұл қалай жұмыс істейді')}>
+        <Steps steps={steps(t)} />
+      </Section>
 
       <Section id="faq" eyebrow={t('Частые вопросы', 'Жиі қойылатын сұрақтар')} title={t('Вопросы о генераторе', 'Генератор туралы сұрақтар')}>
         <Accordion items={faq(t)} />
       </Section>
 
-      <CrossSell items={[CROSS_SELL.cellPrint, CROSS_SELL.program]} />
+      <Section>
+        <Card accent>
+          <div className={s.finalCta}>
+            <div>
+              <h2>{t('Создайте возвратный ШК прямо сейчас', 'Қайтару ШК-ін дәл қазір жасаңыз')}</h2>
+              <p className="muted" style={{ margin: 0 }}>
+                {t(
+                  'Форма генератора — выше на этой странице. Оплата по номеру за 7,50 ₽ или пачкой 50 кодов за 20 ₽.',
+                  'Генератор формасы — осы беттің жоғарғы жағында. Нөмір бойынша 7,50 ₽ немесе 50 кодтық бума 20 ₽.',
+                )}
+              </p>
+            </div>
+            <a href="#generator">
+              <Button size="lg">
+                {t('К генератору', 'Генераторға')}
+                <ArrowRight size={18} />
+              </Button>
+            </a>
+          </div>
+        </Card>
+      </Section>
     </>
   );
 });

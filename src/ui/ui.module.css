@@ -1155,8 +1155,18 @@ button.priceCell:hover {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: stretch;
+  width: 100%;
   margin-bottom: var(--sp-2);
   color: var(--accent);
+}
+
+/* Когда в плитку кладут снимок (выбор вида генерации), он тянется по ширине. */
+.tileMedia img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--r-sm);
 }
 
 .tileLabel {

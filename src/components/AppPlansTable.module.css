@@ -1,0 +1,108 @@
+/* Тарифы «Помощника ПВЗ» (данные — /api/app/plans). Перенесено из
+   ProgramPage.module.css, чтобы таблицу показывали и главная, и /tarify. */
+.plansHead {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-5);
+}
+
+.plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.plan {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-5) var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.planPopular {
+  border-color: var(--accent);
+}
+
+.ribbon {
+  position: absolute;
+  top: 0;
+  left: var(--sp-5);
+  transform: translateY(-50%);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.planName {
+  margin: 0;
+  font-size: var(--fs-24);
+}
+
+.planPrice {
+  font-size: var(--fs-36);
+  font-weight: var(--fw-black);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.planPer {
+  font-size: var(--fs-13);
+  color: var(--text-tertiary);
+}
+
+.limits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+
+.planFeatures {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-2);
+  font-size: var(--fs-14);
+  flex: 1;
+}
+
+.planFeatures li {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.off {
+  color: var(--text-tertiary);
+}
+
+.featureCheck {
+  color: var(--accent);
+  flex: none;
+  margin-top: 2px;
+}
+
+.planAction,
+.planAction button {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .plans {
+    grid-template-columns: 1fr;
+  }
+}
