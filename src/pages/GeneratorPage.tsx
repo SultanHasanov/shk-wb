@@ -937,6 +937,7 @@ export const GeneratorPage = observer(() => {
           <Card>
             <div className={s.programCard}>
               <ScreenshotSlot
+                src="/images/screenshot-crack-tool-v2.webp"
                 alt={t('Окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының терезесі')}
                 caption={t('Помощник ПВЗ', 'ПВЗ көмекшісі')}
               />
