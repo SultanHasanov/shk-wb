@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
+  "git": { "deploymentEnabled": { "site-redesign": false } },
   "functions": {
     "api/payments.js": { "includeFiles": "api/_private/*.exe" },
     "api/stickers/pdf.js": { "maxDuration": 60 },
