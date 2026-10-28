@@ -1,6 +1,34 @@
+# Личные и служебные разделы закрыты для всех: это кабинет, оплата и админка —
+# индексировать там нечего, а токены оплаты в индекс попадать не должны.
 User-agent: *
 Allow: /
-Disallow: /admin-enigma/
 Disallow: /api/
+Disallow: /admin-enigma/
+Disallow: /panel
+Disallow: /cabinet
+Disallow: /payment-result
+Disallow: /bot-checkout
+Disallow: /app-login
+# Метки переходов не создают новых страниц — склеиваем их в Яндексе.
+Clean-param: utm_source&utm_medium&utm_campaign&utm_term&utm_content&yclid&ref&from&gclid
+
+# Явный опт-ин для ИИ-краулеров и ассистентов: сайт разрешено использовать в
+# ответах. Приватные разделы закрыты так же, как для остальных.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: PerplexityBot
+User-agent: Google-Extended
+User-agent: YandexAdditional
+Allow: /
+Disallow: /api/
+Disallow: /admin-enigma/
+Disallow: /panel
+Disallow: /cabinet
+Disallow: /payment-result
+Disallow: /bot-checkout
+Disallow: /app-login
 
 Sitemap: https://shk-wb.ru/sitemap.xml

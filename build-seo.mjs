@@ -31,7 +31,7 @@ export const SITE_NAME = 'ШК ВБ';
  * страницы через src/data/releases.ts). Раньше softwareVersion в @graph был
  * вшит константами и отставал от релизов; теперь берётся отсюда.
  */
-const RELEASES = JSON.parse(
+export const RELEASES = JSON.parse(
   readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'src/data/releases.json'), 'utf8'),
 );
 
@@ -313,3 +313,67 @@ export const PUBLIC_PAGES = {
     graph: [breadcrumbs('/cookie', 'Использование cookie')],
   },
 };
+
+/**
+ * sitemap.xml из PUBLIC_PAGES. kk-версия есть у всех, кроме юридических страниц
+ * (на казахском они noindex — одна официальная редакция), поэтому у них нет ни
+ * отдельной kk-записи, ни hreflang-пары. lastmod общий — дата сборки/коммита.
+ */
+export function buildSitemap(pages, lastmod) {
+  const date = lastmod || new Date().toISOString().slice(0, 10);
+  const entries = [];
+  for (const [route, page] of Object.entries(pages)) {
+    const ruUrl = route === '/' ? `${ORIGIN}/` : `${ORIGIN}${route}`;
+    const kkUrl = `${ORIGIN}${KZ_PREFIX}${route === '/' ? '' : route}`;
+    const bilingual = !page.legal;
+    const priority = route === '/' ? '1.0' : page.legal ? '0.3' : '0.8';
+    const changefreq = route === '/' ? 'weekly' : page.legal ? 'yearly' : 'monthly';
+    const alternates = bilingual
+      ? [
+          `<xhtml:link rel="alternate" hreflang="ru" href="${ruUrl}"/>`,
+          `<xhtml:link rel="alternate" hreflang="kk" href="${kkUrl}"/>`,
+          `<xhtml:link rel="alternate" hreflang="x-default" href="${ruUrl}"/>`,
+        ].join('')
+      : '';
+    entries.push(
+      `<url><loc>${ruUrl}</loc><lastmod>${date}</lastmod><changefreq>${changefreq}</changefreq><priority>${priority}</priority>${alternates}</url>`,
+    );
+    if (bilingual)
+      entries.push(
+        `<url><loc>${kkUrl}</loc><lastmod>${date}</lastmod><changefreq>${changefreq}</changefreq><priority>0.7</priority>${alternates}</url>`,
+      );
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${entries.map(e => `  ${e}`).join('\n')}\n</urlset>\n`;
+}
+
+/**
+ * llms.txt / llms-full.txt — краткая выжимка сайта для ИИ-ассистентов: продукты,
+ * версии, адреса страниц; в full-версии ещё и собранный при пререндере FAQ.
+ */
+export function buildLlms(pages, releases, faqByRoute, full) {
+  const lines = [
+    `# ${SITE_NAME} — ${ORIGIN}`,
+    '',
+    '> Инструменты для пунктов выдачи Wildberries: онлайн-генератор возвратных ШК и стикеров, программа «Помощник ПВЗ» и программа «Печать ячеек».',
+    '',
+    `Версии программ: Помощник ПВЗ ${releases.pvzHelper}, Печать ячеек ${releases.cellPrint}. Скачивание бесплатное, оплата — картой или СБП. Email на сайте не используется — только форма и Telegram.`,
+    '',
+    '## Страницы',
+    '',
+  ];
+  for (const [route, page] of Object.entries(pages)) {
+    const url = route === '/' ? `${ORIGIN}/` : `${ORIGIN}${route}`;
+    lines.push(`- [${page.fallback.title}](${url}): ${page.fallback.description}`);
+  }
+  if (full && faqByRoute) {
+    const faqRoutes = Object.keys(faqByRoute);
+    if (faqRoutes.length) {
+      lines.push('', '## Вопросы и ответы', '');
+      for (const route of faqRoutes)
+        for (const item of faqByRoute[route].mainEntity)
+          lines.push(`### ${item.name}`, '', item.acceptedAnswer.text, '');
+    }
+  }
+  lines.push('', `Карта сайта: ${ORIGIN}/sitemap.xml`);
+  return lines.join('\n') + '\n';
+}
