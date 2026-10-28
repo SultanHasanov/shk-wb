@@ -2,7 +2,15 @@ import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const guard = require('../../server/_attempt-guard.js') as typeof import('../../server/_attempt-guard');
+type Dim = { scope: string; limit?: number; windowSeconds: number; key?: string };
+type Guard = {
+  allowAttempt: (req: unknown, dim: Dim) => Promise<boolean>;
+  recordFailure: (req: unknown, dim: Dim) => Promise<void>;
+  guardAttempts: (req: unknown, res: unknown, dims: Dim[]) => Promise<boolean>;
+  recordFailures: (req: unknown, dims: Dim[]) => Promise<void>;
+  subnetOf: (req: unknown) => string;
+};
+const guard = require('../../server/_attempt-guard.js') as Guard;
 
 function req(ip = '203.0.113.7') {
   return { headers: { 'x-forwarded-for': ip }, socket: { remoteAddress: ip } } as any;
