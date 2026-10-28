@@ -34,10 +34,12 @@ import {
   Field,
   Input,
   PriceTable,
+  ScreenshotSlot,
   Select,
   Stat,
 } from '../ui';
 import type { PriceCell } from '../ui';
+import { RELEASES } from '../data/releases';
 import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
@@ -263,7 +265,7 @@ export const CellPrintPage = observer(() => {
   return (
     <>
       <Hero
-        eyebrow={t('Программа для Windows', 'Windows бағдарламасы')}
+        eyebrow={t(`Программа для Windows · версия ${RELEASES.cellPrint}`, `Windows бағдарламасы · ${RELEASES.cellPrint} нұсқасы`)}
         title={
           <>
             {t('Печать номера ячейки', 'Ұяшық нөмірін')} <em>{t('автоматически', 'автоматты басу')}</em>
@@ -459,7 +461,15 @@ export const CellPrintPage = observer(() => {
           'Жұмыс күйі, ауысымда не басылғаны және қай жерде мәселе туындағаны бірден түсінікті болатын бір терезе.',
         )}
       >
-        <FeatureGrid items={features(t)} />
+        <ScreenshotSlot
+          src="/images/screenshot-cell-print-v2.webp"
+          alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
+          caption={t('Рабочее состояние, журнал смены и печать номера ячейки', 'Жұмыс күйі, ауысым журналы және ұяшық нөмірін басу')}
+          ratio="16 / 9"
+        />
+        <div className="section">
+          <FeatureGrid items={features(t)} />
+        </div>
       </Section>
 
       <Section
