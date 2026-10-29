@@ -5,105 +5,88 @@
   background: var(--page);
 }
 
-/* ---- Шапка ---- */
+/* ---- Шапка (по прототипу: полупрозрачная полоса, меню, плашка WB и «Войти») ---- */
 .header {
   position: sticky;
   top: 0;
   z-index: var(--z-topbar);
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(245, 245, 247, 0.82);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
 
 .headerInner {
-  max-width: var(--content-wide);
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 0 var(--sp-8);
+  padding: 0 32px;
   height: var(--topbar-h);
   display: flex;
   align-items: center;
-  gap: var(--sp-6);
+  gap: 28px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  font-weight: var(--fw-black);
-  font-size: var(--fs-16);
-  letter-spacing: var(--tracking-tight);
+  gap: 10px;
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  color: var(--text);
   flex: none;
 }
 
-.mark {
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-radius: var(--r-sm);
-  width: 32px;
-  height: 32px;
-  font-size: var(--fs-12);
-  font-weight: var(--fw-black);
-  box-shadow: var(--shadow-accent);
+.brand:hover {
+  color: var(--text);
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
-  margin-left: var(--sp-4);
+  gap: 22px;
+  margin-left: 10px;
 }
 
 .navLink {
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
-  color: var(--text-muted);
+  color: var(--text);
+  font-weight: 500;
+  font-size: 15px;
+  white-space: nowrap;
 }
 
-.navLink:hover {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
+.navLink:hover,
 .navActive {
-  color: var(--accent-dark);
-  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 14px;
   flex: none;
 }
 
-.tg {
+.wbchip {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-semibold);
+  gap: 7px;
+  font-size: 12.5px;
   color: var(--text-muted);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 5px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
-.tg:hover {
-  background: var(--surface-muted);
-  color: var(--text);
-}
-
-.tgAva {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  object-fit: cover;
+.wbdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
   flex: none;
-  background: var(--surface-muted);
 }
 
 .tgIco {
@@ -111,17 +94,6 @@
   height: 18px;
   flex: none;
   color: #229ed9;
-}
-
-/* Пилюля бота/канала: в шапке место есть только на широком экране. */
-.tgWide {
-  display: none;
-}
-
-@media (min-width: 1024px) {
-  .tgWide {
-    display: inline-flex;
-  }
 }
 
 .switches {
@@ -138,17 +110,17 @@
 /* Кнопка «Ещё» открывает мобильную шторку — на десктопе скрыта. */
 .more {
   display: none;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   background: var(--surface);
-  border-radius: var(--r-sm);
-  padding: var(--sp-2) var(--sp-3);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-semibold);
+  border-radius: 10px;
+  padding: 9px 15px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text);
 }
 
 .more:hover {
-  background: var(--surface-muted);
+  border-color: var(--border-strong);
 }
 
 /* ---- Контент ---- */
@@ -156,73 +128,83 @@
   flex: 1;
 }
 
-/* ---- Футер ---- */
+/* ---- Футер (по прототипу) ---- */
 .footer {
   margin-top: auto;
-  background: var(--footer-bg);
-  color: var(--footer-text);
-}
-
-.footer .brand {
-  color: var(--footer-text);
+  background: #1d1d27;
+  color: #a7a7b2;
+  padding: 46px 0 32px;
 }
 
 .footerInner {
-  max-width: var(--content-wide);
+  max-width: 1180px;
   margin: 0 auto;
-  padding: var(--sp-12) var(--sp-8);
+  padding: 0 32px;
+}
+
+.footGrid {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
-  gap: var(--sp-10);
+  gap: 34px;
 }
 
-.footerAbout p {
-  color: var(--footer-muted);
-  font-size: var(--fs-13);
-  max-width: 42ch;
-  margin: var(--sp-3) 0 0;
-  line-height: var(--lh-normal);
-}
-
-.footerTitle {
-  font-size: var(--fs-12);
-  font-weight: var(--fw-bold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--footer-muted);
-  margin-bottom: var(--sp-3);
-}
-
-.footerCol {
+.footBrand {
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.footerCol a {
-  display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-13);
-  color: var(--footer-text);
+  gap: 10px;
+  font-weight: 800;
+  font-size: 19px;
+  color: #fff;
+}
+
+.footAbout {
+  margin: 14px 0 0;
+  font-size: 14px;
+  max-width: 38ch;
+  color: #a7a7b2;
+  line-height: 1.55;
+}
+
+.footTitle {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  letter-spacing: 0;
+}
+
+.footGrid a {
+  display: block;
   width: max-content;
+  max-width: 100%;
+  color: #a7a7b2;
+  font-size: 14px;
+  padding: 5px 0;
 }
 
-.footerCol a:hover {
-  color: var(--text-on-accent);
+.footGrid a:hover {
+  color: #fff;
 }
 
-.footerBottom {
-  border-top: 1px solid var(--footer-border);
-  padding: var(--sp-5) var(--sp-8);
-  max-width: var(--content-wide);
-  margin: 0 auto;
-  font-size: var(--fs-12);
-  color: var(--footer-muted);
+.disc {
+  margin: 26px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid #333340;
+  font-size: 12.5px;
+  color: #73737f;
+  line-height: 1.7;
+  max-width: 92ch;
+}
+
+.footBottom {
+  margin-top: 18px;
   display: flex;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: #73737f;
 }
 
 /* ---- Мобильная шторка «Ещё» ---- */
@@ -316,21 +298,34 @@
 }
 
 /* ---- Адаптив ---- */
+@media (max-width: 1180px) {
+  /* Плашка WB — украшение; на узком десктопе место нужнее меню. */
+  .wbchip {
+    display: none;
+  }
+}
+
 @media (max-width: 1023px) {
   .headerInner,
-  .footerInner,
-  .footerBottom {
+  .footerInner {
     padding-left: var(--sp-5);
     padding-right: var(--sp-5);
   }
 
-  .footerInner {
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-8);
+  .headerInner {
+    gap: 20px;
   }
 
-  .footerAbout {
-    grid-column: 1 / -1;
+  .nav {
+    gap: 16px;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .footGrid {
+    grid-template-columns: 1fr;
+    gap: 26px;
   }
 }
 
@@ -357,10 +352,12 @@
     padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 
+  .footer {
+    padding-top: 34px;
+  }
+
   .footerInner {
-    grid-template-columns: 1fr;
-    padding-top: var(--sp-8);
-    padding-bottom: var(--sp-8);
-    gap: var(--sp-6);
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
   }
 }

@@ -12,6 +12,7 @@ import { LanguageSwitch } from '../components/LanguageSwitch';
 import { isKzPath, localizePath, type T, useLocalePath, useStoredLocale, useT } from '../i18n';
 import { isPrerender } from '../lib/prerender';
 import { TelegramIcon } from '../components/TelegramIcon';
+import { BrandMark } from '../components/BrandMark';
 import { useStores } from '../stores/root-store';
 import { useVisitCounter } from '../lib/visits';
 import { BOT_URL, CHANNEL_URL } from '../lib/telegram';
@@ -98,9 +99,7 @@ export const PublicShell = observer(() => {
       <header className={s.header}>
         <div className={s.headerInner}>
           <Link to={lp('/')} className={s.brand} aria-label={t('ШК ВБ — главная', 'ШК ВБ — басты бет')}>
-            <span className={s.mark} aria-hidden="true">
-              ШК
-            </span>
+            <BrandMark />
             ШК ВБ
           </Link>
 
@@ -115,35 +114,18 @@ export const PublicShell = observer(() => {
                 {item.label}
               </NavLink>
             ))}
+            <Link to={`${lp('/')}#faq`} className={s.navLink}>
+              {t('Вопросы', 'Сұрақтар')}
+            </Link>
           </nav>
 
+          {/* Язык, валюта, бот и канал переехали в футер и в шторку «Ещё»:
+              в утверждённом прототипе шапка — только навигация и вход. */}
           <div className={s.actions}>
-            <LanguageSwitch className={s.wideOnly} />
-            <CurrencySwitch className={s.wideOnly} />
-            {/* Пилюля бота показывается только на широком экране — на мобильном
-                он доступен из шторки «Ещё» и из футера. */}
-            <a
-              className={`${s.tg} ${s.tgWide}`}
-              href={BOT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={t('Бот генерации ШК в Telegram', 'Telegram-дағы ШК генерациялау боты')}
-            >
-              <TelegramIcon className={s.tgIco} />
-              <span>{t('Бот', 'Бот')}</span>
-            </a>
-            <a className={`${s.tg} ${s.tgWide}`} href={CHANNEL_URL} target="_blank" rel="noopener noreferrer">
-              <img
-                className={s.tgAva}
-                src="/images/telegram-wb-tools-avatar-112.webp"
-                alt={t('Аватар канала WB Tools', 'WB Tools арнасының аватары')}
-                width={26}
-                height={26}
-                loading="lazy"
-              />
-              <TelegramIcon className={s.tgIco} />
-              <span>{t('Telegram-канал', 'Telegram-арна')}</span>
-            </a>
+            <span className={`${s.wbchip} ${s.wideOnly}`}>
+              <span className={s.wbdot} aria-hidden="true" />
+              {t('Работает с Wildberries', 'Wildberries-пен жұмыс істейді')}
+            </span>
             {/* Раньше кнопка всегда вела на /login: шапка не читала сессию,
                 поэтому после входа на публичных страницах висело «Войти».
                 Пока сессия проверяется, кнопку не рисуем — иначе «Войти»
@@ -176,60 +158,69 @@ export const PublicShell = observer(() => {
 
       <footer className={s.footer}>
         <div className={s.footerInner}>
-          <div className={s.footerAbout}>
-            <div className={s.brand}>
-              <span className={s.mark} aria-hidden="true">
-                ШК
-              </span>
-              ШК ВБ
+          <div className={s.footGrid}>
+            <div>
+              <div className={s.footBrand}>
+                <BrandMark size={26} />
+                ШК ВБ
+              </div>
+              <p className={s.footAbout}>
+                {t(
+                  'Генератор возвратных кодов и две программы для пунктов выдачи Wildberries — под одним аккаунтом.',
+                  'Қайтару кодтарының генераторы және Wildberries беру пункттеріне арналған екі бағдарлама — бір аккаунтта.',
+                )}
+              </p>
             </div>
-            <p>
-              {t(
-                'Инструменты для пунктов выдачи Wildberries: генератор возвратных ШК и стикеров, автоматическая печать номера ячейки, программа «Помощник ПВЗ».',
-                'Wildberries беру пункттеріне арналған құралдар: қайтару ШК мен стикерлерінің генераторы, ұяшық нөмірін автоматты басып шығару, «ПВЗ көмекшісі» бағдарламасы.',
-              )}
-            </p>
-          </div>
 
-          <div>
-            <div className={s.footerTitle}>{t('Инструменты для ПВЗ', 'ПВЗ құралдары')}</div>
-            <div className={s.footerCol}>
-              {[...nav, ...moreLinks(t)].map(item => (
+            <div>
+              <h4 className={s.footTitle}>{t('Инструменты', 'Құралдар')}</h4>
+              <Link to={lp('/')}>{t('Генератор кодов', 'Кодтар генераторы')}</Link>
+              {nav.slice(1).map(item => (
                 <Link key={item.to} to={lp(item.to)}>
                   {item.label}
                 </Link>
               ))}
+              {moreLinks(t)
+                .filter(item => item.to !== '/contacts')
+                .map(item => (
+                  <Link key={item.to} to={lp(item.to)}>
+                    {item.label}
+                  </Link>
+                ))}
               {/* Внешняя ссылка отдельно: списки выше типизированы под роутерные пути. */}
               <a href={BOT_URL} target="_blank" rel="noopener noreferrer">
-                {t('Бот генерации в Telegram', 'Telegram-дағы генерация боты')}
+                {t('Телеграм-бот', 'Телеграм-бот')}
               </a>
             </div>
-          </div>
 
-          <div>
-            <div className={s.footerTitle}>{t('Документы', 'Құжаттар')}</div>
-            <div className={s.footerCol}>
-              {/* Раньше это были <a> на статические .html вне роутера */}
+            <div>
+              <h4 className={s.footTitle}>{t('Документы', 'Құжаттар')}</h4>
               {footerDocs(t).map(item => (
                 <Link key={item.to} to={lp(item.to)}>
                   {item.label}
                 </Link>
               ))}
+              <Link to={lp('/contacts')}>{t('Контакты', 'Байланыс')}</Link>
               <a href={CHANNEL_URL} target="_blank" rel="noopener noreferrer">
                 {t('Telegram-канал', 'Telegram-арна')}
               </a>
             </div>
           </div>
-        </div>
 
-        <div className={s.footerBottom}>
-          <span>© {new Date().getFullYear()} ШК ВБ</span>
-          <span>
+          <p className={s.disc}>
             {t(
-              'Сервис не связан с ООО «Вайлдберриз» и не является его официальным продуктом.',
-              'Сервис «Вайлдберриз» ЖШҚ-мен байланысты емес және оның ресми өнімі болып табылмайды.',
+              'Доступ к программам разрешён лицам старше 18 лет. Сервис не связан с ООО «Вайлдберриз» и является независимым инструментом для операторов пунктов выдачи. Названия и товарные знаки принадлежат их правообладателям.',
+              'Бағдарламаларға 18 жастан асқан тұлғаларға рұқсат етіледі. Сервис «Вайлдберриз» ЖШҚ-мен байланысты емес және беру пункттерінің операторларына арналған тәуелсіз құрал болып табылады. Атаулар мен тауар белгілері олардың құқық иелеріне тиесілі.',
             )}
-          </span>
+          </p>
+
+          <div className={s.footBottom}>
+            <span>© {new Date().getFullYear()} ШК ВБ</span>
+            <span className={s.switches}>
+              <LanguageSwitch />
+              <CurrencySwitch />
+            </span>
+          </div>
         </div>
       </footer>
 

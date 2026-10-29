@@ -103,14 +103,15 @@ h3 {
   margin-bottom: 0;
 }
 
+/* Надзаголовок секции — как в прототипе: 13px, caps, фирменный цвет. */
 .eyebrow {
   display: inline-block;
-  font-size: var(--fs-12);
+  font-size: 13px;
   font-weight: var(--fw-bold);
-  letter-spacing: var(--tracking-wide);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent-dark);
-  margin-bottom: var(--sp-3);
+  color: var(--accent);
+  margin: 0 0 10px;
 }
 
 /* ---- Сетки ---- */

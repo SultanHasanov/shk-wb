@@ -125,7 +125,7 @@ export function TarifyPage() {
           'Лимиттер ай сайын жаңарады. Рәсімдеу — кабинетте немесе бағдарлама бетінде.',
         )}
       >
-        <AppPlansTable />
+        <AppPlansTable variant="full" />
       </Section>
 
       {/* Матрица «Печати ячеек»: срок × число ПК. */}

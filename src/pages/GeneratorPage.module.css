@@ -330,13 +330,7 @@
   }
 }
 
-/* ---- Лендинговые блоки главной (две программы, опоры, поддержка, CTA) ---- */
-.programCards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-5);
-}
-
+/* ---- Лендинговые блоки главной (по прототипу) ---- */
 .programCard {
   display: flex;
   flex-direction: column;
@@ -346,7 +340,7 @@
 
 .programCard h3 {
   margin: 0;
-  font-size: var(--fs-20);
+  font-size: var(--fs-18);
 }
 
 .programCard p {
@@ -354,10 +348,201 @@
   flex: 1;
 }
 
+/* Экосистема: две карточки-программы с иконкой, буллетами, скрином и подвалом. */
+.products {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 4px;
+}
+
+.pcard {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 28px;
+}
+
+.pcardIcon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pcard h3 {
+  margin: 16px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  font-size: 14.5px;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+.pcardList {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.pcardList li {
+  display: flex;
+  gap: 10px;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+
+.pcardList svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent);
+}
+
+.pcard figure {
+  margin-top: 18px;
+}
+
+.pcardFoot {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pcardPrice {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pcardPrice b {
+  font-size: 21px;
+}
+
+.pcardBtns {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+/* Сеть ПВЗ: текст + схема «аккаунт → пункты». */
+.net {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 36px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 44px;
+  align-items: center;
+}
+
+.netTitle {
+  font-size: 28px;
+  font-weight: 800;
+  margin: 10px 0 0;
+  letter-spacing: -0.02em;
+}
+
+.netList {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.netList li {
+  display: flex;
+  gap: 11px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.netList svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent);
+}
+
+.diagram {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 22px;
+}
+
+.hub {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: var(--accent);
+  border-radius: 12px;
+  padding: 13px 15px;
+  color: #fff;
+}
+
+.hubTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.hubSub {
+  color: #fbd6f1;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.spokes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.spoke {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px;
+}
+
+.spoke:last-child {
+  border-style: dashed;
+}
+
+.spokeTitle {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.spokeSub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
 .pillars {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-5);
+  gap: var(--sp-4);
 }
 
 .pillar {
@@ -400,19 +585,41 @@
   margin-bottom: var(--sp-2);
 }
 
+.finalCtaActions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
 @media (max-width: 1023px) {
   .pillars {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
+@media (max-width: 900px) {
+  .products,
+  .net {
+    grid-template-columns: 1fr;
+  }
+
+  .net {
+    gap: 28px;
+  }
+}
+
 @media (max-width: 767px) {
-  .programCards,
   .pillars {
     grid-template-columns: 1fr;
   }
 
-  .finalCta a,
+  .finalCtaActions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .finalCtaActions a,
   .finalCta button {
     width: 100%;
   }
