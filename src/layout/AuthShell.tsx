@@ -1,5 +1,6 @@
 import { Link, Outlet } from 'react-router-dom';
 import { LanguageSwitch } from '../components/LanguageSwitch';
+import { BrandMark } from '../components/BrandMark';
 import { useLocalePath, useT } from '../i18n';
 import s from './AuthShell.module.css';
 
@@ -15,9 +16,7 @@ export function AuthShell() {
     <div className={s.shell}>
       <div className={s.top}>
         <Link to={lp('/')} className={s.brand} aria-label={t('ШК ВБ — главная', 'ШК ВБ — басты бет')}>
-          <span className={s.mark} aria-hidden="true">
-            ШК
-          </span>
+          <BrandMark size={26} />
           ШК ВБ
         </Link>
         <LanguageSwitch />

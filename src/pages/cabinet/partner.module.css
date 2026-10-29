@@ -293,7 +293,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .flow {
     grid-template-columns: 1fr;
   }

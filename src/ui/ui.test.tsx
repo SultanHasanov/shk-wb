@@ -13,6 +13,7 @@ import {
   Progress,
   Segmented,
   Tabs,
+  TileGroup,
 } from '.';
 
 describe('UI kit', () => {
@@ -140,14 +141,45 @@ describe('UI kit', () => {
     expect(bar.firstElementChild).toHaveStyle({ width: '100%' });
   });
 
-  it('раскрывает ответ аккордеона', async () => {
+  it('раскрывает ответ аккордеона и помечает его data-faq', async () => {
     const user = userEvent.setup();
     render(<Accordion items={[{ q: 'Вопрос', a: 'Ответ' }]} />);
 
     const summary = screen.getByText('Вопрос');
-    expect(summary.closest('details')).not.toHaveAttribute('open');
+    const details = summary.closest('details');
+    expect(details).not.toHaveAttribute('open');
+    // build-static.mjs собирает FAQPage только из details[data-faq]
+    expect(details).toHaveAttribute('data-faq');
 
     await user.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
+    expect(details).toHaveAttribute('open');
+  });
+
+  it('переключает значение TileGroup и даёт плиткам роль radio', async () => {
+    const user = userEvent.setup();
+
+    function Harness() {
+      const [value, setValue] = useState<'product' | 'box'>('product');
+      return (
+        <TileGroup
+          label="Что сгенерировать"
+          value={value}
+          onChange={setValue}
+          options={[
+            { value: 'product', label: 'Стикеры для товаров' },
+            { value: 'box', label: 'QR для возвратных коробок' },
+          ]}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const product = screen.getByRole('radio', { name: 'Стикеры для товаров' });
+    const box = screen.getByRole('radio', { name: 'QR для возвратных коробок' });
+
+    expect(product).toHaveAttribute('aria-checked', 'true');
+    await user.click(box);
+    expect(box).toHaveAttribute('aria-checked', 'true');
+    expect(product).toHaveAttribute('aria-checked', 'false');
   });
 });

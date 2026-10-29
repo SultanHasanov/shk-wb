@@ -307,10 +307,41 @@ export const PricingPacks = observer(() => {
         'Нақты нөмір бойынша генерация — 3 ₽-ден. Пакет неғұрлым үлкен болса, бір генерация соғұрлым арзан.',
       )}
     >
-      <div className={s.grid}>
+      <div className={s.packRow}>
         <button type="button" className={s.pack} onClick={() => choose('custom')}><strong>{t('от 3 ₽', '3 ₽-ден')}</strong><span>{t('По конкретному номеру · пакеты до 100', 'Нақты нөмір бойынша · 100-ге дейін')}</span></button>
-        <button type="button" className={s.pack} onClick={() => choose('batch')}><strong>20 ₽</strong><span>{t('Пачка из 50 кодов · один PDF', '50 кодтан тұратын пакет · бір PDF')}</span></button>
+        <button type="button" className={`${s.pack} ${s.packPop}`} onClick={() => choose('batch')}><strong>20 ₽</strong><span>{t('Пачка из 50 кодов · один PDF', '50 кодтан тұратын пакет · бір PDF')}</span></button>
       </div>
+
+      {/* Лесенка пакетов по номеру: чем больше, тем дешевле генерация. Клик по
+          ступени открывает оплату с выбранным количеством. */}
+      <div className={s.ladder}>
+        {Object.entries(CUSTOM_GENERATION_PACKAGES).map(([quantityText, total]) => {
+          const quantity = Number(quantityText);
+          const perUnit = total / quantity;
+          const discount = Math.round((1 - total / (7.5 * quantity)) * 100);
+          return (
+            <button
+              key={quantity}
+              type="button"
+              className={s.lad}
+              onClick={() => {
+                generator.setMode('custom');
+                setSelectedQuantity(quantity);
+                setAccepted(false);
+                setSelectedMode('custom');
+              }}
+            >
+              <span className={s.ladQ}>{quantity} {t('шт', 'дана')}</span>
+              <span className={s.ladP}>{formatCheckoutRub(total)}</span>
+              <span className={s.ladU}>
+                {formatCheckoutRub(perUnit)} / {t('шт', 'дана')}
+                {discount > 0 && <> · <b>−{discount}%</b></>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {auth.isAuthenticated && <div className={s.checkout}><Link to="/cabinet/packages"><Button size="lg">{t('Пополнить баланс', 'Балансты толықтыру')}</Button></Link></div>}
 
       <Modal

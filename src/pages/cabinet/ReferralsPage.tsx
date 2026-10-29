@@ -7,6 +7,8 @@ import { useDocumentMeta } from '../../lib/seo';
 import { useT } from '../../i18n';
 import c from './cabinet.module.css';
 
+const compactMoney = (kopecks: number) => `${Math.round(kopecks / 100).toLocaleString('ru-RU')} ₽`;
+
 export function ReferralsPage() {
   const t = useT();
   useDocumentMeta(t('Рефералы — кабинет', 'Рефералдар — кабинет'));
@@ -46,24 +48,49 @@ export function ReferralsPage() {
     );
 
   return (
-    <div className="page">
+    <div className={`page ${c.mobilePage} ${c.referralsPage}`}>
       <header className="page-head">
         <h1>{t('Рефералы', 'Рефералдар')}</h1>
         <p>{t('10% от денежной части всех успешных покупок приглашённых пользователей.', 'Шақырылған пайдаланушылардың барлық сәтті сатып алуларының ақшалай бөлігінен 10%.')}</p>
       </header>
 
-      <div className="grid grid-4">
+      <Card className={c.refHero}>
+        <h2>{t('Приглашайте коллег — получайте 10%', 'Әріптестеріңізді шақырыңыз — 10% алыңыз')}</h2>
+        <p className={c.refHeroText}>
+          {t(
+            'С каждой оплаты приглашённого (в том числе с пополнений баланса) вам начисляется 10%. Поделитесь ссылкой с другими владельцами пунктов.',
+            'Шақырылған адамның әр төлемінен (баланс толықтыруларын қоса) сізге 10% есептеледі. Сілтемені басқа пункт иелерімен бөлісіңіз.',
+          )}
+        </p>
+        <div className={c.refHeroRow}>
+          <div className={c.refHeroLink}>
+            <Input value={r.link} readOnly aria-label={t('Персональная ссылка', 'Жеке сілтеме')} />
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              navigator.clipboard?.writeText(r.link);
+              toast(t('Ссылка скопирована', 'Сілтеме көшірілді'), 'success');
+            }}
+          >
+            <Copy size={16} />
+            {t('Копировать', 'Көшіру')}
+          </Button>
+        </div>
+      </Card>
+
+      <div className={`grid grid-4 section ${c.refStats}`}>
         <Card>
           <Stat value={r.invited} label={t('приглашено', 'шақырылды')} icon={<Users size={20} />} />
         </Card>
         <Card>
-          <Stat value={money(r.availableKopecks)} label={t('доступно к выводу', 'шығаруға қолжетімді')} />
+          <Stat value={compactMoney(r.earnedKopecks)} label={t('заработано всего', 'барлығы табылды')} />
         </Card>
         <Card>
-          <Stat value={money(r.earnedKopecks)} label={t('заработано всего', 'барлығы табылды')} />
+          <Stat value={compactMoney(r.availableKopecks)} label={t('доступно к выводу', 'шығаруға қолжетімді')} />
         </Card>
-        <Card>
-          <Stat value={money(r.paidKopecks)} label={t('выплачено', 'төленді')} />
+        <Card className={c.refPaidStat}>
+          <Stat value={compactMoney(r.paidKopecks)} label={t('выплачено', 'төленді')} />
         </Card>
       </div>
 
@@ -82,23 +109,7 @@ export function ReferralsPage() {
         </Card>
       )}
 
-      <Card className="section">
-        <Field label={t('Персональная ссылка', 'Жеке сілтеме')}>
-          <div className={c.refLink}>
-            <Input value={r.link} readOnly />
-            <Button
-              variant="secondary"
-              onClick={() => {
-                navigator.clipboard?.writeText(r.link);
-                toast(t('Ссылка скопирована', 'Сілтеме көшірілді'), 'success');
-              }}
-            >
-              <Copy size={16} />
-              {t('Копировать', 'Көшіру')}
-            </Button>
-          </div>
-        </Field>
-
+      <Card className={`section ${c.refInfo}`}>
         <Alert tone="info">
           {t(
             'Отправьте ссылку кому угодно: она открывает обычный сайт, где можно сразу создавать стикеры и покупать пакеты. Приглашение запоминается в браузере человека на 30 дней и закрепляется за вами в момент, когда он создаст аккаунт. После этого вы получаете 10% от каждой его оплаты. Приглашение не сработает, если у человека уже есть аккаунт или он зарегистрируется позже 30 дней.',
@@ -107,8 +118,8 @@ export function ReferralsPage() {
         </Alert>
       </Card>
 
-      <Card className="section">
-        <h2>{t('Приглашённые пользователи', 'Шақырылған пайдаланушылар')}</h2>
+      <Card className={`section ${c.referralsTable}`}>
+        <h2>{t('Начисления', 'Есептеулер')}</h2>
         {referrals.length ? (
           <Table>
             <thead>
@@ -137,7 +148,7 @@ export function ReferralsPage() {
         )}
       </Card>
 
-      <div className="grid grid-2 section">
+      <div className={`grid grid-2 section ${c.referralPayout}`}>
         <Card>
           <h2>{t('Запросить выплату', 'Төлемді сұрау')}</h2>
           <div className="stack">

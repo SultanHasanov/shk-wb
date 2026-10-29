@@ -292,10 +292,12 @@
 }
 
 /* ---- Мобильный drawer ---- */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .shell,
   .collapsed {
     padding-left: 0;
+    /* Контент не должен прятаться под фиксированным нижним таббаром. */
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 
   .sidebar,
@@ -319,7 +321,30 @@
   }
 
   .topbar {
-    padding: 0 var(--sp-4);
+    height: 54px;
+    padding: 0 16px;
+    background: var(--page);
+    backdrop-filter: none;
+  }
+
+  .title {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobileMenuButton,
+  .language {
+    display: none !important;
+  }
+
+  .topActions {
+    display: none;
+  }
+
+  .overviewRoute .topActions {
+    display: flex;
   }
 
   .collapse {
@@ -339,5 +364,16 @@
 
   .accountTrigger {
     padding: var(--sp-1);
+    border: 0;
+    background: var(--accent-soft);
+  }
+
+  .accountTrigger > svg {
+    display: none;
+  }
+
+  .avatar {
+    width: 30px;
+    height: 30px;
   }
 }

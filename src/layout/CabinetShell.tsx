@@ -20,8 +20,10 @@ import {
   User,
   Users,
   Bell,
+  WalletCards,
 } from 'lucide-react';
 import { Button } from '../ui';
+import { TabBar, type TabItem } from './TabBar';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStores } from '../stores/root-store';
 import s from './CabinetShell.module.css';
@@ -52,12 +54,12 @@ const cabinetNavItems = (t: T) => [
 ];
 
 const titlesFor = (t: T): Record<string, string> => ({
-  '/cabinet': t('Обзор', 'Шолу'),
+  '/cabinet': t('Кабинет', 'Кабинет'),
   '/cabinet/generator': t('Генератор', 'Генератор'),
   '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
-  '/cabinet/subscription': t('Подписка', 'Жазылым'),
-  '/cabinet/keys': t('Ключи и доступы', 'Кілттер мен қолжетімділік'),
-  '/cabinet/packages': t('Пакеты и код доступа', 'Пакеттер мен қолжетімділік коды'),
+  '/cabinet/subscription': t('Тарифы «Помощник ПВЗ»', '«ПВЗ көмекшісі» тарифтері'),
+  '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
+  '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),
   '/cabinet/orders': t('Заказы', 'Тапсырыстар'),
   '/cabinet/referrals': t('Рефералы', 'Рефералдар'),
@@ -90,6 +92,27 @@ export const CabinetShell = observer(() => {
   const cabinetNav = cabinetNavItems(t);
   const titles = titlesFor(t);
   const email = auth.displayName || t('Пользователь', 'Пайдаланушы');
+
+  // Нижняя навигация кабинета (телефон): частые разделы + «Ещё», открывающее тот
+  // же боковой drawer со всем списком. Бейдж уведомлений переезжает на «Ещё».
+  const unread = cabinet.data?.unreadNotifications ?? 0;
+  const cabinetTabs: TabItem[] = [
+    { key: 'overview', to: '/cabinet', end: true, label: t('Обзор', 'Шолу'), Icon: Home },
+    ...(APP_SUBSCRIPTIONS_LIVE
+      ? [{ key: 'subscription', to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop }]
+      : []),
+    { key: 'packages', to: '/cabinet/packages', label: t('Баланс', 'Баланс'), Icon: WalletCards },
+    { key: 'referrals', to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users },
+    {
+      key: 'more',
+      label: t('Ещё', 'Тағы'),
+      Icon: Menu,
+      onClick: ui.toggleMobile,
+      active: ui.sidebarOpen || !['/cabinet', '/cabinet/subscription', '/cabinet/packages', '/cabinet/referrals'].includes(location.pathname),
+      badge: unread,
+      ariaLabel: unread > 0 ? t(`Ещё, непрочитанных: ${unread}`, `Тағы, оқылмаған: ${unread}`) : t('Ещё', 'Тағы'),
+    },
+  ];
 
   // Закрывать аккаунт-меню по клику вне и по Escape
   useEffect(() => {
@@ -174,7 +197,9 @@ export const CabinetShell = observer(() => {
         } catch (error) {
           if (
             error instanceof ApiError &&
-            (error.code === 'ASSET_OWNED' || error.code === 'ASSET_NOT_FOUND')
+            (error.code === 'ASSET_UNAVAILABLE' ||
+              error.code === 'ASSET_OWNED' ||
+              error.code === 'ASSET_NOT_FOUND')
           ) {
             if (!cancelled) markProcessed(code);
             return false;
@@ -234,7 +259,7 @@ export const CabinetShell = observer(() => {
 
   return (
     <div
-      className={`${s.shell} ${ui.sidebarCollapsed ? s.collapsed : ''} ${ui.sidebarOpen ? s.open : ''}`}
+      className={`${s.shell} ${ui.sidebarCollapsed ? s.collapsed : ''} ${ui.sidebarOpen ? s.open : ''} ${location.pathname === '/cabinet' ? s.overviewRoute : ''}`}
     >
       {/* Ссылка была только в PublicShell — клавиатурный пользователь кабинета
           каждый раз проходил весь сайдбар, чтобы добраться до содержимого. */}
@@ -295,7 +320,7 @@ export const CabinetShell = observer(() => {
         <header className={s.topbar}>
           <Button
             variant="ghost"
-            className="mobile-only"
+            className={`mobile-only ${s.mobileMenuButton}`}
             onClick={ui.toggleMobile}
             aria-label={t('Открыть меню', 'Мәзірді ашу')}
           >
@@ -304,7 +329,7 @@ export const CabinetShell = observer(() => {
           <span className={s.title}>{titles[location.pathname] ?? t('Кабинет', 'Кабинет')}</span>
 
           <div className={s.topActions}>
-            <LanguageSwitch />
+            <span className={s.language}><LanguageSwitch /></span>
             <div className={s.account} ref={accountRef}>
               <button
                 type="button"
@@ -362,6 +387,8 @@ export const CabinetShell = observer(() => {
           <Outlet />
         </main>
       </div>
+
+      <TabBar items={cabinetTabs} label={t('Навигация кабинета', 'Кабинет навигациясы')} />
     </div>
   );
 });

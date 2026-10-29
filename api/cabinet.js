@@ -12,6 +12,7 @@ const {
 } = require('../server/_user-auth');
 const { createNotification } = require('../server/_notifications');
 const { enforceRateLimit } = require('../server/_rate-limit');
+const { guardAttempts, recordFailures } = require('../server/_attempt-guard');
 const partners = require('../server/_partners');
 const { walletSummary } = require('../server/_wallet');
 
@@ -965,14 +966,46 @@ module.exports = async function handler(req, res) {
     if (a === 'claim' && req.method === 'POST') {
       const parsed = ClaimInput.safeParse(req.body);
       if (!parsed.success) return bad(res, parsed);
-      const result = await supabaseFetch('rpc/claim_user_asset', {
-        method: 'POST',
-        body: JSON.stringify({
-          p_user_id: user.id,
-          p_kind: parsed.data.kind,
-          p_value: parsed.data.value,
-        }),
-      });
+      // Анти-перебор чужих ключей и 6-значных кодов: считаем ТОЛЬКО неудачные
+      // попытки, успешная привязка лимит не расходует. 6-значный код доступа —
+      // короткий и подбираемый, поэтому у него отдельный жёсткий лимит.
+      const sixDigit = parsed.data.kind === 'sticker' && /^\d{6}$/.test(parsed.data.value.trim());
+      const dims = [
+        { scope: 'claim-user', limit: 25, windowSeconds: 3600, key: user.id },
+        { scope: 'claim-ip', limit: 40, windowSeconds: 3600 },
+        ...(sixDigit ? [{ scope: 'claim-code', limit: 10, windowSeconds: 3600, key: user.id }] : []),
+      ];
+      if (!(await guardAttempts(req, res, dims))) return;
+      let result;
+      try {
+        result = await supabaseFetch('rpc/claim_user_asset', {
+          method: 'POST',
+          body: JSON.stringify({
+            p_user_id: user.id,
+            p_kind: parsed.data.kind,
+            p_value: parsed.data.value,
+          }),
+        });
+      } catch (error) {
+        // Неудача (чужой/не найден/не подтверждён) расходует лимит; успех — нет.
+        await recordFailures(req, dims);
+        // Ключи и коды подбираемы: «чужой» и «не найден» отдаём ОДНИМ ответом
+        // ASSET_UNAVAILABLE, иначе по разнице кодов можно перебором узнавать, какие
+        // ключи существуют. Заказ опознаётся по непубличному UUID-токену (перебор
+        // невозможен), и привязка гостевых заказов в CabinetShell различает «чужой»
+        // (выбросить) и «ещё не оплачен» (повторить) — для него коды прежние.
+        const info = JSON.stringify(error.details || '');
+        if (
+          parsed.data.kind !== 'order' &&
+          (info.includes('belongs to another') || info.includes('Asset not found'))
+        )
+          return res.status(404).json({
+            error:
+              'Код или ключ не найден или уже используется другим аккаунтом. Если это ваш ключ — напишите в поддержку.',
+            code: 'ASSET_UNAVAILABLE',
+          });
+        throw error;
+      }
       return res.status(201).json(result);
     }
     if (a === 'orders' && req.method === 'GET') {

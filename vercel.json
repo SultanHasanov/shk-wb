@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
+  "git": { "deploymentEnabled": { "site-redesign": false } },
   "functions": {
     "api/payments.js": { "includeFiles": "api/_private/*.exe" },
     "api/stickers/pdf.js": { "maxDuration": 60 },
@@ -74,6 +75,7 @@
     ,{ "source": "/api/cell-print/login/start", "destination": "/api/cell-print?action=login-start" }
     ,{ "source": "/api/cell-print/login/poll", "destination": "/api/cell-print?action=login-poll" }
     ,{ "source": "/api/cell-print/:action(login|refresh|keys|claim|logout)", "destination": "/api/cell-print?action=:action" }
+    ,{ "source": "/api/cell-print/account/:sub(link|devices|revoke)", "destination": "/api/cell-print?action=account&sub=:sub" }
     ,{ "source": "/cell-print", "destination": "/cell-print.html" }
     ,{ "source": "/program", "destination": "/program.html" }
     ,{ "source": "/vozvratnye-stikery-wb", "destination": "/vozvratnye-stikery-wb.html" }

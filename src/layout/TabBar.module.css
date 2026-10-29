@@ -1,0 +1,81 @@
+/* Нижняя навигация показывается только на телефоне: на десктопе навигация в
+   шапке (публичная часть) или в сайдбаре (кабинет). */
+.tabbar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Ниже скрима (--z-scrim 25): когда открыт сайдбар-drawer кабинета, его
+       затемнение перекрывает и таббар. */
+    z-index: var(--z-topbar);
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border);
+    /* В Telegram Mini App системного safe-area нет, но бот отдаёт свой inset. */
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    width: 100%;
+    min-height: var(--tabbar-h);
+    padding: var(--sp-2) var(--sp-1) calc(var(--sp-2) - 2px);
+    border: 0;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: var(--fs-11);
+    font-weight: var(--fw-semibold);
+    text-align: center;
+  }
+
+  .tab.active {
+    color: var(--accent-dark);
+  }
+
+  .icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+
+  .label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge {
+    position: absolute;
+    top: -7px;
+    right: -10px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--text-on-accent);
+    font-size: 9px;
+    font-weight: var(--fw-black);
+    line-height: 1;
+  }
+}

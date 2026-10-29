@@ -1,18 +1,29 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { observer } from 'mobx-react-lite';
-import { ArrowRight, Download, Printer as PrinterIcon, Share2 } from 'lucide-react';
+import {
+  ArrowRight,
+  Building2,
+  Check,
+  Download,
+  LayoutGrid,
+  LifeBuoy,
+  MessageCircle,
+  Printer as PrinterIcon,
+  RefreshCcw,
+  ScanLine,
+  Share2,
+} from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { api, isOwnerError, isQuotaError } from '../api/client';
 import { CUSTOM_CODE_LENGTH, MAX_BATCH_QUANTITY, useStores } from '../stores/root-store';
 import { ThermalPrint } from '../components/ThermalPrint';
 import { Hero } from '../components/Hero';
 import { Section } from '../components/Section';
-import { Steps } from '../components/Steps';
 import { PricingPacks } from '../components/PricingPacks';
 import { GeneratedCounter } from '../components/GeneratedCounter';
-import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { TelegramBotPromo } from '../components/TelegramBotPromo';
+import { AppPlansTable } from '../components/AppPlansTable';
 import { BulkCustomStickerEditor } from '../components/BulkCustomStickerEditor';
 import {
   Accordion,
@@ -24,10 +35,14 @@ import {
   Field,
   Input,
   Modal,
+  ScreenshotSlot,
   Segmented,
   Skeleton,
+  TileGroup,
 } from '../ui';
 import { MIN_PER_UNIT } from '../lib/pricing';
+import { PROGRAM_DOWNLOAD_URL, CELL_PRINT_DOWNLOAD_URL } from '../lib/downloads';
+import { SUPPORT_URL } from '../lib/telegram';
 import { useDocumentMeta } from '../lib/seo';
 import s from './GeneratorPage.module.css';
 import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
@@ -106,31 +121,14 @@ const kindOptions = (t: T) => [
  * «что за код доступа и где его взять»: из шага 1 видно, что код нужен сразу и
  * приходит вместе с пакетом.
  */
-const steps = (t: T) => [
-  {
-    title: t('Выберите, что печатать', 'Не басып шығаратыныңызды таңдаңыз'),
-    text: t(
-      'Товарные стикеры или QR-коды возвратных коробок. Массово — пачкой по количеству, либо по конкретному номеру ШК.',
-      'Тауар стикерлері немесе қайтару қораптарының QR-кодтары. Көптеп — санына қарай бумамен, не нақты ШК нөмірі бойынша.',
-    ),
-  },
-  {
-    title: t('Укажите данные', 'Деректерді көрсетіңіз'),
-    text: t(
-      'Для массовой печати — количество, для одиночной — номер. Для коробок можно задать свой префикс. Всё проверяется на лету.',
-      'Көптеп басу үшін — саны, жеке басу үшін — нөмірі. Қораптар үшін өз префиксіңізді беруге болады. Бәрі бірден тексеріледі.',
-    ),
-  },
-  {
-    title: t('Скачайте или напечатайте', 'Жүктеп алыңыз немесе басып шығарыңыз'),
-    text: t(
-      'Готовый PDF формата A4 для обычного принтера или прямая отправка на термопринтер. Файл остаётся у вас.',
-      'Кәдімгі принтерге арналған дайын A4 PDF немесе термопринтерге тікелей жіберу. Файл өзіңізде қалады.',
-    ),
-  },
-];
-
 const faq = (t: T) => [
+  {
+    q: t('Что такое ШК на ВБ?', 'ВБ-дегі ШК деген не?'),
+    a: t(
+      'ШК — это штрих-код, которым Wildberries помечает товары и возвратные коробки. На пункте выдачи он нужен для приёмки, поиска и возврата товара: по нему система узнаёт позицию. Наш генератор создаёт возвратные ШК товаров и QR-коды коробок и отдаёт готовый PDF для печати.',
+      'ШК — бұл Wildberries тауарлар мен қайтару қораптарын белгілейтін штрих-код. Беру пунктінде ол тауарды қабылдау, іздеу және қайтару үшін қажет: сол арқылы жүйе позицияны таниды. Біздің генератор тауарлардың қайтару ШК-ларын және қораптардың QR-кодтарын жасап, басып шығаруға дайын PDF береді.',
+    ),
+  },
   {
     q: t('Что такое возвратный ШК и зачем он нужен?', 'Қайтару ШК деген не және ол не үшін қажет?'),
     a: t(
@@ -403,26 +401,36 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   const leftAfter = remaining === undefined ? undefined : Math.max(0, remaining - plannedCount);
   const notEnough = !auth.isAuthenticated && remaining !== undefined && remaining < plannedCount;
 
+  // Код доступа сохраняется в localStorage как удобство для постоянных клиентов,
+  // но после выхода из аккаунта там остаётся код владельца — гостю он не подходит
+  // (ACCESS_CODE_OWNER_REQUIRED) и, пока поле непустое, блокирует гостевую оплату
+  // (она запускается только при пустом коде). Эта кнопка очищает чужой код.
+  const clearAccessCode = () => {
+    g.accessCode = '';
+    try {
+      localStorage.removeItem('sticker_access_code');
+    } catch {
+      // Запрет на запись в хранилище не должен мешать очистке поля.
+    }
+  };
+
   return (
     <div className={s.layout}>
       <Card className={s.form}>
         <div className="stack">
-          {/* Фотографии вместо иконок: по картинке сразу видно, что печатается —
+          {/* Плитки вида генерации: по картинке сразу видно, что печатается —
               наклейка на пакет с товаром или QR на возвратную коробку. */}
-          <div className={s.kindPicker} role="radiogroup" aria-label={t('Тип стикера', 'Стикер түрі')}>
-            {kindOptions(t).map(option => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={g.kind === option.value}
-                className={`${s.kindCard} ${g.kind === option.value ? s.kindActive : ''}`}
-                onClick={() => g.setKind(option.value)}
-              >
-                <img src={option.image} alt="" loading="lazy" />
-                <span>{option.label}</span>
-              </button>
-            ))}
+          <div className={s.kindSelector}>
+            <TileGroup
+              label={t('Тип стикера', 'Стикер түрі')}
+              value={g.kind}
+              onChange={v => g.setKind(v)}
+              options={kindOptions(t).map(option => ({
+                value: option.value,
+                label: option.label,
+                media: <img src={option.image} alt="" loading="lazy" />,
+              }))}
+            />
           </div>
 
           <Segmented
@@ -544,6 +552,17 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             />
           </Field>}
 
+          {/* Чужой/старый код подставился из этого браузера — дать его убрать,
+              иначе гостевая оплата заблокирована (запускается при пустом коде). */}
+          {!auth.isAuthenticated && g.accessCode && (
+            <p className={s.printHelp}>
+              {t('Код подставлен из этого браузера.', 'Код осы браузерден қойылды.')}{' '}
+              <button type="button" className={s.codeToggle} onClick={clearAccessCode}>
+                {t('Это не мой код — очистить', 'Бұл менің кодым емес — тазалау')}
+              </button>
+            </p>
+          )}
+
           <div className={s.remaining}>
             {access.isLoading && <Skeleton width="180px" />}
             {remaining !== undefined && (
@@ -551,7 +570,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 {t('Осталось генераций:', 'Қалған генерациялар:')} {remaining}
               </Badge>
             )}
-            {(lowQuota || !g.accessCode) && (
+            {/* Гостю предлагаем покупку сразу — даже когда код уже подставлен. */}
+            {(lowQuota || !g.accessCode || !auth.isAuthenticated) && (
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
                 {t('Пополнить баланс', 'Балансты толықтыру')}
               </button>
@@ -606,19 +626,33 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               </button>
             </Alert>
           ) : ownerBlocked ? (
-            /* Текст ошибки сервера кончается словами «Войдите под владельцем
-               кода», но пойти туда было не по чему: собираем ту же фразу с
-               кнопкой и возвратом на эту же страницу после входа. */
+            /* Чужой код не подошёл: кроме входа под владельцем предлагаем купить —
+               очистить код и сгенерировать без него (гостевая оплата) либо взять
+               пакет. Раньше тут был только вход, и покупка не предлагалась вовсе. */
             <Alert tone="error">
-              {t('Этот код привязан к другому аккаунту.', 'Бұл код басқа аккаунтқа байланған.')}{' '}
+              {t('Этот код принадлежит другому аккаунту.', 'Бұл код басқа аккаунтқа тиесілі.')}{' '}
               <Link
                 className={s.alertLogin}
                 to="/login"
                 state={{ from: location.pathname + location.search }}
               >
-                {t('Войдите', 'Код иесінің')}
+                {t('Войдите', 'Иесі ретінде')}
               </Link>{' '}
-              {t('под владельцем кода.', 'аккаунтымен кіріңіз.')}
+              {t('под его владельцем,', 'кіріңіз,')}{' '}
+              <button type="button" className={s.codeToggle} onClick={clearAccessCode}>
+                {t('сгенерируйте без кода', 'кодсыз генерациялаңыз')}
+              </button>{' '}
+              {t('или', 'немесе')}{' '}
+              <button
+                type="button"
+                className={s.codeToggle}
+                onClick={() => {
+                  clearAccessCode();
+                  onNeedPackages();
+                }}
+              >
+                {t('купите пакет', 'пакет сатып алыңыз')}
+              </button>.
             </Alert>
           ) : (
             mutation.isError && <Alert tone="error">{mutation.error.message}</Alert>
@@ -876,30 +910,41 @@ export const GeneratorPage = observer(() => {
   return (
     <>
       <Hero
+        mobileDense
         eyebrow={t('Онлайн-инструмент', 'Онлайн-құрал')}
         title={
           <>
-            <em>{t('Генератор ШК ВБ', 'ШК ВБ генераторы')}</em>
-            {t(': возвратные стикеры и QR-коды коробок', ': қайтару стикерлері мен қорап QR-кодтары')}
+            <span className={s.desktopOnly}>
+              <em>{t('Генератор ШК ВБ', 'ШК ВБ генераторы')}</em>
+              {t(': возвратные стикеры и QR-коды коробок', ': қайтару стикерлері мен қорап QR-кодтары')}
+            </span>
+            <span className={s.mobileOnly}>
+              {t('Возвратные ШК и QR коробок', 'Қайтару ШК және қорап QR-кодтары')}
+            </span>
           </>
         }
         copy={
           <>
-            {t(
-              'Создавайте возвратные ШК (штрихкоды) Wildberries для товаров и QR-коды коробок по номеру. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или термопринтер. Генерации покупаются пакетами —',
-              'Тауарларға арналған Wildberries қайтару ШК-ларын (штрихкодтарын) және нөмір бойынша қорап QR-кодтарын жасаңыз. Дайын PDF-ті жүктеп алыңыз немесе заттаңбаларды бірден кәдімгі не термопринтерге жіберіңіз. Генерациялар пакетпен сатылады —',
-            )}{' '}
-            <strong>{t('7,50 ₽ по номеру', 'Нөмір бойынша 7,50 ₽')}</strong>{' '}
-            {t('или 50 кодов за 20 ₽.', 'немесе 50 код 20 ₽.')}
+            <span className={s.desktopOnly}>
+              {t(
+                'Создавайте возвратные ШК (штрихкоды) Wildberries для товаров и QR-коды коробок по номеру. Скачивайте готовый PDF либо сразу отправляйте этикетки на обычный или термопринтер. Генерации покупаются пакетами —',
+                'Тауарларға арналған Wildberries қайтару ШК-ларын (штрихкодтарын) және нөмір бойынша қорап QR-кодтарын жасаңыз. Дайын PDF-ті жүктеп алыңыз немесе заттаңбаларды бірден кәдімгі не термопринтерге жіберіңіз. Генерациялар пакетпен сатылады —',
+              )}{' '}
+              <strong>{t('7,50 ₽ по номеру', 'Нөмір бойынша 7,50 ₽')}</strong>{' '}
+              {t('или 50 кодов за 20 ₽.', 'немесе 50 код 20 ₽.')}
+            </span>
+            <span className={s.mobileOnly}>
+              {t(
+                'Введите номер — получите готовый PDF для печати. 7,50 ₽ по номеру или 50 кодов за 20 ₽.',
+                'Нөмірді енгізіңіз — басып шығаруға дайын PDF алыңыз. Нөмір бойынша 7,50 ₽ немесе 50 код 20 ₽.',
+              )}
+            </span>
           </>
         }
         trust={trustItems(t, formatPerUnit(MIN_PER_UNIT))}
       />
 
-      <Section id="how" eyebrow={t('Три шага', 'Үш қадам')} title={t('Как это работает', 'Бұл қалай жұмыс істейді')}>
-        <Steps steps={steps(t)} />
-      </Section>
-
+      {/* Сам генератор — сразу под hero: посетитель пришёл печатать, а не читать. */}
       <div className="page" id="generator">
         <GeneratorWorkspace onNeedPackages={goToPackages} />
         <div className="section">
@@ -908,13 +953,202 @@ export const GeneratorPage = observer(() => {
       </div>
 
       <GeneratedCounter />
+
+      {/* «Выгоднее пакетами» — блок #packages внутри. */}
       <PricingPacks />
 
-      <Section id="faq" eyebrow={t('Частые вопросы', 'Жиі қойылатын сұрақтар')} title={t('Вопросы о генераторе', 'Генератор туралы сұрақтар')}>
+      {/* Экосистема: две программы под тем же аккаунтом (по прототипу). */}
+      <Section
+        id="products"
+        eyebrow={t('Не только генератор', 'Тек генератор ғана емес')}
+        title={t('Экосистема для всего пункта выдачи', 'Бүкіл беру пунктіне арналған экожүйе')}
+        lead={t(
+          'Кроме кодов у нас две программы для Windows под той же учётной записью. Скачиваются бесплатно, платите помесячно и только за то, чем пользуетесь.',
+          'Кодтардан бөлек бізде сол тіркелгідегі Windows-қа арналған екі бағдарлама бар. Тегін жүктеледі, ай сайын тек пайдаланғаныңыз үшін төлейсіз.',
+        )}
+      >
+        <div className={s.products}>
+          <article className={s.pcard}>
+            <span className={s.pcardIcon}><ScanLine size={24} /></span>
+            <h3>{t('Помощник ПВЗ', 'ПВЗ көмекшісі')}</h3>
+            <p className={s.tagline}>{t('Вся выдача в одном окне', 'Бүкіл беру бір терезеде')}</p>
+            <ul className={s.pcardList}>
+              <li><Check size={18} />{t('Подбор кода клиента по номеру ячейки', 'Ұяшық нөмірі бойынша клиент кодын іріктеу')}</li>
+              <li><Check size={18} />{t('Ячейки, товары «в пути», досье клиента', 'Ұяшықтар, «жолдағы» тауарлар, клиент досьесі')}</li>
+              <li><Check size={18} />{t('Отзывы, стикеры, сотрудники и зарплата', 'Пікірлер, стикерлер, қызметкерлер мен жалақы')}</li>
+            </ul>
+            <ScreenshotSlot
+              src="/images/screenshot-pvz-helper.webp"
+              alt={t('Окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының терезесі')}
+            />
+            <div className={s.pcardFoot}>
+              <span className={s.pcardPrice}>{t('от', 'бастап')} <b>190</b> ₽/{t('мес', 'ай')}</span>
+              <span className={s.pcardBtns}>
+                <Link to="/program"><Button variant="secondary" size="sm">{t('Подробнее', 'Толығырақ')}</Button></Link>
+                <a href={PROGRAM_DOWNLOAD_URL}><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
+              </span>
+            </div>
+          </article>
+
+          <article className={s.pcard}>
+            <span className={s.pcardIcon}><PrinterIcon size={24} /></span>
+            <h3>{t('Печать ячеек', 'Ұяшық басып шығару')}</h3>
+            <p className={s.tagline}>{t('Этикетка с номером ячейки печатается сама', 'Ұяшық нөмірі бар заттаңба өзі басылады')}</p>
+            <ul className={s.pcardList}>
+              <li><Check size={18} />{t('Ловит скан товара рядом с WB_PVZ в фоне', 'WB_PVZ қасында тауар сканын фонда ұстайды')}</li>
+              <li><Check size={18} />{t('Сразу шлёт этикетку на термопринтер', 'Заттаңбаны бірден термопринтерге жібереді')}</li>
+              <li><Check size={18} />{t('Безлимит этикеток, поддержка NIIMBOT', 'Шексіз заттаңба, NIIMBOT қолдауы')}</li>
+            </ul>
+            <ScreenshotSlot
+              src="/images/screenshot-cell-print-app.webp"
+              alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
+            />
+            <div className={s.pcardFoot}>
+              <span className={s.pcardPrice}>{t('от', 'бастап')} <b>150</b> ₽</span>
+              <span className={s.pcardBtns}>
+                <Link to="/cell-print"><Button variant="secondary" size="sm">{t('Подробнее', 'Толығырақ')}</Button></Link>
+                <a href={CELL_PRINT_DOWNLOAD_URL}><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
+              </span>
+            </div>
+          </article>
+        </div>
+      </Section>
+
+      {/* Почему вместе выгоднее — четыре опоры экосистемы. */}
+      <Section eyebrow={t('Почему вместе выгоднее', 'Неге бірге тиімдірек')} title={t('Один аккаунт на генератор и обе программы', 'Генератор мен екі бағдарламаға бір аккаунт')}>
+        <div className={s.pillars}>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><LayoutGrid size={20} /></span>
+            <h3>{t('Одна экосистема', 'Бір экожүйе')}</h3>
+            <p>{t('Один аккаунт на сайте и во всех программах, общий баланс.', 'Сайтта және барлық бағдарламада бір аккаунт, ортақ баланс.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><RefreshCcw size={20} /></span>
+            <h3>{t('Обновления сами', 'Жаңартулар өздері')}</h3>
+            <p>{t('Новые функции приходят автоматически, без переустановок.', 'Жаңа функциялар қайта орнатусыз автоматты түрде келеді.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><MessageCircle size={20} /></span>
+            <h3>{t('Поддержка 24/7', 'Қолдау 24/7')}</h3>
+            <p>{t('Живой человек в Telegram в любое время.', 'Telegram-да кез келген уақытта тірі адам.')}</p>
+          </div>
+          <div className={s.pillar}>
+            <span className={s.pillarIcon}><Building2 size={20} /></span>
+            <h3>{t('Сеть пунктов', 'Пункттер желісі')}</h3>
+            <p>{t('Все ПВЗ под управлением из одного места.', 'Барлық ПВЗ бір жерден басқарылады.')}</p>
+          </div>
+        </div>
+      </Section>
+
+      {/* Для сети ПВЗ — текст + схема «один аккаунт → все пункты». */}
+      <Section>
+        <div className={s.net}>
+          <div>
+            <p className="eyebrow">{t('Для владельцев сети пунктов', 'Пункттер желісінің иелеріне')}</p>
+            <h2 className={s.netTitle}>{t('Все пункты — из одного аккаунта', 'Барлық пункт — бір аккаунттан')}</h2>
+            <ul className={s.netList}>
+              <li><Check size={20} />{t('Один вход открывает все ваши ПВЗ — переключайтесь в пару кликов.', 'Бір кіру барлық ПВЗ-ны ашады — бірнеше шертумен ауысыңыз.')}</li>
+              <li><Check size={20} />{t('Статусы, ячейки и данные пункта видны с любого компьютера сети.', 'Мәртебелер, ұяшықтар мен пункт деректері желінің кез келген компьютерінен көрінеді.')}</li>
+              <li><Check size={20} />{t('Добавляйте пункты и компьютеры по мере роста.', 'Өскен сайын пункттер мен компьютерлер қосыңыз.')}</li>
+            </ul>
+            <Link to="/tarify"><Button>{t('Тарифы для сети', 'Желіге арналған тарифтер')}<ArrowRight size={16} /></Button></Link>
+          </div>
+          <div className={s.diagram} aria-hidden="true">
+            <div className={s.hub}>
+              <Building2 size={19} />
+              <div>
+                <div className={s.hubTitle}>{t('Ваш аккаунт', 'Сіздің аккаунтыңыз')}</div>
+                <div className={s.hubSub}>{t('один вход · все пункты', 'бір кіру · барлық пункт')}</div>
+              </div>
+            </div>
+            <div className={s.spokes}>
+              {[
+                [t('Пункт №1', 'Пункт №1'), t('центр', 'орталық')],
+                [t('Пункт №2', 'Пункт №2'), t('спальный', 'тұрғын')],
+                [t('Пункт №3', 'Пункт №3'), t('ТЦ «Восток»', '«Восток» СО')],
+                [t('Пункт №4', 'Пункт №4'), t('вокзал', 'вокзал')],
+                [t('Пункт №5', 'Пункт №5'), t('новый', 'жаңа')],
+                [t('+ добавить', '+ қосу'), t('по мере роста', 'өскен сайын')],
+              ].map(([title, sub]) => (
+                <div key={title} className={s.spoke}>
+                  <div className={s.spokeTitle}>{title}</div>
+                  <div className={s.spokeSub}>{sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      {/* Тарифы «Помощника ПВЗ» — живые цены с сервера. */}
+      <Section
+        id="plans"
+        eyebrow={t('Тарифы программ', 'Бағдарлама тарифтері')}
+        title={t('Помощник ПВЗ — платите за то, чем пользуетесь', 'ПВЗ көмекшісі — пайдаланғаныңыз үшін төлейсіз')}
+        lead={t(
+          'Генератор работает по балансу без подписки. Для программы — помесячные тарифы; расширяются пакетами по мере роста.',
+          'Генератор жазылымсыз баланс бойынша жұмыс істейді. Бағдарлама үшін — ай сайынғы тарифтер; өскен сайын пакеттермен кеңейеді.',
+        )}
+      >
+        <AppPlansTable />
+      </Section>
+
+      {/* Поддержка и обновления. */}
+      <Section>
+        <div className="grid grid-2">
+          <Card>
+            <div className={s.programCard}>
+              <span className={s.pillarIcon}><LifeBuoy size={22} /></span>
+              <h3>{t('Поддержка на связи круглосуточно', 'Қолдау тәулік бойы байланыста')}</h3>
+              <p className="muted">
+                {t(
+                  'Напишите в Telegram в любое время — ответит живой человек. Поможем с генерацией, установкой программ и настройкой принтера.',
+                  'Telegram-ға кез келген уақытта жазыңыз — тірі адам жауап береді. Генерация, бағдарламаларды орнату мен принтерді баптауға көмектесеміз.',
+                )}
+              </p>
+              <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
+                <Button size="sm">{t('Написать в Telegram', 'Telegram-ға жазу')}</Button>
+              </a>
+            </div>
+          </Card>
+          <Card>
+            <div className={s.programCard}>
+              <span className={s.pillarIcon}><RefreshCcw size={22} /></span>
+              <h3>{t('Функции добавляются постоянно', 'Функциялар үнемі қосылады')}</h3>
+              <p className="muted">
+                {t(
+                  'Мы регулярно выпускаем обновления с новыми возможностями. Они приходят автоматически — вы всегда работаете на свежей версии без переустановок.',
+                  'Біз жаңа мүмкіндіктермен жаңартуларды үнемі шығарамыз. Олар автоматты түрде келеді — сіз әрқашан қайта орнатусыз жаңа нұсқада жұмыс істейсіз.',
+                )}
+              </p>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section id="faq" eyebrow={t('Вопросы', 'Сұрақтар')} title={t('Коротко о главном', 'Қысқаша ең маңыздысы')}>
         <Accordion items={faq(t)} />
       </Section>
 
-      <CrossSell items={[CROSS_SELL.cellPrint, CROSS_SELL.program]} />
+      <Section>
+        <Card accent>
+          <div className={s.finalCta}>
+            <div>
+              <h2>{t('Сгенерируйте первый код прямо сейчас', 'Бірінші кодты дәл қазір генерациялаңыз')}</h2>
+              <p className="muted" style={{ margin: 0 }}>
+                {t(
+                  'Без регистрации и установки. А когда понадобится больше — рядом программы для всей выдачи.',
+                  'Тіркелусіз және орнатусыз. Ал көбірек керек болғанда — қасында бүкіл беруге арналған бағдарламалар.',
+                )}
+              </p>
+            </div>
+            <div className={s.finalCtaActions}>
+              <a href="#generator"><Button size="lg">{t('К генератору', 'Генераторға')}<ArrowRight size={18} /></Button></a>
+              <a href="#products"><Button size="lg" variant="secondary">{t('Смотреть программы', 'Бағдарламаларды көру')}</Button></a>
+            </div>
+          </div>
+        </Card>
+      </Section>
     </>
   );
 });

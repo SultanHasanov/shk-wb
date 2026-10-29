@@ -62,6 +62,14 @@ describe('покупка и продление ключей в кабинете'
     expect(screen.getAllByRole('button', { name: /Купить (пакет|новый ключ)/ }).length).toBeGreaterThan(0);
   });
 
+  it('ключи в интерфейсе маскированы, полный ключ не показывается', async () => {
+    renderPage();
+    expect(await screen.findByText('CP-••••-••••-FFFF')).toBeInTheDocument();
+    expect(screen.getByText('WBPK-••••-••••-CCCC')).toBeInTheDocument();
+    expect(screen.queryByText('CP-DDDD-EEEE-FFFF')).not.toBeInTheDocument();
+    expect(screen.queryByText('WBPK-AAAA-BBBB-CCCC')).not.toBeInTheDocument();
+  });
+
   it('передаёт серверу ключ пополнения и возврат в кабинет', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -117,13 +125,24 @@ describe('покупка и продление ключей в кабинете'
     expect(claimBody).toBeNull();
   });
 
-  it('ключ, купленный без аккаунта, сначала добавляется, потом открывается продление', async () => {
+  it('ключ без аккаунта: сначала подтверждение привязки, потом продление', async () => {
     const user = userEvent.setup();
     renderPage('/cabinet/keys?renew=CP-GGGG-HHHH-JJJJ');
+    // Чужой/ничейный ключ не привязывается молча — сначала подтверждение в модалке.
+    await user.click(await screen.findByRole('button', { name: 'Привязать и продлить' }));
     await waitFor(() => expect(claimBody).toEqual({ kind: 'cell_print', value: 'CP-GGGG-HHHH-JJJJ' }));
     await user.click(await screen.findByRole('checkbox', { name: /Принимаю/ }));
     await user.click(screen.getByRole('button', { name: 'Перейти к оплате' }));
     await waitFor(() => expect(paymentBody).not.toBeNull());
     expect(paymentBody).toMatchObject({ productKind: 'cell_print_license', renewalTargetKey: 'CP-GGGG-HHHH-JJJJ' });
+  });
+
+  it('отмена подтверждения не привязывает чужой ключ', async () => {
+    const user = userEvent.setup();
+    renderPage('/cabinet/keys?renew=CP-GGGG-HHHH-JJJJ');
+    await user.click(await screen.findByRole('button', { name: 'Отмена' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Привязать и продлить' })).not.toBeInTheDocument());
+    expect(claimBody).toBeNull();
+    expect(paymentBody).toBeNull();
   });
 });

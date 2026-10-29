@@ -1,0 +1,53 @@
+/* На десктопе панели нет — кнопка остаётся в hero и блоке покупки. */
+.bar,
+.spacer {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Резервируем место в потоке, чтобы последний контент не уходил под панель. */
+  .spacer {
+    display: block;
+    height: 72px;
+  }
+
+  .bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    z-index: var(--z-topbar);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 10px var(--sp-4);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 18px rgba(29, 29, 39, 0.06);
+  }
+
+  .note {
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-14);
+    line-height: 1.15;
+  }
+
+  .note small {
+    display: block;
+    margin-top: 2px;
+    font-weight: var(--fw-normal);
+    font-size: var(--fs-11);
+    color: var(--text-muted);
+  }
+
+  .action {
+    margin-left: auto;
+    flex: 1;
+    max-width: 210px;
+  }
+
+  .action a,
+  .action button {
+    width: 100%;
+  }
+}

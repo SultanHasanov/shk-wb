@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { AppWindow, Home, LogIn, MoreHorizontal, Printer, QrCode, Tag, User, X } from 'lucide-react';
 import { Button } from '../ui';
+import { TabBar, type TabItem } from './TabBar';
 import { AnnouncementBanner } from '../components/AnnouncementBanner';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { CookieBanner } from '../components/CookieBanner';
@@ -11,23 +12,25 @@ import { LanguageSwitch } from '../components/LanguageSwitch';
 import { isKzPath, localizePath, type T, useLocalePath, useStoredLocale, useT } from '../i18n';
 import { isPrerender } from '../lib/prerender';
 import { TelegramIcon } from '../components/TelegramIcon';
+import { BrandMark } from '../components/BrandMark';
 import { useStores } from '../stores/root-store';
 import { useVisitCounter } from '../lib/visits';
 import { BOT_URL, CHANNEL_URL } from '../lib/telegram';
 import s from './PublicShell.module.css';
 
-const navItems = (t: T) => [
-  { to: '/', label: t('Генератор', 'Генератор'), end: true },
-  { to: '/cell-print', label: t('Печать ячеек', 'Ұяшық басып шығару'), end: false },
-  { to: '/program', label: t('Помощник ПВЗ', 'ПВЗ көмекшісі'), end: false },
-  { to: '/contacts', label: t('Контакты', 'Байланыс'), end: false },
+/** Основная навигация: одни и те же разделы в шапке (десктоп) и в таббаре (мобайл). */
+const primaryNav = (t: T) => [
+  { to: '/', label: t('Генератор', 'Генератор'), short: t('Генератор', 'Генератор'), end: true, Icon: QrCode },
+  { to: '/program', label: t('Помощник ПВЗ', 'ПВЗ көмекшісі'), short: t('Помощник', 'Көмекші'), end: false, Icon: AppWindow },
+  { to: '/cell-print', label: t('Печать ячеек', 'Ұяшық басып шығару'), short: t('Печать', 'Басып шығ.'), end: false, Icon: Printer },
+  { to: '/tarify', label: t('Тарифы', 'Тарифтер'), short: t('Тарифы', 'Тарифтер'), end: false, Icon: Tag },
 ];
 
-/** В шапке уже четыре пункта, поэтому контентный лендинг живёт только в футере. */
-const footerTools = (t: T) => [
-  ...navItems(t),
-  { to: '/vozvratnye-stikery-wb', label: t('Возвратные стикеры ВБ', 'WB қайтару стикерлері'), end: false },
-  { to: '/qr-korobov-wb', label: t('QR коробов WB', 'WB қорап QR-кодтары'), end: false },
+/** Дополнительные ссылки — в футере и в мобильной шторке «Ещё». */
+const moreLinks = (t: T) => [
+  { to: '/contacts', label: t('Контакты', 'Байланыс') },
+  { to: '/vozvratnye-stikery-wb', label: t('Возвратные стикеры ВБ', 'WB қайтару стикерлері') },
+  { to: '/qr-korobov-wb', label: t('QR коробов WB', 'WB қорап QR-кодтары') },
 ];
 
 const footerDocs = (t: T) => [
@@ -37,27 +40,35 @@ const footerDocs = (t: T) => [
 ];
 
 /**
- * Оболочка публичной части: горизонтальная шапка и футер, без сайдбара.
- * Раньше лендинг, генератор и cell-print рендерились внутри админского
- * сайдбара на 260px, из-за чего публичное лицо сайта выглядело как
+ * Оболочка публичной части: липкая шапка и тёмный футер на десктопе, нижняя
+ * навигация (таббар) и шторка «Ещё» на телефоне. Раньше лендинг и генератор
+ * рендерились внутри админского сайдбара — публичное лицо сайта выглядело как
  * внутренний инструмент.
  */
 export const PublicShell = observer(() => {
   const { auth } = useStores();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const t = useT();
   const lp = useLocalePath();
   const storedLocale = useStoredLocale();
-  const nav = navItems(t);
+  const nav = primaryNav(t);
 
   // Только публичная часть: заходы админа в панель посещаемостью сайта не были
   // и в старой статике — js/visits.js на admin-enigma не подключался.
   useVisitCounter();
 
-  // Закрывать мобильное меню при переходе
-  useEffect(() => setMenuOpen(false), [location.pathname]);
+  // Закрывать шторку «Ещё» при переходе
+  useEffect(() => setMoreOpen(false), [location.pathname]);
+
+  // Шторка «Ещё» блокирует фон — иначе прокрутка уходит в страницу под ней.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [moreOpen]);
 
   // Кто выбрал казахский, с русского адреса попадает на казахский. Робот без
   // localStorage остаётся на русской версии, поэтому индексу это не мешает.
@@ -65,6 +76,23 @@ export const PublicShell = observer(() => {
     if (isPrerender() || storedLocale !== 'kk' || isKzPath(location.pathname)) return;
     navigate(localizePath(location.pathname, 'kk') + location.search + location.hash, { replace: true });
   }, [storedLocale, location.pathname, location.search, location.hash, navigate]);
+
+  // Нижняя навигация строго по прототипу: четыре раздела + «Ещё». Аккаунт — не
+  // вкладка, а иконка в шапке (ниже), поэтому здесь его нет. Первая вкладка на
+  // телефоне называется «Главная» с иконкой дома (в десктоп-шапке это «Генератор»).
+  const tabs: TabItem[] = [
+    { key: '/', to: lp('/'), end: true, label: t('Главная', 'Басты бет'), Icon: Home },
+    { key: '/program', to: lp('/program'), label: t('Помощник', 'Көмекші'), Icon: AppWindow },
+    { key: '/cell-print', to: lp('/cell-print'), label: t('Печать', 'Басып шығ.'), Icon: Printer },
+    { key: '/tarify', to: lp('/tarify'), label: t('Тарифы', 'Тарифтер'), Icon: Tag },
+    {
+      key: 'more',
+      label: t('Ещё', 'Тағы'),
+      Icon: MoreHorizontal,
+      onClick: () => setMoreOpen(true),
+      active: moreOpen,
+    },
+  ];
 
   return (
     <div className={s.shell}>
@@ -79,17 +107,11 @@ export const PublicShell = observer(() => {
       <header className={s.header}>
         <div className={s.headerInner}>
           <Link to={lp('/')} className={s.brand} aria-label={t('ШК ВБ — главная', 'ШК ВБ — басты бет')}>
-            <span className={s.mark} aria-hidden="true">
-              ШК
-            </span>
+            <BrandMark />
             ШК ВБ
           </Link>
 
-          <nav
-            className={`${s.nav} ${menuOpen ? s.navOpen : ''}`}
-            aria-label={t('Основная навигация', 'Негізгі навигация')}
-            id="site-nav"
-          >
+          <nav className={s.nav} aria-label={t('Основная навигация', 'Негізгі навигация')}>
             {nav.map(item => (
               <NavLink
                 key={item.to}
@@ -100,65 +122,45 @@ export const PublicShell = observer(() => {
                 {item.label}
               </NavLink>
             ))}
-            {/* На телефоне в шапке нет места — валюта переезжает в выпадающее меню. */}
-            <div className={s.mobileOnly}>
-              <span className={s.switchLabel}>{t('Язык и валюта', 'Тіл және валюта')}</span>
-              <span className={s.switches}>
-                <LanguageSwitch />
-                <CurrencySwitch />
-              </span>
-            </div>
+            <Link to={`${lp('/')}#faq`} className={s.navLink}>
+              {t('Вопросы', 'Сұрақтар')}
+            </Link>
           </nav>
 
+          {/* Язык, валюта, бот и канал переехали в футер и в шторку «Ещё»:
+              в утверждённом прототипе шапка — только навигация и вход. */}
           <div className={s.actions}>
-            <LanguageSwitch className={s.wideOnly} />
-            <CurrencySwitch className={s.wideOnly} />
-            {/* Шапка уже плотная: четыре пункта навигации, канал, вход и бургер.
-                Поэтому пилюля бота показывается только на широком экране — на
-                мобильном он доступен из блока у генератора и из футера. */}
-            <a
-              className={`${s.tg} ${s.tgWide}`}
-              href={BOT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={t('Бот генерации ШК в Telegram', 'Telegram-дағы ШК генерациялау боты')}
-            >
-              <TelegramIcon className={s.tgIco} />
-              <span>{t('Бот', 'Бот')}</span>
-            </a>
-            <a className={s.tg} href={CHANNEL_URL} target="_blank" rel="noopener noreferrer">
-              <img
-                className={s.tgAva}
-                src="/images/telegram-wb-tools-avatar-112.webp"
-                alt={t('Аватар канала WB Tools', 'WB Tools арнасының аватары')}
-                width={26}
-                height={26}
-                loading="lazy"
-              />
-              <TelegramIcon className={s.tgIco} />
-              <span>{t('Telegram-канал', 'Telegram-арна')}</span>
-            </a>
+            <span className={`${s.wbchip} ${s.wideOnly}`}>
+              <span className={s.wbdot} aria-hidden="true" />
+              {t('Работает с Wildberries', 'Wildberries-пен жұмыс істейді')}
+            </span>
             {/* Раньше кнопка всегда вела на /login: шапка не читала сессию,
                 поэтому после входа на публичных страницах висело «Войти».
                 Пока сессия проверяется, кнопку не рисуем — иначе «Войти»
                 мигает перед «Кабинетом» на каждой загрузке. */}
             {auth.status !== 'initializing' && (
-              <Link to={auth.isAuthenticated ? '/cabinet' : '/login'}>
+              <Link to={auth.isAuthenticated ? '/cabinet' : '/login'} className={s.wideOnly}>
                 <Button variant="secondary" size="sm">
                   {auth.isAuthenticated ? t('Кабинет', 'Кабинет') : t('Войти', 'Кіру')}
                 </Button>
               </Link>
             )}
-            <button
-              type="button"
-              className={s.burger}
-              onClick={() => setMenuOpen(v => !v)}
-              aria-label={menuOpen ? t('Закрыть меню', 'Мәзірді жабу') : t('Открыть меню', 'Мәзірді ашу')}
-              aria-expanded={menuOpen}
-              aria-controls="site-nav"
-            >
-              {menuOpen ? <X size={20} /> : <Menu size={20} />}
-            </button>
+
+            {/* Телефон (по прототипу): компактный индикатор WB и иконка аккаунта.
+                «Ещё» на мобайле — это вкладка таббара, а не кнопка в шапке. */}
+            <span className={`${s.wbMini} ${s.mobileOnly}`} aria-hidden="true">
+              <span className={s.wbdot} />
+              WB
+            </span>
+            {auth.status !== 'initializing' && (
+              <Link
+                to={auth.isAuthenticated ? '/cabinet' : '/login'}
+                className={`${s.acctBtn} ${s.mobileOnly}`}
+                aria-label={auth.isAuthenticated ? t('Личный кабинет', 'Жеке кабинет') : t('Войти в аккаунт', 'Аккаунтқа кіру')}
+              >
+                {auth.isAuthenticated ? <User size={20} /> : <LogIn size={20} />}
+              </Link>
+            )}
           </div>
         </div>
       </header>
@@ -170,63 +172,112 @@ export const PublicShell = observer(() => {
 
       <footer className={s.footer}>
         <div className={s.footerInner}>
-          <div className={s.footerAbout}>
-            <div className={s.brand}>
-              <span className={s.mark} aria-hidden="true">
-                ШК
-              </span>
-              ШК ВБ
+          <div className={s.footGrid}>
+            <div>
+              <div className={s.footBrand}>
+                <BrandMark size={26} />
+                ШК ВБ
+              </div>
+              <p className={s.footAbout}>
+                {t(
+                  'Генератор возвратных кодов и две программы для пунктов выдачи Wildberries — под одним аккаунтом.',
+                  'Қайтару кодтарының генераторы және Wildberries беру пункттеріне арналған екі бағдарлама — бір аккаунтта.',
+                )}
+              </p>
             </div>
-            <p>
-              {t(
-                'Инструменты для пунктов выдачи Wildberries: генератор возвратных ШК и стикеров, автоматическая печать номера ячейки, программа «Помощник ПВЗ».',
-                'Wildberries беру пункттеріне арналған құралдар: қайтару ШК мен стикерлерінің генераторы, ұяшық нөмірін автоматты басып шығару, «ПВЗ көмекшісі» бағдарламасы.',
-              )}
-            </p>
-          </div>
 
-          <div>
-            <div className={s.footerTitle}>{t('Инструменты', 'Құралдар')}</div>
-            <div className={s.footerCol}>
-              {footerTools(t).map(item => (
+            <div>
+              <h4 className={s.footTitle}>{t('Инструменты', 'Құралдар')}</h4>
+              <Link to={lp('/')}>{t('Генератор кодов', 'Кодтар генераторы')}</Link>
+              {nav.slice(1).map(item => (
                 <Link key={item.to} to={lp(item.to)}>
                   {item.label}
                 </Link>
               ))}
-              {/* Внешняя ссылка отдельно от списка: footerTools типизирован под
-                  роутерные пути и рендерится через <Link>. */}
+              {moreLinks(t)
+                .filter(item => item.to !== '/contacts')
+                .map(item => (
+                  <Link key={item.to} to={lp(item.to)}>
+                    {item.label}
+                  </Link>
+                ))}
+              {/* Внешняя ссылка отдельно: списки выше типизированы под роутерные пути. */}
               <a href={BOT_URL} target="_blank" rel="noopener noreferrer">
-                {t('Бот генерации в Telegram', 'Telegram-дағы генерация боты')}
+                {t('Телеграм-бот', 'Телеграм-бот')}
               </a>
             </div>
-          </div>
 
-          <div>
-            <div className={s.footerTitle}>{t('Документы', 'Құжаттар')}</div>
-            <div className={s.footerCol}>
-              {/* Раньше это были <a> на статические .html вне роутера */}
+            <div>
+              <h4 className={s.footTitle}>{t('Документы', 'Құжаттар')}</h4>
               {footerDocs(t).map(item => (
                 <Link key={item.to} to={lp(item.to)}>
                   {item.label}
                 </Link>
               ))}
+              <Link to={lp('/contacts')}>{t('Контакты', 'Байланыс')}</Link>
               <a href={CHANNEL_URL} target="_blank" rel="noopener noreferrer">
                 {t('Telegram-канал', 'Telegram-арна')}
               </a>
             </div>
           </div>
-        </div>
 
-        <div className={s.footerBottom}>
-          <span>© {new Date().getFullYear()} ШК ВБ</span>
-          <span>
+          <p className={s.disc}>
             {t(
-              'Сервис не связан с ООО «Вайлдберриз» и не является его официальным продуктом.',
-              'Сервис «Вайлдберриз» ЖШҚ-мен байланысты емес және оның ресми өнімі болып табылмайды.',
+              'Доступ к программам разрешён лицам старше 18 лет. Сервис не связан с ООО «Вайлдберриз» и является независимым инструментом для операторов пунктов выдачи. Названия и товарные знаки принадлежат их правообладателям.',
+              'Бағдарламаларға 18 жастан асқан тұлғаларға рұқсат етіледі. Сервис «Вайлдберриз» ЖШҚ-мен байланысты емес және беру пункттерінің операторларына арналған тәуелсіз құрал болып табылады. Атаулар мен тауар белгілері олардың құқық иелеріне тиесілі.',
             )}
-          </span>
+          </p>
+
+          <div className={s.footBottom}>
+            <span>© {new Date().getFullYear()} ШК ВБ</span>
+            <span className={s.switches}>
+              <LanguageSwitch />
+              <CurrencySwitch />
+            </span>
+          </div>
         </div>
       </footer>
+
+      {/* Нижняя навигация и шторка «Ещё» — только на телефоне (CSS). */}
+      <TabBar items={tabs} label={t('Основная навигация', 'Негізгі навигация')} />
+
+      {moreOpen && (
+        <div className={s.sheetRoot} role="dialog" aria-modal="true" aria-label={t('Ещё', 'Тағы')}>
+          <button type="button" className={s.sheetScrim} aria-label={t('Закрыть', 'Жабу')} onClick={() => setMoreOpen(false)} />
+          <div className={s.sheet}>
+            <div className={s.sheetHead}>
+              <span>{t('Ещё', 'Тағы')}</span>
+              <button type="button" className={s.sheetClose} onClick={() => setMoreOpen(false)} aria-label={t('Закрыть', 'Жабу')}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className={s.sheetLinks}>
+              {moreLinks(t).map(item => (
+                <Link key={item.to} to={lp(item.to)} className={s.sheetLink}>
+                  {item.label}
+                </Link>
+              ))}
+              <a href={BOT_URL} target="_blank" rel="noopener noreferrer" className={s.sheetLink}>
+                <TelegramIcon className={s.tgIco} />
+                {t('Бот генерации в Telegram', 'Telegram-дағы генерация боты')}
+              </a>
+              <a href={CHANNEL_URL} target="_blank" rel="noopener noreferrer" className={s.sheetLink}>
+                <TelegramIcon className={s.tgIco} />
+                {t('Telegram-канал', 'Telegram-арна')}
+              </a>
+            </div>
+
+            <div className={s.sheetSwitches}>
+              <span className={s.switchLabel}>{t('Язык и валюта', 'Тіл және валюта')}</span>
+              <span className={s.switches}>
+                <LanguageSwitch />
+                <CurrencySwitch />
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* В старом проекте плашку показывал js/cookie-notice.js; при переезде на
           React она потерялась вместе со страницей политики cookie. */}

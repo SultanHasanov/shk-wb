@@ -5,105 +5,88 @@
   background: var(--page);
 }
 
-/* ---- Шапка ---- */
+/* ---- Шапка (по прототипу: полупрозрачная полоса, меню, плашка WB и «Войти») ---- */
 .header {
   position: sticky;
   top: 0;
   z-index: var(--z-topbar);
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(245, 245, 247, 0.82);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
 
 .headerInner {
-  max-width: var(--content-wide);
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 0 var(--sp-8);
+  padding: 0 32px;
   height: var(--topbar-h);
   display: flex;
   align-items: center;
-  gap: var(--sp-6);
+  gap: 28px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  font-weight: var(--fw-black);
-  font-size: var(--fs-16);
-  letter-spacing: var(--tracking-tight);
+  gap: 10px;
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+  color: var(--text);
   flex: none;
 }
 
-.mark {
-  display: grid;
-  place-items: center;
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-radius: var(--r-sm);
-  width: 32px;
-  height: 32px;
-  font-size: var(--fs-12);
-  font-weight: var(--fw-black);
-  box-shadow: var(--shadow-accent);
+.brand:hover {
+  color: var(--text);
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
-  margin-left: var(--sp-4);
+  gap: 22px;
+  margin-left: 10px;
 }
 
 .navLink {
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
-  color: var(--text-muted);
+  color: var(--text);
+  font-weight: 500;
+  font-size: 15px;
+  white-space: nowrap;
 }
 
-.navLink:hover {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
+.navLink:hover,
 .navActive {
-  color: var(--accent-dark);
-  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 14px;
   flex: none;
 }
 
-.tg {
+.wbchip {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-semibold);
+  gap: 7px;
+  font-size: 12.5px;
   color: var(--text-muted);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 5px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
-.tg:hover {
-  background: var(--surface-muted);
-  color: var(--text);
-}
-
-.tgAva {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  object-fit: cover;
+.wbdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
   flex: none;
-  background: var(--surface-muted);
 }
 
 .tgIco {
@@ -111,21 +94,6 @@
   height: 18px;
   flex: none;
   color: #229ed9;
-}
-
-/* Пилюля бота: в шапке место есть только на широком экране. */
-.tgWide {
-  display: none;
-}
-
-@media (min-width: 1024px) {
-  .tgWide {
-    display: inline-flex;
-  }
-}
-
-.mobileOnly {
-  display: none;
 }
 
 .switches {
@@ -136,15 +104,41 @@
 .switchLabel {
   color: var(--text-muted);
   font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
 }
 
-.burger {
+/* Элементы только для телефона (иконка аккаунта и мини-плашка WB в шапке). */
+.mobileOnly {
   display: none;
-  border: 1px solid var(--border-strong);
+}
+
+.wbMini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Иконка-кнопка аккаунта в шапке телефона — как в прототипе (38–40px, рамка). */
+.acctBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
   background: var(--surface);
-  border-radius: var(--r-sm);
-  padding: var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text);
+  flex: none;
+}
+
+.acctBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--accent-dark);
 }
 
 /* ---- Контент ---- */
@@ -152,143 +146,241 @@
   flex: 1;
 }
 
-/* ---- Футер ---- */
+/* ---- Футер (по прототипу) ---- */
 .footer {
   margin-top: auto;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
+  background: #1d1d27;
+  color: #a7a7b2;
+  padding: 46px 0 32px;
 }
 
 .footerInner {
-  max-width: var(--content-wide);
+  max-width: 1180px;
   margin: 0 auto;
-  padding: var(--sp-12) var(--sp-8);
+  padding: 0 32px;
+}
+
+.footGrid {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
-  gap: var(--sp-10);
+  gap: 34px;
 }
 
-.footerAbout p {
-  color: var(--text-muted);
-  font-size: var(--fs-13);
-  max-width: 42ch;
-  margin: var(--sp-3) 0 0;
-  line-height: var(--lh-normal);
+.footBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 19px;
+  color: #fff;
 }
 
-.footerTitle {
-  font-size: var(--fs-12);
+.footAbout {
+  margin: 14px 0 0;
+  font-size: 14px;
+  max-width: 38ch;
+  color: #a7a7b2;
+  line-height: 1.55;
+}
+
+.footTitle {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  letter-spacing: 0;
+}
+
+.footGrid a {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  color: #a7a7b2;
+  font-size: 14px;
+  padding: 5px 0;
+}
+
+.footGrid a:hover {
+  color: #fff;
+}
+
+.disc {
+  margin: 26px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid #333340;
+  font-size: 12.5px;
+  color: #73737f;
+  line-height: 1.7;
+  max-width: 92ch;
+}
+
+.footBottom {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: #73737f;
+}
+
+/* ---- Мобильная шторка «Ещё» ---- */
+.sheetRoot {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheetScrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.4);
+  animation: fade var(--dur) var(--ease);
+}
+
+.sheet {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+  padding: var(--sp-4) var(--sp-5) calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+  box-shadow: var(--shadow-lg);
+  animation: sheetUp var(--dur-slow) var(--ease);
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-weight: var(--fw-bold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--text-tertiary);
+  font-size: var(--fs-16);
   margin-bottom: var(--sp-3);
 }
 
-.footerCol {
+.sheetClose {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: var(--sp-1);
+  border-radius: var(--r-sm);
+}
+
+.sheetClose:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.sheetLinks {
   display: flex;
   flex-direction: column;
+}
+
+.sheetLink {
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
+  min-height: var(--tap);
+  padding: var(--sp-3) var(--sp-2);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
 }
 
-.footerCol a {
-  font-size: var(--fs-13);
-  color: var(--text-muted);
-  width: max-content;
-}
-
-.footerCol a:hover {
+.sheetLink:hover {
   color: var(--accent-dark);
 }
 
-.footerBottom {
-  border-top: 1px solid var(--border);
-  padding: var(--sp-5) var(--sp-8);
-  max-width: var(--content-wide);
-  margin: 0 auto;
-  font-size: var(--fs-12);
-  color: var(--text-tertiary);
+.sheetSwitches {
   display: flex;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
 }
 
 /* ---- Адаптив ---- */
+@media (max-width: 1180px) {
+  /* Плашка WB — украшение; на узком десктопе место нужнее меню. */
+  .wbchip {
+    display: none;
+  }
+}
+
 @media (max-width: 1023px) {
   .headerInner,
-  .footerInner,
-  .footerBottom {
+  .footerInner {
     padding-left: var(--sp-5);
     padding-right: var(--sp-5);
   }
 
-  .footerInner {
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-8);
+  .headerInner {
+    gap: 20px;
   }
 
-  .footerAbout {
-    grid-column: 1 / -1;
+  .nav {
+    gap: 16px;
+    margin-left: 0;
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 900px) {
+  .footGrid {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Основная навигация переезжает в нижний таббар, вспомогательные ссылки и
+     переключатели — в шторку «Ещё». В шапке остаются бренд, индикатор WB и
+     иконка аккаунта (по прототипу). */
+  .nav,
+  .wideOnly {
+    display: none;
+  }
+
+  .mobileOnly {
+    display: inline-flex;
+  }
+
   .headerInner {
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);
     gap: var(--sp-3);
   }
 
-  .burger {
-    display: inline-flex;
+  .actions {
+    gap: var(--sp-2);
   }
 
-  .wideOnly {
-    display: none;
+  /* Контент не должен прятаться под фиксированным таббаром. */
+  .shell {
+    padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
   }
 
-  .mobileOnly {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--sp-3);
-  }
-
-  .tg span {
-    display: none;
-  }
-
-  /* Мобильное меню: выпадающая панель под шапкой */
-  .nav {
-    display: none;
-    position: absolute;
-    top: var(--topbar-h);
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-1);
-    margin: 0;
-    padding: var(--sp-3);
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    box-shadow: var(--shadow-md);
-  }
-
-  .navOpen {
-    display: flex;
-  }
-
-  .navLink {
-    padding: var(--sp-3);
-    font-size: var(--fs-16);
+  .footer {
+    padding-top: 34px;
   }
 
   .footerInner {
-    grid-template-columns: 1fr;
-    padding-top: var(--sp-8);
-    padding-bottom: var(--sp-8);
-    gap: var(--sp-6);
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
   }
 }

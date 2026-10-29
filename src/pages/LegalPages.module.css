@@ -76,7 +76,7 @@
   color: var(--text-tertiary);
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .doc {
     padding: var(--sp-6) var(--sp-5);
   }

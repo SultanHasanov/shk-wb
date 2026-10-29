@@ -286,7 +286,9 @@ export function Accordion({ items }: { items: ReadonlyArray<{ q: string; a: Reac
   return (
     <div className={s.accordion}>
       {items.map(item => (
-        <details key={item.q} className={s.accordionItem}>
+        // data-faq помечает именно FAQ: build-static.mjs собирает FAQPage только из
+        // details[data-faq], чтобы в schema.org не попали меню-шторки и прочие <details>.
+        <details key={item.q} className={s.accordionItem} data-faq>
           <summary className={s.accordionQ}>
             {item.q}
             <ChevronDown size={18} className={s.accordionChevron} aria-hidden="true" />
@@ -906,5 +908,192 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {viewport}
     </ToastContext.Provider>
+  );
+}
+
+/* ============ TileGroup ============
+   Крупные плитки-переключатели с картинкой/иконкой и описанием (выбор вида
+   генерации «Стикеры / QR коробок»). Радиогруппа с ролями и стрелками, как
+   Segmented, но с местом под медиа. */
+
+export function TileGroup<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+  columns = 2,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: ReadonlyArray<{ value: T; label: string; description?: string; media?: ReactNode }>;
+  label: string;
+  columns?: number;
+}) {
+  const refs = useRef<Partial<Record<T, HTMLButtonElement | null>>>({});
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const index = options.findIndex(o => o.value === value);
+    let next = -1;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % options.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp')
+      next = (index - 1 + options.length) % options.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = options.length - 1;
+    if (next === -1) return;
+    event.preventDefault();
+    const target = options[next].value;
+    onChange(target);
+    refs.current[target]?.focus();
+  }
+
+  return (
+    <div
+      className={s.tileGroup}
+      role="radiogroup"
+      aria-label={label}
+      style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      onKeyDown={onKeyDown}
+    >
+      {options.map(o => {
+        const selected = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            ref={node => {
+              refs.current[o.value] = node;
+            }}
+            className={`${s.tile} ${selected ? s.tileActive : ''}`}
+            onClick={() => onChange(o.value)}
+          >
+            {o.media && <span className={s.tileMedia}>{o.media}</span>}
+            <span className={s.tileLabel}>{o.label}</span>
+            {o.description && <span className={s.tileDesc}>{o.description}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============ ScreenshotSlot ============
+   Рамка под скриншот программы с фиксированными размерами (без сдвига макета,
+   CLS=0). Пока картинки нет — показывает заглушку с подписью, чтобы владелец
+   видел, куда вставлять. src принимает webp/png; aspect-ratio держит высоту. */
+
+export function ScreenshotSlot({
+  src,
+  alt,
+  caption,
+  ratio = '16 / 10',
+  priority = false,
+}: {
+  src?: string;
+  alt: string;
+  caption?: string;
+  /** CSS aspect-ratio строкой, напр. "16 / 10". Держит высоту до загрузки. */
+  ratio?: string;
+  /** true только для LCP-изображения (одного на страницу). */
+  priority?: boolean;
+}) {
+  // Превью обрезается рамкой (object-fit: cover), поэтому по клику открываем
+  // снимок целиком в оверлее — закрытие по фону, крестику или Escape.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
+  return (
+    <figure className={s.shot} style={{ aspectRatio: ratio }}>
+      {src ? (
+        <button
+          type="button"
+          className={s.shotZoom}
+          onClick={() => setOpen(true)}
+          aria-label={`${alt} — открыть в полном размере`}
+        >
+          <img
+            className={s.shotImg}
+            src={src}
+            alt={alt}
+            loading={priority ? 'eager' : 'lazy'}
+            decoding="async"
+            // @ts-expect-error fetchpriority — валидный HTML-атрибут, типы React отстают
+            fetchpriority={priority ? 'high' : undefined}
+          />
+        </button>
+      ) : (
+        <div className={s.shotPlaceholder} aria-hidden="true">
+          <span className={s.shotCap}>{caption ?? alt}</span>
+          <span className={s.shotHint}>скриншот появится здесь</span>
+        </div>
+      )}
+      {src && caption && <figcaption className={s.shotCaption}>{caption}</figcaption>}
+
+      {open && src && createPortal(
+        <div className={s.lightbox} role="dialog" aria-modal="true" aria-label={alt} onClick={() => setOpen(false)}>
+          <button type="button" className={s.lightboxClose} aria-label="Закрыть" onClick={() => setOpen(false)}>×</button>
+          <img className={s.lightboxImg} src={src} alt={alt} onClick={e => e.stopPropagation()} />
+        </div>,
+        document.body,
+      )}
+    </figure>
+  );
+}
+
+/* ============ AnswerBlock ============
+   AEO: заголовок-вопрос (H2) + короткий прямой ответ, который ИИ-поисковики и
+   быстрые ответы берут целиком. Подробности — в children под ответом. */
+
+export function AnswerBlock({
+  question,
+  answer,
+  children,
+  id,
+}: {
+  question: string;
+  answer: ReactNode;
+  children?: ReactNode;
+  id?: string;
+}) {
+  return (
+    <div className={s.answer} id={id}>
+      <h2 className={s.answerQ}>{question}</h2>
+      <p className={s.answerA}>{answer}</p>
+      {children}
+    </div>
+  );
+}
+
+/* ============ BalanceChip ============
+   Чип баланса для топбара кабинета. Презентационный: ссылку «Пополнить» рисует
+   вызывающий (кабинет ходит через react-router Link + lp()). */
+
+export function BalanceChip({
+  label,
+  value,
+  action,
+}: {
+  label: string;
+  value: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <span className={s.balanceChip}>
+      <span className={s.balanceLabel}>{label}</span>
+      <span className={s.balanceValue}>{value}</span>
+      {action}
+    </span>
   );
 }

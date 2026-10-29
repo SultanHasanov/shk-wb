@@ -16,6 +16,7 @@ import s from './Breadcrumbs.module.css';
 const TITLES: Record<string, Text> = {
   'cell-print': { ru: 'Печать ячеек', kk: 'Ұяшық басып шығару' },
   program: { ru: 'Помощник ПВЗ', kk: 'ПВЗ көмекшісі' },
+  tarify: { ru: 'Тарифы', kk: 'Тарифтер' },
   'vozvratnye-stikery-wb': { ru: 'Возвратные стикеры', kk: 'Қайтару стикерлері' },
   'qr-korobov-wb': { ru: 'QR коробов WB', kk: 'WB қорап QR-кодтары' },
   contacts: { ru: 'Контакты', kk: 'Байланыс' },

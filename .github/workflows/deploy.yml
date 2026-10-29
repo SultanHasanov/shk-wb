@@ -23,10 +23,17 @@ concurrency:
 
 jobs:
   deploy:
+    # Выкатываем только ветку main. on.push уже ограничен main, но
+    # workflow_dispatch можно запустить с любой ветки через вкладку Actions —
+    # это условие не даёт случайно выложить на прод неслитую ветку (напр. site-redesign).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Полная история нужна, чтобы build-static.mjs брал lastmod для sitemap из git.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

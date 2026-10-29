@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { chromium } from 'playwright';
-import { GOOGLE_SITE_VERIFICATION, KZ_PREFIX, ORIGIN, PUBLIC_PAGES, SITE_NAME, localizeGraph } from './build-seo.mjs';
+import { GOOGLE_SITE_VERIFICATION, KZ_PREFIX, ORIGIN, PUBLIC_PAGES, RELEASES, SITE_NAME, buildLlms, buildSitemap, localizeGraph } from './build-seo.mjs';
 
 const output = resolve('dist');
 
@@ -30,7 +30,9 @@ if (existsSync('downloads/version.json')) {
 // offer.html, privacy.html и payment-result.html больше не копируются: это
 // маршруты React (/offer, /privacy, /payment-result), а старые файлы перекрыли
 // бы их собой — Vercel отдаёт файл раньше, чем применяет rewrite.
-for (const file of ['robots.txt', 'sitemap.xml', 'favicon.ico']) {
+// sitemap.xml здесь больше не копируется: он генерируется из PUBLIC_PAGES в
+// конце сборки (см. ниже) — так он не разойдётся со списком страниц.
+for (const file of ['robots.txt', 'favicon.ico']) {
   if (existsSync(file)) copyFileSync(file, resolve(output, file));
 }
 
@@ -284,6 +286,8 @@ const browser = await launchChromium();
 // Снимки копятся в памяти и пишутся после обхода: файл, записанный на середине
 // цикла, не должен попасться серверу как ответ на следующий маршрут.
 const snapshots = [];
+// FAQ, снятый с русской версии каждого маршрута, — для llms-full.txt.
+const faqByRoute = {};
 
 if (browser) {
   const { origin, server } = await startStaticServer(output);
@@ -315,7 +319,9 @@ if (browser) {
     // Хвост микрозадач react-query и эффектов useDocumentMeta.
     await page.waitForTimeout(300);
 
-    const html = injectSeo(await page.content(), route, await extractFaq(page), undefined, locale);
+    const faq = await extractFaq(page);
+    if (locale === 'ru' && faq) faqByRoute[route] = faq;
+    const html = injectSeo(await page.content(), route, faq, undefined, locale);
     snapshots.push([address, html]);
   }
 
@@ -334,3 +340,24 @@ for (const [route, html] of snapshots) {
   writeFileSync(resolve(output, file), html);
   console.log(`${browser ? 'prerender' : 'оболочка'} ${route} → dist/${file} (${html.length} байт)`);
 }
+
+/* ============ sitemap.xml, llms.txt, llms-full.txt ============
+   Генерируются из PUBLIC_PAGES (buildSitemap/buildLlms в build-seo.mjs, там же
+   их берёт тест seo-build.test.ts), чтобы не вести список страниц руками. */
+
+/** Дата последнего коммита (committer date, YYYY-MM-DD) для lastmod. При
+ *  отсутствии git (локальная распаковка без истории) — сегодня. Shallow-клон
+ *  даёт дату последнего доступного коммита, этого для lastmod достаточно. */
+function lastCommitDate() {
+  try {
+    return execSync('git log -1 --format=%cs', { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const sitemapDate = lastCommitDate();
+writeFileSync(resolve(output, 'sitemap.xml'), buildSitemap(PUBLIC_PAGES, sitemapDate));
+writeFileSync(resolve(output, 'llms.txt'), buildLlms(PUBLIC_PAGES, RELEASES, faqByRoute, false));
+writeFileSync(resolve(output, 'llms-full.txt'), buildLlms(PUBLIC_PAGES, RELEASES, faqByRoute, true));
+console.log(`sitemap.xml, llms.txt, llms-full.txt → dist/ (lastmod ${sitemapDate || 'сегодня'})`);

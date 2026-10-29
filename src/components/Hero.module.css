@@ -86,7 +86,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .inner {
     padding: var(--sp-10) var(--sp-4) var(--sp-8);
   }
@@ -107,5 +107,34 @@
   .trust li {
     font-size: var(--fs-12);
     padding: var(--sp-1) var(--sp-3);
+  }
+
+  .mobileDense {
+    background: var(--surface-muted);
+  }
+
+  .mobileDense .inner {
+    padding: 24px var(--sp-4) 14px;
+  }
+
+  .mobileDense .title {
+    margin-bottom: 8px;
+    font-size: 22px;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .mobileDense .copy {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .mobileDense .trust {
+    display: none;
+  }
+
+  .mobileDense .inner > :global(.eyebrow) {
+    margin-bottom: 8px;
+    font-size: 12px;
   }
 }

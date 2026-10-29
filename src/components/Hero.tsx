@@ -13,6 +13,7 @@ export function Hero({
   copy,
   trust,
   compact = false,
+  mobileDense = false,
   children,
 }: {
   eyebrow?: string;
@@ -20,10 +21,11 @@ export function Hero({
   copy?: ReactNode;
   trust?: readonly string[];
   compact?: boolean;
+  mobileDense?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <section className={`${s.hero} ${compact ? s.compact : ''}`}>
+    <section className={`${s.hero} ${compact ? s.compact : ''} ${mobileDense ? s.mobileDense : ''}`}>
       <div className={s.inner}>
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1 className={s.title}>{title}</h1>

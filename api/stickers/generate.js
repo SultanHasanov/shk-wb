@@ -5,12 +5,25 @@ const { optionalUser } = require('../../server/_user-auth');
 const { enforceRateLimit } = require('../../server/_rate-limit');
 const { generateStickers } = require('../../server/_sticker-generation');
 const { BATCH_QUANTITY, finalizeGeneration, refundGeneration, reserveGeneration } = require('../../server/_generation-billing');
+const { guardAttempts, recordFailures, recordFailure, allowAttempt, subnetOf } = require('../../server/_attempt-guard');
+const { sendToAdmins } = require('../../server/_admin-alerts');
+
+// Всплеск перебора гостевых кодов: уведомляем админа не чаще раза в час на подсеть.
+async function alertGuestBruteforce(req, subnet) {
+  try {
+    if (await allowAttempt(req, { scope: 'guest-code-alert', limit: 1, windowSeconds: 3600, key: subnet })) {
+      await sendToAdmins(`⚠️ Подбор гостевых кодов генерации: подсеть ${subnet} временно заблокирована (много неверных кодов).`);
+      await recordFailure(req, { scope: 'guest-code-alert', windowSeconds: 3600, key: subnet });
+    }
+  } catch (_) { /* оповещение не должно влиять на ответ генерации */ }
+}
 
 module.exports = async function handler(req, res) {
   if (!await enforceRateLimit(req, res, { scope: 'sticker-generation', limit: 60, windowSeconds: 60 })) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const user = await optionalUser(req);
   let charge = null;
+  let guestFailureDims = null;
   try {
     const rawMode = req.body?.mode;
     if (!['range', 'custom', 'box_range', 'box_custom'].includes(rawMode)) {
@@ -33,6 +46,16 @@ module.exports = async function handler(req, res) {
       }
     } else if (!accessCode) {
       return res.status(401).json({ error: 'Войдите или купите генерацию без регистрации', code: 'AUTH_OR_ACCESS_CODE_REQUIRED' });
+    }
+    // Анти-перебор гостевых кодов доступа: считаем ТОЛЬКО неверные коды (успешная
+    // генерация лимит не расходует). Измерения — IP, /24-подсеть и сам код.
+    if (!user) {
+      guestFailureDims = [
+        { scope: 'guest-code-ip', limit: 20, windowSeconds: 3600 },
+        { scope: 'guest-code-subnet', limit: 40, windowSeconds: 3600, key: subnetOf(req) },
+        { scope: 'guest-code-value', limit: 5, windowSeconds: 3600, key: accessCode },
+      ];
+      if (!(await guardAttempts(req, res, guestFailureDims))) { await alertGuestBruteforce(req, subnetOf(req)); return; }
     }
     const result = await generateStickers({
       userId: user?.id || null,
@@ -62,6 +85,8 @@ module.exports = async function handler(req, res) {
     return res.status(201).json(response);
   } catch (error) {
     if (charge?.chargeId) await refundGeneration(charge.chargeId).catch(() => {});
+    // Неверный гостевой код — засчитываем попытку (прочие ошибки лимит не трогают).
+    if (guestFailureDims && error.code === 'INVALID_ACCESS_CODE') await recordFailures(req, guestFailureDims).catch(() => {});
     if (error.code) return res.status(error.status || 400).json({ error: error.message, code: error.code });
     const host = String(req.headers?.host || '');
     if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) return res.status(502).json({ error: 'Database request failed', details: error.details || error.message });

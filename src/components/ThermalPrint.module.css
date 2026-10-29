@@ -35,7 +35,7 @@
   gap: var(--sp-3);
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .actions > * {
     flex: 1 1 100%;
   }
