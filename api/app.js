@@ -5,6 +5,7 @@ const { requireUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
+const QRCode = require('qrcode');
 const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
 const { appFreeMode } = require('../server/_app-free');
@@ -46,6 +47,11 @@ function body(req) {
 function codeFromQrText(qrText) {
   const value = String(qrText || '').split('_')[1];
   return /^\d{5}$/.test(value) ? Number(value) : null;
+}
+
+async function clientQrImage(qrText) {
+  if (!/^\d{1,12}_\d{5}_\d{6}_\d$/.test(String(qrText || ''))) throw account.appError(400, 'VALIDATION_ERROR', 'Некорректный QR-код');
+  return QRCode.toDataURL(qrText, { width: 240, margin: 1 });
 }
 
 // Сессия + регистрация ПК. При лимите ПК токены всё равно отдаём: из программы
@@ -203,6 +209,10 @@ module.exports = async function handler(req, res) {
     // --- Код клиента: формула и подбор живут только на сервере (server/_wb-code.js,
     // server/_wb-crack.js). Биллинг — аккаунтом (Bearer) или WBPK-ключом из тела, поэтому
     // эндпоинты до requireUser: «Базовый» без входа тоже должен получать коды.
+    if (action === 'qr-image' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-qr-image', limit: 120, windowSeconds: 60 })) return;
+      return res.status(200).json({ qrImage: await clientQrImage(body(req).qrText) });
+    }
     if (action === 'client-qr' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-client-qr', limit: 60, windowSeconds: 60 })) return;
       const b = body(req);
@@ -212,11 +222,11 @@ module.exports = async function handler(req, res) {
       if (b.requestId) {
         const qr = buildClientQr(sid);
         const result = await account.billClientCode(req, { key: b.key, meta, requestId: b.requestId, sid, qrText: qr.qrText });
-        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, billing: result.billing, replayed: result.replayed });
+        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, qrImage: await clientQrImage(result.qrText), billing: result.billing, replayed: result.replayed });
       }
       const billing = await account.billCode(req, { key: b.key, meta });
       const { code, qrText } = buildClientQr(sid);
-      return res.status(200).json({ code, qrText, billing });
+      return res.status(200).json({ code, qrText, qrImage: await clientQrImage(qrText), billing });
     }
     if (action === 'crack-code' && req.method === 'POST') {
       if (!await crackFallbackEnabled()) return res.status(403).json({ error: 'Резервный подбор отключён', code: 'CRACK_DISABLED' });
@@ -231,10 +241,10 @@ module.exports = async function handler(req, res) {
       const meta = { cell: String(b.cell || '').slice(0, 16) || undefined, via: 'crack' };
       if (b.requestId) {
         const result = await account.billClientCode(req, { key: b.key, meta, requestId: b.requestId, sid, qrText: found.qrText });
-        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, billing: result.billing, replayed: result.replayed });
+        return res.status(200).json({ code: codeFromQrText(result.qrText), qrText: result.qrText, qrImage: await clientQrImage(result.qrText), billing: result.billing, replayed: result.replayed });
       }
       const billing = await account.billCode(req, { key: b.key, meta });
-      return res.status(200).json({ code: found.code, qrText: found.qrText, billing });
+      return res.status(200).json({ code: found.code, qrText: found.qrText, qrImage: await clientQrImage(found.qrText), billing });
     }
 
     const user = await requireUser(req, res);
