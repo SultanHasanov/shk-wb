@@ -266,7 +266,7 @@ export function ProgramPage() {
 
       <Section eyebrow={t('Как выглядит', 'Қалай көрінеді')} title={t('Всё на одном экране', 'Бәрі бір экранда')}>
         <ScreenshotSlot
-          src="/images/screenshot-crack-tool-v2.webp"
+          src="/images/screenshot-pvz-helper.jpg"
           alt={t('Главное окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының басты терезесі')}
           caption={t('Ячейки, товары «В пути» и поиск клиента в одном окне', 'Ұяшықтар, «Жолдағы» тауарлар және клиентті іздеу бір терезеде')}
           ratio="16 / 9"

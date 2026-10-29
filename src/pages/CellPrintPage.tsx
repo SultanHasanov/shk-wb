@@ -463,7 +463,7 @@ export const CellPrintPage = observer(() => {
         )}
       >
         <ScreenshotSlot
-          src="/images/screenshot-cell-print-v2.webp"
+          src="/images/screenshot-cell-print-app.jpg"
           alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
           caption={t('Рабочее состояние, журнал смены и печать номера ячейки', 'Жұмыс күйі, ауысым журналы және ұяшық нөмірін басу')}
           ratio="16 / 9"
