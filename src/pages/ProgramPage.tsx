@@ -24,6 +24,7 @@ import { FeatureGrid } from '../components/FeatureGrid';
 import { SpecList } from '../components/SpecList';
 import { AppPlansTable } from '../components/AppPlansTable';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
+import { MobileActionBar } from '../components/MobileActionBar';
 import { Accordion, Alert, Button, Card, Checkbox, ScreenshotSlot, Stat } from '../ui';
 import { RELEASES } from '../data/releases';
 import {
@@ -406,6 +407,16 @@ export function ProgramPage() {
           '«Ұяшық басып шығару» WB_PVZ-мен бірге фондық режимде жұмыс істейді: тауарды сканерлегеннен кейін ұяшықты тауып, заттаңбаны бірден термопринтерге жібереді.',
         )}
       />
+
+      {/* Телефон: липкая панель скачивания над таббаром (по прототипу). */}
+      <MobileActionBar note={t('Бесплатно', 'Тегін')} subnote={t('платите за тариф', 'тариф үшін төлейсіз')}>
+        <a href={PROGRAM_DOWNLOAD_URL}>
+          <Button>
+            <Download size={18} />
+            {t('Скачать программу', 'Бағдарламаны жүктеу')}
+          </Button>
+        </a>
+      </MobileActionBar>
     </>
   );
 }

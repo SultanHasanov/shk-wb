@@ -23,6 +23,7 @@ import { Steps } from '../components/Steps';
 import { FeatureGrid } from '../components/FeatureGrid';
 import { SpecList } from '../components/SpecList';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
+import { MobileActionBar } from '../components/MobileActionBar';
 import { MarketplaceScopeToggle } from '../components/MarketplaceScopeToggle';
 import {
   Accordion,
@@ -605,6 +606,16 @@ export const CellPrintPage = observer(() => {
           '«Ұяшық басып шығарудан» бөлек бізде кодтарды іріктеу бағдарламасы және онлайн стикер генераторы бар.',
         )}
       />
+
+      {/* Телефон: липкая панель скачивания над таббаром (по прототипу). */}
+      <MobileActionBar note={t('Бесплатно', 'Тегін')} subnote={t('ключ — от 150 ₽', 'кілт — 150 ₽ бастап')}>
+        <a href="/api/payments/download-cell-print">
+          <Button>
+            <Download size={18} />
+            {t('Скачать', 'Жүктеп алу')}
+          </Button>
+        </a>
+      </MobileActionBar>
     </>
   );
 });

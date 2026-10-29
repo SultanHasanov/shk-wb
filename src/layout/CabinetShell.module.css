@@ -292,7 +292,7 @@
 }
 
 /* ---- Мобильный drawer ---- */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .shell,
   .collapsed {
     padding-left: 0;

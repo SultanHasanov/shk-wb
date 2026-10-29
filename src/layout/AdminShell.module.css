@@ -285,7 +285,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .head {
     padding: var(--sp-3) var(--sp-4);
   }

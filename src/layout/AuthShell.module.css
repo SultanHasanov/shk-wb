@@ -58,7 +58,7 @@
   text-decoration: underline;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .top,
   .bottom {
     padding-left: var(--sp-4);

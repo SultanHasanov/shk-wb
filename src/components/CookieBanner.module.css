@@ -42,7 +42,7 @@
 }
 
 /* Нижний таббар мобильного приложения перекрыл бы плашку — поднимаем её над ним. */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .banner {
     bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-3));
   }

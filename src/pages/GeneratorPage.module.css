@@ -609,9 +609,11 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
+  /* По прототипу (MobileHome) «опоры» остаются сеткой 2×2, а не столбцом. */
   .pillars {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-3);
   }
 
   .finalCtaActions {

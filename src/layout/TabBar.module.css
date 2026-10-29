@@ -4,7 +4,7 @@
   display: none;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .tabbar {
     position: fixed;
     left: 0;

@@ -86,7 +86,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .inner {
     padding: var(--sp-10) var(--sp-4) var(--sp-8);
   }

@@ -33,7 +33,7 @@
   text-decoration: underline;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .crumbs {
     padding: var(--sp-4) var(--sp-5) 0;
   }

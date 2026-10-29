@@ -882,7 +882,7 @@ button.priceCell:hover {
 /* На телефоне таблицу листают вбок внутри .tableWrap: nowrap оставляем (в
    ячейках коды, ключи и даты — перенос делает их нечитаемыми), но ужимаем
    отступы, чтобы за экран уезжало меньше. */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .table {
     font-size: var(--fs-12);
   }
@@ -1109,7 +1109,7 @@ button.priceCell:hover {
 }
 
 /* Над нижним таббаром мобильного приложения, иначе тост ложится на навигацию. */
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .toastViewport {
     bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + var(--sp-3));
   }

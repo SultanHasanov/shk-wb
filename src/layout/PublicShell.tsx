@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { AppWindow, LogIn, Printer, QrCode, Tag, User, X } from 'lucide-react';
+import { AppWindow, Home, LogIn, MoreHorizontal, Printer, QrCode, Tag, User, X } from 'lucide-react';
 import { Button } from '../ui';
 import { TabBar, type TabItem } from './TabBar';
 import { AnnouncementBanner } from '../components/AnnouncementBanner';
@@ -77,13 +77,21 @@ export const PublicShell = observer(() => {
     navigate(localizePath(location.pathname, 'kk') + location.search + location.hash, { replace: true });
   }, [storedLocale, location.pathname, location.search, location.hash, navigate]);
 
+  // Нижняя навигация строго по прототипу: четыре раздела + «Ещё». Аккаунт — не
+  // вкладка, а иконка в шапке (ниже), поэтому здесь его нет. Первая вкладка на
+  // телефоне называется «Главная» с иконкой дома (в десктоп-шапке это «Генератор»).
   const tabs: TabItem[] = [
-    ...nav.map(item => ({ key: item.to, to: lp(item.to), end: item.end, label: item.short, Icon: item.Icon })),
-    auth.status === 'initializing'
-      ? { key: 'account', label: t('Войти', 'Кіру'), Icon: User, placeholder: true }
-      : auth.isAuthenticated
-        ? { key: 'account', to: '/cabinet', label: t('Кабинет', 'Кабинет'), Icon: User }
-        : { key: 'account', to: '/login', label: t('Войти', 'Кіру'), Icon: LogIn },
+    { key: '/', to: lp('/'), end: true, label: t('Главная', 'Басты бет'), Icon: Home },
+    { key: '/program', to: lp('/program'), label: t('Помощник', 'Көмекші'), Icon: AppWindow },
+    { key: '/cell-print', to: lp('/cell-print'), label: t('Печать', 'Басып шығ.'), Icon: Printer },
+    { key: '/tarify', to: lp('/tarify'), label: t('Тарифы', 'Тарифтер'), Icon: Tag },
+    {
+      key: 'more',
+      label: t('Ещё', 'Тағы'),
+      Icon: MoreHorizontal,
+      onClick: () => setMoreOpen(true),
+      active: moreOpen,
+    },
   ];
 
   return (
@@ -137,16 +145,22 @@ export const PublicShell = observer(() => {
                 </Button>
               </Link>
             )}
-            <button
-              type="button"
-              className={s.more}
-              onClick={() => setMoreOpen(true)}
-              aria-label={t('Ещё', 'Тағы')}
-              aria-expanded={moreOpen}
-              aria-haspopup="dialog"
-            >
-              {t('Ещё', 'Тағы')}
-            </button>
+
+            {/* Телефон (по прототипу): компактный индикатор WB и иконка аккаунта.
+                «Ещё» на мобайле — это вкладка таббара, а не кнопка в шапке. */}
+            <span className={`${s.wbMini} ${s.mobileOnly}`} aria-hidden="true">
+              <span className={s.wbdot} />
+              WB
+            </span>
+            {auth.status !== 'initializing' && (
+              <Link
+                to={auth.isAuthenticated ? '/cabinet' : '/login'}
+                className={`${s.acctBtn} ${s.mobileOnly}`}
+                aria-label={auth.isAuthenticated ? t('Личный кабинет', 'Жеке кабинет') : t('Войти в аккаунт', 'Аккаунтқа кіру')}
+              >
+                {auth.isAuthenticated ? <User size={20} /> : <LogIn size={20} />}
+              </Link>
+            )}
           </div>
         </div>
       </header>
