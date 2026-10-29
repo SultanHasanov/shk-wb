@@ -1195,11 +1195,74 @@ button.priceCell:hover {
   border: 1px solid var(--border);
 }
 
+/* Кнопка-обёртка превью: по клику открывается полноразмерный снимок. */
+.shotZoom {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.shotZoom:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
 .shotImg {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Оверлей полноразмерного скриншота (рендерится порталом в body). */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: rgba(15, 15, 22, 0.82);
+  backdrop-filter: blur(4px);
+  cursor: zoom-out;
+  animation: fade var(--dur) var(--ease);
+}
+
+.lightboxImg {
+  max-width: 95vw;
+  max-height: 92vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+}
+
+.lightboxClose {
+  position: fixed;
+  top: max(var(--sp-4), env(safe-area-inset-top, 0px));
+  right: var(--sp-4);
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-full);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightboxClose:hover {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .shotPlaceholder {

@@ -978,7 +978,7 @@ export const GeneratorPage = observer(() => {
               <li><Check size={18} />{t('Отзывы, стикеры, сотрудники и зарплата', 'Пікірлер, стикерлер, қызметкерлер мен жалақы')}</li>
             </ul>
             <ScreenshotSlot
-              src="/images/screenshot-pvz-helper.jpg"
+              src="/images/screenshot-pvz-helper.webp"
               alt={t('Окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының терезесі')}
             />
             <div className={s.pcardFoot}>
@@ -1000,7 +1000,7 @@ export const GeneratorPage = observer(() => {
               <li><Check size={18} />{t('Безлимит этикеток, поддержка NIIMBOT', 'Шексіз заттаңба, NIIMBOT қолдауы')}</li>
             </ul>
             <ScreenshotSlot
-              src="/images/screenshot-cell-print-app.jpg"
+              src="/images/screenshot-cell-print-app.webp"
               alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
             />
             <div className={s.pcardFoot}>
