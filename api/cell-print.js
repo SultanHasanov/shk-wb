@@ -4,6 +4,7 @@ const { requireUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const account = require('../server/_app-account');
 const cellPrintLink = require('../server/_cell-print-link');
+const cellUpdate = require('../server/_cell-print-update');
 
 // error.details — это распарсенный ответ PostgREST ({code,message,...}), а не строка.
 // String() от объекта давал «[object Object]», поэтому проверки ниже не срабатывали
@@ -145,6 +146,8 @@ function versionAtLeast(value,minimum){const a=versionTuple(value),b=versionTupl
 
 module.exports = async function handler(req,res){
   const action=String(req.query.action||'');
+  if(action==='update'&&req.method==='GET')return cellUpdate.updateResponse(req,res,publicOrigin(req));
+  if(action==='update-download'&&req.method==='GET')return cellUpdate.downloadResponse(res);
   if(['login','login-start','login-poll','refresh','keys','claim','logout'].includes(action)){
     try{return await accountAction(action,req,res);}catch(error){return accountError(res,error);}
   }
