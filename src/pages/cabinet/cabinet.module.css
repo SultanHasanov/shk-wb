@@ -273,6 +273,98 @@
   font-size: var(--fs-14);
 }
 
+/* ---- Уведомления (прототип Cabinet_Notifications) ---- */
+.notifList {
+  display: flex;
+  flex-direction: column;
+}
+
+.notifDay {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  margin: var(--sp-5) var(--sp-1) var(--sp-2);
+}
+
+.notifDay:first-child {
+  margin-top: 0;
+}
+
+.notifItem {
+  display: flex;
+  gap: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-5);
+  margin-bottom: var(--sp-3);
+  position: relative;
+}
+
+.notifUnread {
+  border-color: var(--accent-softer);
+  background: #fffdfe;
+}
+
+.notifIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.toneWarn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.toneOk {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.toneInfo {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.notifTitle {
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-14);
+}
+
+.notifBody {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  margin: 3px 0 0;
+  line-height: var(--lh-normal);
+}
+
+.notifTime {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  margin-top: 7px;
+}
+
+.notifCta {
+  margin-top: var(--sp-3);
+}
+
+.notifDot {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
 /* ---- Опасная зона ---- */
 .danger {
   border-color: var(--danger);
