@@ -52,7 +52,32 @@ export function ReferralsPage() {
         <p>{t('10% от денежной части всех успешных покупок приглашённых пользователей.', 'Шақырылған пайдаланушылардың барлық сәтті сатып алуларының ақшалай бөлігінен 10%.')}</p>
       </header>
 
-      <div className="grid grid-4">
+      <Card className={c.refHero}>
+        <h2>{t('Приглашайте коллег — получайте 10%', 'Әріптестеріңізді шақырыңыз — 10% алыңыз')}</h2>
+        <p className={c.refHeroText}>
+          {t(
+            'С каждой оплаты приглашённого (в том числе с пополнений баланса) вам начисляется 10%. Поделитесь ссылкой с другими владельцами пунктов.',
+            'Шақырылған адамның әр төлемінен (баланс толықтыруларын қоса) сізге 10% есептеледі. Сілтемені басқа пункт иелерімен бөлісіңіз.',
+          )}
+        </p>
+        <div className={c.refHeroRow}>
+          <div className={c.refHeroLink}>
+            <Input value={r.link} readOnly aria-label={t('Персональная ссылка', 'Жеке сілтеме')} />
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              navigator.clipboard?.writeText(r.link);
+              toast(t('Ссылка скопирована', 'Сілтеме көшірілді'), 'success');
+            }}
+          >
+            <Copy size={16} />
+            {t('Копировать', 'Көшіру')}
+          </Button>
+        </div>
+      </Card>
+
+      <div className="grid grid-4 section">
         <Card>
           <Stat value={r.invited} label={t('приглашено', 'шақырылды')} icon={<Users size={20} />} />
         </Card>
@@ -83,22 +108,6 @@ export function ReferralsPage() {
       )}
 
       <Card className="section">
-        <Field label={t('Персональная ссылка', 'Жеке сілтеме')}>
-          <div className={c.refLink}>
-            <Input value={r.link} readOnly />
-            <Button
-              variant="secondary"
-              onClick={() => {
-                navigator.clipboard?.writeText(r.link);
-                toast(t('Ссылка скопирована', 'Сілтеме көшірілді'), 'success');
-              }}
-            >
-              <Copy size={16} />
-              {t('Копировать', 'Көшіру')}
-            </Button>
-          </div>
-        </Field>
-
         <Alert tone="info">
           {t(
             'Отправьте ссылку кому угодно: она открывает обычный сайт, где можно сразу создавать стикеры и покупать пакеты. Приглашение запоминается в браузере человека на 30 дней и закрепляется за вами в момент, когда он создаст аккаунт. После этого вы получаете 10% от каждой его оплаты. Приглашение не сработает, если у человека уже есть аккаунт или он зарегистрируется позже 30 дней.',

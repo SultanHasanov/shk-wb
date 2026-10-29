@@ -51,12 +51,174 @@
   margin-bottom: var(--sp-5);
 }
 
-/* ---- Пакеты ---- */
+/* ---- Баланс (прототип Cabinet_Balance) ---- */
 .balance {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-6);
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+/* Яркая карточка баланса: акцентный фон, белый текст — как в макете. */
+.balanceCard {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+}
+
+.balanceLead {
+  font-size: var(--fs-13);
+  color: #f6d4ee;
+}
+
+.balanceBig {
+  font-size: var(--fs-36);
+  font-weight: var(--fw-black);
+  letter-spacing: var(--tracking-tight);
+  margin-top: var(--sp-1);
+}
+
+.amts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
+}
+
+.amt {
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+
+.amt:hover {
+  border-color: var(--accent-softer);
+}
+
+.amtSel {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35);
+}
+
+.amt .amtValue {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-black);
+}
+
+.amtBonus {
+  font-size: var(--fs-11);
+  color: var(--success);
+  font-weight: var(--fw-semibold);
+  margin-top: 2px;
+}
+
+.topup {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.topup > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.balanceNote {
+  font-size: var(--fs-12);
+  color: #f6d4ee;
+  margin: var(--sp-3) 0 0;
+  line-height: var(--lh-normal);
+}
+
+.cardTitle {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+  margin: 0 0 var(--sp-3);
+}
+
+/* Компактная лента операций (правая колонка баланса, рефералов). */
+.ops {
+  display: flex;
+  flex-direction: column;
+}
+
+.op {
+  display: flex;
   align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.op:first-child {
+  border-top: 0;
+}
+
+.opName {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-14);
+}
+
+.opDate {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.opAmt {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-14);
+}
+
+/* ---- Реферальная карточка-герой (прототип Cabinet_Referrals) ---- */
+.refHero {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+}
+
+.refHero h2 {
+  color: #fff;
+}
+
+.refHeroText {
+  font-size: var(--fs-13);
+  color: #f6d4ee;
+  margin: var(--sp-2) 0 0;
+  max-width: 60ch;
+  line-height: var(--lh-normal);
+}
+
+.refHeroRow {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  max-width: 560px;
+  flex-wrap: wrap;
+}
+
+.refHeroRow > :first-child {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+/* Поле ссылки поверх акцентного фона. */
+.refHeroLink input {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-family: var(--font-mono);
+}
+
+.refHeroLink input::placeholder {
+  color: #f6d4ee;
 }
 
 .code {
