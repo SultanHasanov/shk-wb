@@ -53,7 +53,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .section,
   .inner {
     padding: 40px var(--sp-4);

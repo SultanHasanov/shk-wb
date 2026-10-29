@@ -107,20 +107,38 @@
   font-weight: var(--fw-semibold);
 }
 
-/* Кнопка «Ещё» открывает мобильную шторку — на десктопе скрыта. */
-.more {
+/* Элементы только для телефона (иконка аккаунта и мини-плашка WB в шапке). */
+.mobileOnly {
   display: none;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 10px;
-  padding: 9px 15px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
 }
 
-.more:hover {
+.wbMini {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Иконка-кнопка аккаунта в шапке телефона — как в прототипе (38–40px, рамка). */
+.acctBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  flex: none;
+}
+
+.acctBtn:hover {
   border-color: var(--border-strong);
+  color: var(--accent-dark);
 }
 
 /* ---- Контент ---- */
@@ -329,15 +347,16 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   /* Основная навигация переезжает в нижний таббар, вспомогательные ссылки и
-     переключатели — в шторку «Ещё». В шапке остаётся бренд и кнопка «Ещё». */
+     переключатели — в шторку «Ещё». В шапке остаются бренд, индикатор WB и
+     иконка аккаунта (по прототипу). */
   .nav,
   .wideOnly {
     display: none;
   }
 
-  .more {
+  .mobileOnly {
     display: inline-flex;
   }
 
@@ -345,6 +364,10 @@
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);
     gap: var(--sp-3);
+  }
+
+  .actions {
+    gap: var(--sp-2);
   }
 
   /* Контент не должен прятаться под фиксированным таббаром. */

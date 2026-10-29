@@ -239,7 +239,7 @@ h3 {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .page {
     padding: var(--sp-6) var(--sp-4) var(--sp-12);
   }
