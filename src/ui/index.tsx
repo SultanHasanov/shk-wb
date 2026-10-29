@@ -999,18 +999,40 @@ export function ScreenshotSlot({
   /** true только для LCP-изображения (одного на страницу). */
   priority?: boolean;
 }) {
+  // Превью обрезается рамкой (object-fit: cover), поэтому по клику открываем
+  // снимок целиком в оверлее — закрытие по фону, крестику или Escape.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
   return (
     <figure className={s.shot} style={{ aspectRatio: ratio }}>
       {src ? (
-        <img
-          className={s.shotImg}
-          src={src}
-          alt={alt}
-          loading={priority ? 'eager' : 'lazy'}
-          decoding="async"
-          // @ts-expect-error fetchpriority — валидный HTML-атрибут, типы React отстают
-          fetchpriority={priority ? 'high' : undefined}
-        />
+        <button
+          type="button"
+          className={s.shotZoom}
+          onClick={() => setOpen(true)}
+          aria-label={`${alt} — открыть в полном размере`}
+        >
+          <img
+            className={s.shotImg}
+            src={src}
+            alt={alt}
+            loading={priority ? 'eager' : 'lazy'}
+            decoding="async"
+            // @ts-expect-error fetchpriority — валидный HTML-атрибут, типы React отстают
+            fetchpriority={priority ? 'high' : undefined}
+          />
+        </button>
       ) : (
         <div className={s.shotPlaceholder} aria-hidden="true">
           <span className={s.shotCap}>{caption ?? alt}</span>
@@ -1018,6 +1040,14 @@ export function ScreenshotSlot({
         </div>
       )}
       {src && caption && <figcaption className={s.shotCaption}>{caption}</figcaption>}
+
+      {open && src && createPortal(
+        <div className={s.lightbox} role="dialog" aria-modal="true" aria-label={alt} onClick={() => setOpen(false)}>
+          <button type="button" className={s.lightboxClose} aria-label="Закрыть" onClick={() => setOpen(false)}>×</button>
+          <img className={s.lightboxImg} src={src} alt={alt} onClick={e => e.stopPropagation()} />
+        </div>,
+        document.body,
+      )}
     </figure>
   );
 }
