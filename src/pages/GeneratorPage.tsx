@@ -401,6 +401,19 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   const leftAfter = remaining === undefined ? undefined : Math.max(0, remaining - plannedCount);
   const notEnough = !auth.isAuthenticated && remaining !== undefined && remaining < plannedCount;
 
+  // Код доступа сохраняется в localStorage как удобство для постоянных клиентов,
+  // но после выхода из аккаунта там остаётся код владельца — гостю он не подходит
+  // (ACCESS_CODE_OWNER_REQUIRED) и, пока поле непустое, блокирует гостевую оплату
+  // (она запускается только при пустом коде). Эта кнопка очищает чужой код.
+  const clearAccessCode = () => {
+    g.accessCode = '';
+    try {
+      localStorage.removeItem('sticker_access_code');
+    } catch {
+      // Запрет на запись в хранилище не должен мешать очистке поля.
+    }
+  };
+
   return (
     <div className={s.layout}>
       <Card className={s.form}>
@@ -539,6 +552,17 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             />
           </Field>}
 
+          {/* Чужой/старый код подставился из этого браузера — дать его убрать,
+              иначе гостевая оплата заблокирована (запускается при пустом коде). */}
+          {!auth.isAuthenticated && g.accessCode && (
+            <p className={s.printHelp}>
+              {t('Код подставлен из этого браузера.', 'Код осы браузерден қойылды.')}{' '}
+              <button type="button" className={s.codeToggle} onClick={clearAccessCode}>
+                {t('Это не мой код — очистить', 'Бұл менің кодым емес — тазалау')}
+              </button>
+            </p>
+          )}
+
           <div className={s.remaining}>
             {access.isLoading && <Skeleton width="180px" />}
             {remaining !== undefined && (
@@ -546,7 +570,8 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 {t('Осталось генераций:', 'Қалған генерациялар:')} {remaining}
               </Badge>
             )}
-            {(lowQuota || !g.accessCode) && (
+            {/* Гостю предлагаем покупку сразу — даже когда код уже подставлен. */}
+            {(lowQuota || !g.accessCode || !auth.isAuthenticated) && (
               <button type="button" className={s.codeToggle} onClick={onNeedPackages}>
                 {t('Пополнить баланс', 'Балансты толықтыру')}
               </button>
@@ -601,19 +626,33 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               </button>
             </Alert>
           ) : ownerBlocked ? (
-            /* Текст ошибки сервера кончается словами «Войдите под владельцем
-               кода», но пойти туда было не по чему: собираем ту же фразу с
-               кнопкой и возвратом на эту же страницу после входа. */
+            /* Чужой код не подошёл: кроме входа под владельцем предлагаем купить —
+               очистить код и сгенерировать без него (гостевая оплата) либо взять
+               пакет. Раньше тут был только вход, и покупка не предлагалась вовсе. */
             <Alert tone="error">
-              {t('Этот код привязан к другому аккаунту.', 'Бұл код басқа аккаунтқа байланған.')}{' '}
+              {t('Этот код принадлежит другому аккаунту.', 'Бұл код басқа аккаунтқа тиесілі.')}{' '}
               <Link
                 className={s.alertLogin}
                 to="/login"
                 state={{ from: location.pathname + location.search }}
               >
-                {t('Войдите', 'Код иесінің')}
+                {t('Войдите', 'Иесі ретінде')}
               </Link>{' '}
-              {t('под владельцем кода.', 'аккаунтымен кіріңіз.')}
+              {t('под его владельцем,', 'кіріңіз,')}{' '}
+              <button type="button" className={s.codeToggle} onClick={clearAccessCode}>
+                {t('сгенерируйте без кода', 'кодсыз генерациялаңыз')}
+              </button>{' '}
+              {t('или', 'немесе')}{' '}
+              <button
+                type="button"
+                className={s.codeToggle}
+                onClick={() => {
+                  clearAccessCode();
+                  onNeedPackages();
+                }}
+              >
+                {t('купите пакет', 'пакет сатып алыңыз')}
+              </button>.
             </Alert>
           ) : (
             mutation.isError && <Alert tone="error">{mutation.error.message}</Alert>
@@ -939,7 +978,7 @@ export const GeneratorPage = observer(() => {
               <li><Check size={18} />{t('Отзывы, стикеры, сотрудники и зарплата', 'Пікірлер, стикерлер, қызметкерлер мен жалақы')}</li>
             </ul>
             <ScreenshotSlot
-              src="/images/screenshot-crack-tool-v2.webp"
+              src="/images/screenshot-pvz-helper.jpg"
               alt={t('Окно программы «Помощник ПВЗ»', '«ПВЗ көмекшісі» бағдарламасының терезесі')}
             />
             <div className={s.pcardFoot}>
@@ -961,7 +1000,7 @@ export const GeneratorPage = observer(() => {
               <li><Check size={18} />{t('Безлимит этикеток, поддержка NIIMBOT', 'Шексіз заттаңба, NIIMBOT қолдауы')}</li>
             </ul>
             <ScreenshotSlot
-              src="/images/screenshot-cell-print-v2.webp"
+              src="/images/screenshot-cell-print-app.jpg"
               alt={t('Окно программы «Печать ячеек»', '«Ұяшық басып шығару» бағдарламасының терезесі')}
             />
             <div className={s.pcardFoot}>
