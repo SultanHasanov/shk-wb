@@ -5,6 +5,14 @@
   align-items: start;
 }
 
+.layout > * {
+  min-width: 0;
+}
+
+.mobileOnly {
+  display: none;
+}
+
 .resultHead {
   display: flex;
   align-items: baseline;
@@ -452,6 +460,10 @@
   align-items: center;
 }
 
+.net > * {
+  min-width: 0;
+}
+
 .netTitle {
   font-size: 28px;
   font-weight: 800;
@@ -511,7 +523,7 @@
 
 .spokes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
@@ -610,6 +622,57 @@
 }
 
 @media (max-width: 768px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileOnly {
+    display: inline;
+  }
+
+  .layout {
+    gap: var(--sp-3);
+  }
+
+  .form {
+    overflow: hidden;
+  }
+
+  .kindSelector {
+    margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) 0;
+    padding: 6px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-muted);
+  }
+
+  .kindSelector [role='radiogroup'] {
+    gap: 4px !important;
+  }
+
+  .kindSelector [role='radio'] {
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 6px;
+    border: 0;
+    border-radius: 9px;
+    box-shadow: none;
+    text-align: center;
+  }
+
+  .kindSelector [role='radio'][aria-checked='true'] {
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .kindSelector [role='radio'] > span:first-child {
+    display: none;
+  }
+
+  .kindSelector [role='radio'] > span:last-child {
+    font-size: 12px;
+  }
+
   /* По прототипу (MobileHome) «опоры» остаются сеткой 2×2, а не столбцом. */
   .pillars {
     grid-template-columns: repeat(2, minmax(0, 1fr));

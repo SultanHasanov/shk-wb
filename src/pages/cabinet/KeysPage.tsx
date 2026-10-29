@@ -8,6 +8,7 @@ import { CELL_PRINT_DOWNLOAD_URL, PROGRAM_DOWNLOAD_URL } from '../../lib/downloa
 import { useDocumentMeta } from '../../lib/seo';
 import { LicenseCheckoutModal, type LicenseCheckout } from './LicenseCheckoutModal';
 import { type T, useT } from '../../i18n';
+import c from './cabinet.module.css';
 
 /** Маска ключа для интерфейса: первый и последний сегменты видны, середина — точки.
  *  CP-AAAA-BBBB-CCCC → CP-••••-••••-CCCC. Полный ключ остаётся у кнопки «Копировать»
@@ -89,10 +90,10 @@ export function KeysPage() {
   const assets = query.data.assets.filter(asset => asset.type !== 'sticker');
   const submitClaim = (kind: 'program' | 'cell_print') => claimMutation.mutate({ kind, value: claim }, { onSuccess: () => { setClaim(''); toast(t('Ключ добавлен', 'Кілт қосылды'), 'success'); } });
 
-  return <div className="page">
+  return <div className={`page ${c.mobilePage} ${c.keysPage}`}>
     <header className="page-head"><h1>{t('Ключи и доступы', 'Кілттер мен қолжетімділік')}</h1><p>{t('Покупайте программы и ключи, пополняйте итерации и продлевайте срок лицензий.', 'Бағдарламалар мен кілттерді сатып алыңыз, итерацияларды толықтырып, лицензия мерзімін ұзартыңыз.')}</p></header>
 
-    <div className="grid grid-2">
+    <div className={`grid grid-2 ${c.keyProducts}`}>
       <Card accent><div className="stack">
         <div className="row"><h2 style={{ margin: 0 }}>{t('Пакеты подборов', 'Іріктеу пакеттері')}</h2><Badge tone="success">{t('Скачивание бесплатно', 'Жүктеу тегін')}</Badge></div>
         <p className="muted" style={{ margin: 0 }}>{t('Подборы кода сверх месячного лимита подписки «Помощник ПВЗ». Пакет не сгорает, подбор списывается только за найденный код.', '«ПВЗ көмекшісі» жазылымының айлық лимитінен тыс код іріктеулері. Пакеттің мерзімі өтпейді, іріктеу тек табылған код үшін есептеледі.')}</p>
@@ -112,28 +113,28 @@ export function KeysPage() {
       </div></Card>
     </div>
 
-    <p className="muted section" style={{ marginBottom: 0 }}>{t(
+    <p className={`muted section ${c.keyHelp}`} style={{ marginBottom: 0 }}>{t(
       'Как войти в программу: откройте её → «Войти через сайт» → подтвердите вход на открывшейся странице. Либо войдите в программе почтой и паролем от этого кабинета.',
       'Бағдарламаға кіру: оны ашыңыз → «Сайт арқылы кіру» → ашылған бетте кіруді растаңыз. Немесе бағдарламада осы кабинеттің поштасы мен құпиясөзімен кіріңіз.',
     )}</p>
 
-    <Card className="section"><div className="row">
+    <Card className={`section ${c.claimCard}`}><div className="row">
       <Field label={t('Добавить ранее купленный ключ', 'Бұрын сатып алынған кілтті қосу')}><Input value={claim} onChange={event => setClaim(event.target.value.toUpperCase())} placeholder="CP-… или WBPK-…" /></Field>
       <Button variant="secondary" disabled={!claim} onClick={() => submitClaim(claim.startsWith('CP-') ? 'cell_print' : 'program')}>{t('Добавить', 'Қосу')}</Button>
     </div>{claimMutation.isError && <p className="error">{claimMutation.error.message}</p>}</Card>
 
-    <div className="stack-lg section">{assets.length ? assets.map(asset => {
+    <div className={`stack-lg section ${c.assetList}`}>{assets.length ? assets.map(asset => {
       const status = assetStatus(asset, t);
       const used = asset.type === 'program' ? asset.used : asset.devices.length;
       const total = asset.type === 'program' ? asset.total : asset.deviceLimit;
-      return <Card key={`${asset.type}:${asset.key}`}>
-        <div className="row"><strong className="mono">{maskKey(asset.key)}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast(t('Ключ скопирован', 'Кілт көшірілді'), 'success'); }}><Copy size={15} />{t('Копировать', 'Көшіру')}</Button><Badge>{asset.label}</Badge>{asset.type === 'cell_print' && <Badge>{marketplaceLabel(asset.marketplaceScope)}</Badge>}<Badge tone={status.tone}>{status.label}</Badge></div>
-        <div className="grid grid-3 section">
+      return <Card className={c.assetCard} key={`${asset.type}:${asset.key}`}>
+        <div className={`row ${c.assetHead}`}><strong className="mono">{maskKey(asset.key)}</strong><Button variant="ghost" size="sm" onClick={() => { navigator.clipboard?.writeText(asset.key); toast(t('Ключ скопирован', 'Кілт көшірілді'), 'success'); }}><Copy size={15} />{t('Копировать', 'Көшіру')}</Button><Badge>{asset.label}</Badge>{asset.type === 'cell_print' && <Badge>{marketplaceLabel(asset.marketplaceScope)}</Badge>}<Badge tone={status.tone}>{status.label}</Badge></div>
+        <div className={`grid grid-3 section ${c.assetMeta}`}>
           <div><strong>{asset.type === 'cell_print' ? t(`${asset.durationDays} дней`, `${asset.durationDays} күн`) : t('Без срока', 'Мерзімсіз')}</strong><div className="muted">{t('срок ключа', 'кілт мерзімі')}</div></div>
           <div><strong>{asset.type === 'cell_print' ? asset.expiresAt ? dateTime(asset.expiresAt) : t('После первой активации', 'Алғашқы белсендіруден кейін') : t(`${Math.max(0, asset.total - asset.used)} итераций`, `${Math.max(0, asset.total - asset.used)} итерация`)}</strong><div className="muted">{t('остаток / окончание', 'қалдық / аяқталуы')}</div></div>
           <Progress value={used} max={Math.max(1, total)} label={<><span>{asset.type === 'program' ? t('Использовано', 'Пайдаланылды') : t('Устройства', 'Құрылғылар')}</span><strong>{t(`${used} из ${total}`, `${total} ішінен ${used}`)}</strong></>} />
         </div>
-        <div className="row">
+        <div className={`row ${c.assetActions}`}>
           {asset.type === 'cell_print' && <Button variant="secondary" onClick={() => setDevices(asset)}>{t('Устройства', 'Құрылғылар')}</Button>}
           {asset.active && asset.type === 'program' && <Button onClick={() => setCheckout({ kind: 'program_license', targetKey: asset.key })}><RefreshCw size={16} />{t('Пополнить итерации', 'Итерацияларды толықтыру')}</Button>}
           {asset.active && asset.type === 'cell_print' && <Button onClick={() => renewCellPrint(asset)}><RefreshCw size={16} />{t('Продлить', 'Ұзарту')}</Button>}

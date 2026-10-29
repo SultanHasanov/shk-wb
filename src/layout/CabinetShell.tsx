@@ -20,6 +20,7 @@ import {
   User,
   Users,
   Bell,
+  WalletCards,
 } from 'lucide-react';
 import { Button } from '../ui';
 import { TabBar, type TabItem } from './TabBar';
@@ -53,12 +54,12 @@ const cabinetNavItems = (t: T) => [
 ];
 
 const titlesFor = (t: T): Record<string, string> => ({
-  '/cabinet': t('Обзор', 'Шолу'),
+  '/cabinet': t('Кабинет', 'Кабинет'),
   '/cabinet/generator': t('Генератор', 'Генератор'),
   '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
-  '/cabinet/subscription': t('Подписка', 'Жазылым'),
-  '/cabinet/keys': t('Ключи и доступы', 'Кілттер мен қолжетімділік'),
-  '/cabinet/packages': t('Пакеты и код доступа', 'Пакеттер мен қолжетімділік коды'),
+  '/cabinet/subscription': t('Тарифы «Помощник ПВЗ»', '«ПВЗ көмекшісі» тарифтері'),
+  '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
+  '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),
   '/cabinet/orders': t('Заказы', 'Тапсырыстар'),
   '/cabinet/referrals': t('Рефералы', 'Рефералдар'),
@@ -100,14 +101,14 @@ export const CabinetShell = observer(() => {
     ...(APP_SUBSCRIPTIONS_LIVE
       ? [{ key: 'subscription', to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop }]
       : []),
-    { key: 'packages', to: '/cabinet/packages', label: t('Пакеты', 'Пакеттер'), Icon: Package },
+    { key: 'packages', to: '/cabinet/packages', label: t('Баланс', 'Баланс'), Icon: WalletCards },
     { key: 'referrals', to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users },
     {
       key: 'more',
       label: t('Ещё', 'Тағы'),
       Icon: Menu,
       onClick: ui.toggleMobile,
-      active: ui.sidebarOpen,
+      active: ui.sidebarOpen || !['/cabinet', '/cabinet/subscription', '/cabinet/packages', '/cabinet/referrals'].includes(location.pathname),
       badge: unread,
       ariaLabel: unread > 0 ? t(`Ещё, непрочитанных: ${unread}`, `Тағы, оқылмаған: ${unread}`) : t('Ещё', 'Тағы'),
     },
@@ -258,7 +259,7 @@ export const CabinetShell = observer(() => {
 
   return (
     <div
-      className={`${s.shell} ${ui.sidebarCollapsed ? s.collapsed : ''} ${ui.sidebarOpen ? s.open : ''}`}
+      className={`${s.shell} ${ui.sidebarCollapsed ? s.collapsed : ''} ${ui.sidebarOpen ? s.open : ''} ${location.pathname === '/cabinet' ? s.overviewRoute : ''}`}
     >
       {/* Ссылка была только в PublicShell — клавиатурный пользователь кабинета
           каждый раз проходил весь сайдбар, чтобы добраться до содержимого. */}
@@ -319,7 +320,7 @@ export const CabinetShell = observer(() => {
         <header className={s.topbar}>
           <Button
             variant="ghost"
-            className="mobile-only"
+            className={`mobile-only ${s.mobileMenuButton}`}
             onClick={ui.toggleMobile}
             aria-label={t('Открыть меню', 'Мәзірді ашу')}
           >
@@ -328,7 +329,7 @@ export const CabinetShell = observer(() => {
           <span className={s.title}>{titles[location.pathname] ?? t('Кабинет', 'Кабинет')}</span>
 
           <div className={s.topActions}>
-            <LanguageSwitch />
+            <span className={s.language}><LanguageSwitch /></span>
             <div className={s.account} ref={accountRef}>
               <button
                 type="button"

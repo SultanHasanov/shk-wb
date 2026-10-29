@@ -321,7 +321,30 @@
   }
 
   .topbar {
-    padding: 0 var(--sp-4);
+    height: 54px;
+    padding: 0 16px;
+    background: var(--page);
+    backdrop-filter: none;
+  }
+
+  .title {
+    overflow: hidden;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobileMenuButton,
+  .language {
+    display: none !important;
+  }
+
+  .topActions {
+    display: none;
+  }
+
+  .overviewRoute .topActions {
+    display: flex;
   }
 
   .collapse {
@@ -341,5 +364,16 @@
 
   .accountTrigger {
     padding: var(--sp-1);
+    border: 0;
+    background: var(--accent-soft);
+  }
+
+  .accountTrigger > svg {
+    display: none;
+  }
+
+  .avatar {
+    width: 30px;
+    height: 30px;
   }
 }

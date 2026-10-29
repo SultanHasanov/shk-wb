@@ -55,6 +55,10 @@
   letter-spacing: var(--tracking-tight);
 }
 
+.mobilePlanSummary {
+  display: none;
+}
+
 .limits {
   margin: 0;
   padding: 0;
@@ -101,4 +105,185 @@
 
 .device:first-child {
   border-top: 0;
+}
+
+@media (max-width: 768px) {
+  .mobilePage {
+    width: 100%;
+    max-width: none;
+    padding: 16px 16px 32px;
+    overflow: hidden;
+  }
+
+  .mobilePage > :global(.page-head) {
+    display: none;
+  }
+
+  .subscriptionSummary {
+    display: block;
+    margin-bottom: 16px;
+  }
+
+  /* Пункты и компьютеры остаются доступны на десктопе. На телефоне их
+     управление находится в «Ключи и устройства», а первый экран повторяет
+     короткий тарифный сценарий из прототипа. */
+  .accountResources {
+    display: none;
+  }
+
+  .subscriptionSummary > :first-child,
+  .subscriptionSummary > :nth-child(2) {
+    padding: 16px;
+    border-color: var(--accent-softer);
+    border-radius: 0;
+    background: var(--accent-soft);
+    box-shadow: none;
+  }
+
+  .subscriptionSummary > :first-child {
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .subscriptionSummary > :nth-child(2) {
+    border-top: 0;
+    border-radius: 0 0 14px 14px;
+  }
+
+  .subscriptionSummary > :nth-child(2)::before {
+    content: '';
+    display: block;
+    height: 1px;
+    margin: -4px 0 14px;
+    background: var(--accent-softer);
+  }
+
+  .subscriptionSummary h2 {
+    font-size: 14px;
+  }
+
+  .subscriptionSummary > :nth-child(2) h2,
+  .subscriptionSummary .limitHelp,
+  .subscriptionSummary .planActions {
+    display: none;
+  }
+
+  .planHead {
+    align-items: flex-start;
+    flex-wrap: nowrap;
+  }
+
+  .planName {
+    margin-top: 2px;
+    font-size: 22px;
+  }
+
+  .subscriptionSummary :global(.stack) {
+    gap: 10px;
+  }
+
+  .subscriptionSummary :global(.muted) {
+    font-size: 12px;
+  }
+
+  .mobilePage :global(#plans) {
+    gap: 12px;
+  }
+
+  .mobilePage :global(#plans) > :first-child {
+    display: block !important;
+  }
+
+  .mobilePage :global(#plans) > :first-child > h2 {
+    display: none;
+  }
+
+  .mobilePage [role='radiogroup'] {
+    display: grid;
+    grid-template-columns: repeat(4,minmax(0,1fr));
+    gap: 0;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: transparent;
+  }
+
+  .mobilePage [role='radio'] {
+    min-width: 0;
+    min-height: 44px;
+    padding: 5px 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: normal;
+  }
+
+  .mobilePage [role='radio'][aria-checked='true'] {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: none;
+  }
+
+  .plans {
+    gap: 10px;
+  }
+
+  .plan {
+    gap: 10px;
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .plan h3 {
+    font-size: 17px;
+  }
+
+  .price {
+    display: inline;
+    font-size: 26px;
+  }
+
+  .priceBlock {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+
+  .priceBlock > :last-child {
+    font-size: 12px !important;
+  }
+
+  .mobilePlanSummary {
+    display: grid;
+    gap: 3px;
+    font-size: 12px;
+  }
+
+  .plan > p,
+  .plan .limits {
+    display: none;
+  }
+
+  .features {
+    display: none;
+  }
+
+  .limits {
+    gap: 3px;
+    font-size: 12px;
+  }
+
+  .plan > button {
+    width: 100%;
+  }
+
+  .mobilePage > :global(.grid),
+  .mobilePage > :global(.stack),
+  .mobilePage > :global(.card) {
+    margin-top: 12px;
+  }
+
+  .device {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

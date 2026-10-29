@@ -155,7 +155,7 @@ function CurrentPlan({ account, onExtend }: { account: AppAccount; onExtend: () 
             : t(`Оплачено до ${date(paidUntil)} · осталось ${left} дн.`, `${date(paidUntil)} дейін төленген · ${left} күн қалды`)}
         </p>
         {sub.nextPlan && <p className="muted" style={{ margin: 0 }}>{t(`С ${date(sub.endsAt)} — тариф «${sub.nextPlan === 'basic' ? 'Базовый' : sub.nextPlan === 'standard' ? 'Стандарт' : 'Про'}».`, `${date(sub.endsAt)} бастап — «${sub.nextPlan}» тарифі.`)}</p>}
-        <div className="row">
+        <div className={`row ${s.planActions}`}>
           <Button onClick={onExtend}>{t('Продлить', 'Ұзарту')}</Button>
           <a href="#plans"><Button variant="secondary">{t('Сменить тариф', 'Тарифті ауыстыру')}</Button></a>
         </div>
@@ -183,7 +183,7 @@ function Limits({ account }: { account: AppAccount }) {
           {t('Пакеты подборов сверх лимита:', 'Лимиттен тыс іріктеу пакеттері:')} <strong>{account.packsLeft}</strong>
           {account.stickerPacksLeft > 0 && <> · {t('стикеры в пакетах:', 'пакеттердегі стикерлер:')} <strong>{account.stickerPacksLeft}</strong></>}
         </p>
-        <p className="muted" style={{ margin: 0 }}>{t('Когда месячный лимит закончится, подборы спишутся из пакетов. Пакеты покупаются в разделе «Ключи и доступы».', 'Айлық лимит біткенде, іріктеулер пакеттерден алынады. Пакеттер «Кілттер мен қолжетімділік» бөлімінде сатылады.')}</p>
+        <p className={`muted ${s.limitHelp}`} style={{ margin: 0 }}>{t('Когда месячный лимит закончится, подборы спишутся из пакетов. Пакеты покупаются в разделе «Ключи и доступы».', 'Айлық лимит біткенде, іріктеулер пакеттерден алынады. Пакеттер «Кілттер мен қолжетімділік» бөлімінде сатылады.')}</p>
       </div>
     </Card>
   );
@@ -361,11 +361,15 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
                 {isCurrent && <Badge tone="accent">{t('Текущий', 'Ағымдағы')}</Badge>}
               </div>
               <p className="muted" style={{ margin: 0 }}>{plan.summary}</p>
-              <div>
+              <div className={s.priceBlock}>
                 <div className={s.price}>{formatTotal(price)}</div>
                 <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
                   {months > 1 ? t(`за ${monthsWord(months, t)} · ${formatTotal(Math.round(price / months))} в месяц`, `${monthsWord(months, t)} · айына ${formatTotal(Math.round(price / months))}`) : t('в месяц', 'айына')}
                 </div>
+              </div>
+              <div className={s.mobilePlanSummary}>
+                <span>{plan.summary}</span>
+                <span>{t(`${plan.codes} подборов · ${plan.devices} ПК${(plan.points ?? 1) > 1 ? ` · ${plan.points} пункта` : ''}`, `${plan.codes} іріктеу · ${plan.devices} ПК`)}</span>
               </div>
               <ul className={s.limits}>
                 <li>{t(`${plan.codes} подборов кода в месяц`, `Айына ${plan.codes} код іріктеу`)}</li>
@@ -421,7 +425,7 @@ export function SubscriptionPage() {
   };
 
   return (
-    <div className="page">
+    <div className={`page ${s.mobilePage}`}>
       <header className="page-head">
         <h1>{t('Подписка «Помощник ПВЗ»', '«ПВЗ көмекшісі» жазылымы')}</h1>
         <p>{t('Тариф, лимиты, пункты и компьютеры программы. Войти в программу можно тем же логином и паролем, что на сайте.', 'Бағдарламаның тарифі, лимиттері, пункттері және компьютерлері. Бағдарламаға сайттағы логин мен құпиясөзбен кіруге болады.')}</p>
@@ -445,11 +449,11 @@ export function SubscriptionPage() {
           )}
         </Alert>
       )}
-      <div className="grid grid-2">
+      <div className={`grid grid-2 ${s.subscriptionSummary}`}>
         <CurrentPlan account={account.data} onExtend={extend} />
         <Limits account={account.data} />
       </div>
-      <div className="grid grid-2">
+      <div className={`grid grid-2 ${s.accountResources}`}>
         <Points account={account.data} />
         <Devices account={account.data} />
       </div>

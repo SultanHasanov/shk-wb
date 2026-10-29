@@ -24,7 +24,7 @@ export function PackagesPage() {
   const t = useT();
   useDocumentMeta(t('Баланс генератора — кабинет', 'Генератор балансы — кабинет'));
   const query = useCabinet();
-  const [amount, setAmount] = useState('20');
+  const [amount, setAmount] = useState('500');
   const value = Number(amount.replace(',', '.'));
   const kopecks = Math.round(value * 100);
   const valid = Number.isFinite(value) && value >= 20 && value <= 50000 && Math.abs(kopecks - value * 100) < 1e-6;
@@ -47,7 +47,7 @@ export function PackagesPage() {
       ? t('Конвертация старого пакета', 'Ескі пакетті айырбастау')
       : ({ topup: t('Пополнение', 'Толықтыру'), bonus: t('Бонус', 'Бонус'), spend: t('Списание', 'Есептен шығару'), refund: t('Возврат', 'Қайтару'), admin: t('Корректировка', 'Түзету') }[entry.kind] ?? entry.kind);
 
-  return <div className="page">
+  return <div className={`page ${c.mobilePage} ${c.balancePage}`}>
     <header className="page-head">
       <h1>{t('Баланс генератора', 'Генератор балансы')}</h1>
       <p>{t('Один баланс для сайта и Telegram-бота. По номеру — 7,50 ₽, пачка из 50 кодов одним PDF — 20 ₽.', 'Сайт пен Telegram-ботқа ортақ баланс. Нөмір бойынша — 7,50 ₽, 50 кодтан тұратын PDF — 20 ₽.')}</p>
