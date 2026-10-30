@@ -1713,24 +1713,26 @@ async function showShopConfirm(from, chatId, messageId, userId, parts, error) {
   ]) });
 }
 
-async function payShopItem(from, chatId, messageId, nonce, parts) {
+/** screenId — где показывать ход оплаты, если не там же, где кнопка (автопокупка после пополнения). */
+async function payShopItem(from, chatId, messageId, nonce, parts, screenId = messageId) {
   const userId = await findUser(from.id);
   if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
   const item = await resolveShopItem(userId, parts);
-  if (item.error) return showShopConfirm(from, chatId, messageId, userId, parts);
+  if (item.error) return showShopConfirm(from, chatId, screenId, userId, parts);
+  // id экрана с кнопкой, а не screenId: повторное уведомление о том же пополнении не купит второй раз
   const requestId = `shop:${from.id}:${messageId}:${nonce}`;
   if (!await claimGenerationRequest(requestId, from, chatId, { userId, shop: parts })) return;
-  await showScreen(chatId, messageId, `${item.title}\n\n⏳ Оплачиваю с баланса…`);
+  await showScreen(chatId, screenId, `${item.title}\n\n⏳ Оплачиваю с баланса…`);
   let result;
   try {
     result = await wallet.payWithWallet({ userId, productKind: item.productKind, fields: item.fields, priceRub: item.priceRub, snapshot: item.snapshot });
   } catch (error) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
-    return showScreen(chatId, messageId, `⚠️ Не удалось оформить покупку: ${escapeHtml(error.message)}\n\nДеньги вернулись на баланс. Если повторится — напишите в поддержку.`, { reply_markup: choiceKeyboard([[{ text: '🆘 Поддержка', callback_data: 'menu:support' }], [{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
+    return showScreen(chatId, screenId, `⚠️ Не удалось оформить покупку: ${escapeHtml(error.message)}\n\nДеньги вернулись на баланс. Если повторится — напишите в поддержку.`, { reply_markup: choiceKeyboard([[{ text: '🆘 Поддержка', callback_data: 'menu:support' }], [{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
   }
   if (!result.ok) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
-    return showShopConfirm(from, chatId, messageId, userId, parts, 'Денег на балансе не хватает.');
+    return showShopConfirm(from, chatId, screenId, userId, parts, 'Денег на балансе не хватает.');
   }
   await completeGenerationRequest(requestId, { orderId: result.order.id });
   const order = result.order;
@@ -1751,7 +1753,7 @@ async function payShopItem(from, chatId, messageId, nonce, parts) {
   const doneRows = item.returnToGenerator
     ? [[{ text: '🏷 Продолжить генерацию', callback_data: 'gen:return-mode' }], MENU_ROW]
     : [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }], MENU_ROW];
-  await showScreen(chatId, messageId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard(doneRows) });
+  await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard(doneRows) });
 }
 
 // ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──
@@ -1872,8 +1874,9 @@ async function referralToWallet(from, chatId, messageId) {
  * После оплаты пополнения «💳 Пополнить на X ₽ и купить» — сразу провести покупку, ради которой
  * пополняли (pricing_snapshot.wallet.then). Вызывается из notifyCompleted один раз на заказ.
  * Возвращает true, если покупка запущена; false — пусть пользователь вернётся к ней сам.
+ * noticeId — сообщение «Баланс пополнен…» внизу чата: итог покупки показываем в нём, а не в старом экране выше.
  */
-async function afterWalletTopup(order) {
+async function afterWalletTopup(order, noticeId = null) {
   const then = String(order?.pricing_snapshot?.wallet?.then || '');
   if (!then || !order.user_id) return false;
   const tg = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`);
@@ -1900,7 +1903,9 @@ async function afterWalletTopup(order) {
   if (then.startsWith('shop:')) {
     // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
     const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
-    await payShopItem(from, chatId, messageId, nonce, then.slice('shop:'.length).split(':'));
+    // Старый экран покупки выше по чату: убираем кнопку «Пополнить и купить», чтобы не оплатили второй раз.
+    if (messageId && noticeId) await editMessageText(chatId, messageId, 'Баланс пополнен — итог покупки ниже ⬇️').catch(() => {});
+    await payShopItem(from, chatId, messageId, nonce, then.slice('shop:'.length).split(':'), noticeId || messageId);
     return true;
   }
   return false;
