@@ -85,6 +85,12 @@ function apiHandler(pathname) {
   return handlers.get(file);
 }
 
+/**
+ * Файлы подтверждения прав в поисковых панелях: google<hex>.html и
+ * yandex_<hex>.html в корне. Отдаются как есть, без cleanUrls-редиректа.
+ */
+const VERIFICATION_FILE = /^\/(google[0-9a-f]{8,}|yandex_[0-9a-f]{8,})\.html$/;
+
 function staticFile(pathname) {
   let decoded;
   try {
@@ -116,6 +122,13 @@ app.use((req, res, next) => {
   }
   // cleanUrls + trailingSlash:false — канонический адрес без .html и без слэша.
   if (pathname.length > 1 && pathname.endsWith('/')) return res.redirect(308, pathname.replace(/\/+$/, '') + url.search);
+  // Исключение из cleanUrls: Яндекс Вебмастер и Google Search Console проверяют
+  // права запросом к точному адресу файла и ждут 200. Редирект на адрес без
+  // .html они считают неудачей, и права на домен слетают при перепроверке.
+  if (pathname.endsWith('.html') && VERIFICATION_FILE.test(pathname)) {
+    const file = staticFile(pathname);
+    if (file) return res.sendFile(file);
+  }
   if (pathname.endsWith('.html')) {
     const clean = pathname === '/index.html' ? '/' : pathname.slice(0, -5);
     if (staticFile(pathname)) return res.redirect(308, clean + url.search);
