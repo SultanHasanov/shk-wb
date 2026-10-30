@@ -43,7 +43,7 @@ const PLANS = Object.freeze({
     title: 'Про',
     monthlyPrice: 790,
     codes: 100,
-    stickers: 300,
+    stickers: 0, // квота стикеров не выдаётся: генерация оплачивается с баланса
     devices: 4,
     points: 2,
     summary: 'Досье клиентов, стикеры, сотрудники и зарплата',

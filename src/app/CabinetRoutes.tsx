@@ -15,6 +15,7 @@ import {
   ReferralsPage,
   SettingsPage,
   SubscriptionPage,
+  AccessPage,
 } from '../pages/cabinet';
 
 /**
@@ -32,6 +33,7 @@ export default function CabinetRoutes() {
           {/* Покупка из кабинета возвращается сюда же, а не на публичную страницу */}
           <Route path="payment-result" element={<PaymentResultPage />} />
           <Route path="subscription" element={<SubscriptionPage />} />
+          <Route path="access" element={<AccessPage />} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="packages" element={<PackagesPage />} />
           <Route path="history" element={<HistoryPage />} />

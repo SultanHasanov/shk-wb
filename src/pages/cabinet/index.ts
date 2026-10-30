@@ -10,3 +10,4 @@ export { SettingsPage } from './SettingsPage';
 export { NotificationsPage } from './NotificationsPage';
 export { PartnerPage } from './PartnerPage';
 export { SubscriptionPage } from './SubscriptionPage';
+export { AccessPage } from './AccessPage';

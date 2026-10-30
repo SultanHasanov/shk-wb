@@ -58,8 +58,17 @@ async function finalizeGeneration(chargeId, result) {
   }));
 }
 
+// Цены генерации для конкретного пользователя (копейки): с разовой скидкой 20%, если она ещё есть.
+async function generationPrices(userId) {
+  const rows = await supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []);
+  const discount = rows.length > 0;
+  const p = discount ? GENERATION_DISCOUNT_PRICES : GENERATION_PRICES;
+  return { batch: p.batch, custom: p.custom, batchQuantity: BATCH_QUANTITY, discountAvailable: discount };
+}
+
 module.exports = {
   BATCH_QUANTITY,
+  generationPrices,
   GENERATION_DISCOUNT_PRICES,
   GENERATION_PRICES,
   finalizeGeneration,

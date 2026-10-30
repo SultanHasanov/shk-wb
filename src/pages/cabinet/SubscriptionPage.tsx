@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Archive, Check, Download, Infinity as InfinityIcon, Laptop, MapPin, Minus, PackagePlus, Pencil, Unlink } from 'lucide-react';
+import { Archive, Check, Download, Infinity as InfinityIcon, Laptop, MapPin, Minus, PackagePlus, Pencil, ShieldCheck, Unlink } from 'lucide-react';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Modal, Progress, Segmented, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { api } from '../../api/client';
@@ -191,6 +191,7 @@ function Limits({ account }: { account: AppAccount }) {
 
 function Devices({ account }: { account: AppAccount }) {
   const t = useT();
+  const lp = useLocalePath();
   const toast = useToast();
   const revoke = useRevokeAppDevice();
   const rename = useRenameAppDevice();
@@ -221,6 +222,11 @@ function Devices({ account }: { account: AppAccount }) {
               </div>
             ))}</div>}
         <p className="muted" style={{ margin: 0 }}>{t('Отключённый компьютер выйдет из аккаунта при следующем обращении к серверу.', 'Ажыратылған компьютер серверге келесі жүгінгенде аккаунттан шығады.')}</p>
+        {account.devices.length > 0 && (
+          <p style={{ margin: 0 }}>
+            <Link to={lp('/cabinet/access')}><ShieldCheck size={15} style={{ verticalAlign: -3 }} /> {t('Ограничить разделы на компьютерах сотрудников', 'Қызметкерлер компьютерлерінде бөлімдерді шектеу')}</Link>
+          </p>
+        )}
       </div>
     </Card>
   );

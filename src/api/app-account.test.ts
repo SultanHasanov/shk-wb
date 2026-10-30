@@ -49,7 +49,7 @@ describe('тарифы программы', () => {
     expect(plans.planPrice('vip', 1)).toBeNull();
   });
   it('кладёт лимиты в снимок заказа', () => {
-    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 100, stickers: 300, devices: 4, monthly_price: 790 }, total: 2133 });
+    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 100, stickers: 0, devices: 4, monthly_price: 790 }, total: 2133 });
   });
   it('отдаёт тарифы публично', async () => {
     const res = response();
@@ -279,9 +279,9 @@ describe('оплата из программы по QR-коду СБП', () => {
     expect(app).toContain("req.query.action = 'create'");
     expect(app).toContain("req.query.action = 'status'");
   });
-  it('QR берётся из confirmation_data ЮKassa и только для подписки программы', () => {
+  it('QR берётся из confirmation_data ЮKassa и только для покупок программы', () => {
     expect(payments).toContain("payment_method_data: { type: 'sbp' }, confirmation: { type: 'qr' }");
     expect(payments).toContain('qr: payment.confirmation?.confirmation_data');
-    expect(payments).toContain('Оплата по QR доступна только для подписки программы');
+    expect(payments).toContain("const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license'];");
   });
 });

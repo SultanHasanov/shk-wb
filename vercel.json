@@ -49,7 +49,7 @@
     { "source": "/api/app/mirror/push", "destination": "/api/app?action=mirror-push" },
     { "source": "/api/app/mirror/pull", "destination": "/api/app?action=mirror-pull" },
     { "source": "/api/app/relay/:action(inbox|peers|ask|put|get|ack)", "destination": "/api/app?action=relay-:action" },
-    { "source": "/api/app/:action(plans|login|refresh|register-device|me|consume|usage|claim-key|site-link|logout|update|lease|pay|pay-status|signup|points|point-purge|docs|secrets|logout-others|security-log|client-qr|crack-code|qr-image|wallet|orders|assets|referrals)", "destination": "/api/app?action=:action" },
+    { "source": "/api/app/:action(plans|login|refresh|register-device|me|consume|usage|claim-key|site-link|logout|update|lease|pay|pay-status|signup|points|point-purge|docs|secrets|logout-others|security-log|client-qr|crack-code|qr-image|wallet|orders|assets|referrals|cell-print-prices)", "destination": "/api/app?action=:action" },
     { "source": "/api/admin/cabinet/withdrawals", "destination": "/api/admin/data?cabinet=withdrawals" },
     { "source": "/api/admin/cabinet/withdrawal", "destination": "/api/admin/data?cabinet=withdrawal" },
     { "source": "/api/admin/cabinet/news", "destination": "/api/admin/data?cabinet=news" },

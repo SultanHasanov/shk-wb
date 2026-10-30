@@ -13,6 +13,7 @@ const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, m
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 const { crackFallbackEnabled } = require('./_app-flags');
+const permissions = require('./_app-permissions');
 
 /**
  * Фактические даты подписки с учётом бесплатного периода. При его окончании подписки
@@ -232,7 +233,7 @@ async function registerDeviceLimited(userId, deviceHash, name, version) {
 async function requireDevice(req, userId) {
   const hash = deviceHashFrom(req);
   if (!hash) throw appError(400, 'DEVICE_REQUIRED', 'Обновите программу');
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at&limit=1`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at,denied,point_wb&limit=1`);
   if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
   const device = rows[0];
   if (Date.now() - new Date(device.last_seen_at).getTime() > 10 * 60 * 1000) {
@@ -245,7 +246,7 @@ async function requireDevice(req, userId) {
 }
 
 async function listDevices(userId, currentHash) {
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at&order=last_seen_at.desc`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at,denied,point_wb,access_updated_at&order=last_seen_at.desc`);
   return rows.map(row => ({
     id: row.id,
     name: row.name,
@@ -253,7 +254,35 @@ async function listDevices(userId, currentHash) {
     lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
     current: Boolean(currentHash && row.device_hash === currentHash),
+    denied: Array.isArray(row.denied) ? row.denied : [],
+    pointWb: row.point_wb || null,
+    accessUpdatedAt: row.access_updated_at || null,
   }));
+}
+
+// Кабинет → «Доступ сотрудников»: что закрыто на этом ПК. Только владелец (Bearer сайта).
+async function setDeviceAccess(userId, deviceId, denied) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
+  if (!Array.isArray(denied)) throw appError(400, 'VALIDATION_ERROR', 'Список закрытого должен быть массивом');
+  const list = permissions.cleanDenied(denied);
+  const rows = await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ denied: list, access_updated_at: new Date().toISOString() }),
+  });
+  if (!rows.length) throw appError(404, 'NOT_FOUND', 'Устройство не найдено');
+  return { id: rows[0].id, denied: rows[0].denied || [] };
+}
+
+// Запрос программы с ПК, где владелец закрыл действие, — 403 DENIED_BY_OWNER.
+// Запросы кабинета (без X-Device-Id) не ограничиваются: там владелец.
+async function requireAllowed(req, userId, key) {
+  if (!req.headers['x-device-id']) return null;
+  const device = await requireDevice(req, userId);
+  if (permissions.isDenied(device, key)) {
+    throw appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл это действие на этом компьютере', { key });
+  }
+  return device;
 }
 
 async function renameDevice(userId, deviceId, name) {
@@ -388,18 +417,30 @@ async function accountSummary(user, currentHash) {
 async function leaseRights(req) {
   const user = await optionalUser(req).catch(() => null);
   if (!user) return { user: null, plan: null, features: [], archive_until: null, free: false };
+  let device;
   try {
-    await requireDevice(req, user.id);
+    device = await requireDevice(req, user.id);
   } catch (error) {
     if (error.code === 'DEVICE_REVOKED' || error.code === 'DEVICE_REQUIRED') {
-      return { user: user.id, plan: null, features: [], archive_until: null, free: false };
+      return { user: user.id, plan: null, features: [], archive_until: null, free: false, denied: [] };
     }
     throw error;
   }
+  await rememberDevicePoint(device, req.headers['x-point-wb']);
   const { free, unlimited, plan, addons, features } = await entitlementsFor(user.id);
   const all = free || unlimited;
   const archiveUntil = all ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
-  return { user: user.id, plan: all ? 'pro' : plan, features, archive_until: archiveUntil, free: all };
+  // закрытое владельцем на этом ПК: разделы вычитаются из тарифа, весь список — программе
+  const denied = permissions.cleanDenied(device.denied);
+  const open = features.filter(f => !denied.includes(f));
+  return { user: user.id, plan: all ? 'pro' : plan, features: open, archive_until: archiveUntil, free: all, denied };
+}
+
+// Пункт, чья база WB стоит на ПК (программа шлёт в /lease), — для группировки ПК в кабинете.
+async function rememberDevicePoint(device, header) {
+  const wb = String(header || '').trim();
+  if (!/^\d{1,12}$/.test(wb) || wb === device.point_wb) return;
+  await supabaseFetch(`app_devices?id=eq.${device.id}`, { method: 'PATCH', body: JSON.stringify({ point_wb: wb }) }).catch(() => {});
 }
 
 async function consumeCode(userId, deviceId, meta) {
@@ -719,6 +760,8 @@ async function logoutOthers(user, currentDeviceId) {
 
 module.exports = {
   changePassword,
+  requireAllowed,
+  setDeviceAccess,
   entitlementsFor,
   isUnlimited,
   logoutOthers,

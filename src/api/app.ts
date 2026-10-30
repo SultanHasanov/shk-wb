@@ -42,7 +42,14 @@ export type AppPlans = {
   /** Бесплатный режим из админки: всем вошедшим — Про без лимитов. */
   freeMode?: boolean;
 };
-export type AppDevice = { id: string; name: string; appVersion: string; lastSeenAt: string; createdAt: string; current: boolean };
+export type AppDevice = {
+  id: string; name: string; appVersion: string; lastSeenAt: string; createdAt: string; current: boolean;
+  /** что владелец закрыл на этом ПК (разделы и действия act.*) */
+  denied?: string[];
+  /** пункт, чья база WB стоит на этом ПК */
+  pointWb?: string | null;
+  accessUpdatedAt?: string | null;
+};
 export type AppAccount = {
   freeMode?: boolean;
   /** дата окончания бесплатного периода (ISO), если задана в админке */
@@ -99,6 +106,16 @@ export function useRenameAppDevice() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       api<{ id: string; name: string }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
+  });
+}
+
+/** Доступ сотрудников: что закрыто на компьютере. Программа получит это с арендой (до 10 мин). */
+export function useSetDeviceAccess() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, denied }: { id: string; denied: string[] }) =>
+      api<{ id: string; denied: string[] }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ denied }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
   });
 }

@@ -199,8 +199,10 @@ module.exports = async function handler(req, res) {
       // QR-код СБП показывает сама программа «Помощник ПВЗ» (api/app.js action=pay):
       // платёж без перехода на сайт, оплата с телефона по QR.
       const sbpQr = req.body?.paymentMethod === 'sbp_qr';
-      if (sbpQr && productKind !== 'app_subscription' && productKind !== 'app_addon')
-        return res.status(400).json({ error: 'Оплата по QR доступна только для подписки программы' });
+      // QR из программы: подписка, услуга, пополнение баланса (стикеры) и лицензия «Печати ячеек»
+      const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license'];
+      if (sbpQr && !SBP_QR_KINDS.includes(productKind))
+        return res.status(400).json({ error: 'Оплата по QR недоступна для этой покупки' });
       const appAddon = String(req.body?.appAddon || '');
       const appAddonMonths = Number(req.body?.appAddonMonths || 0);
       const addonSnap = productKind === 'app_addon' ? addonSnapshot(appAddon, appAddonMonths) : null;

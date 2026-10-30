@@ -17,6 +17,7 @@ import {
   QrCode,
   Receipt,
   Settings,
+  ShieldCheck,
   User,
   Users,
   Bell,
@@ -40,7 +41,10 @@ const cabinetNavItems = (t: T) => [
   { to: '/cabinet', label: t('Обзор', 'Шолу'), Icon: Home, end: true },
   // Раньше за генерацией приходилось уходить на публичную главную и возвращаться руками
   { to: '/cabinet/generator', label: t('Генератор', 'Генератор'), Icon: QrCode, end: false },
-  ...(APP_SUBSCRIPTIONS_LIVE ? [{ to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false }] : []),
+  ...(APP_SUBSCRIPTIONS_LIVE ? [
+    { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
+    { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
+  ] : []),
   { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
   { to: '/cabinet/packages', label: t('Пакеты и код', 'Пакеттер мен код'), Icon: Package, end: false },
   { to: '/cabinet/history', label: t('История генераций', 'Генерациялар тарихы'), Icon: FileClock, end: false },
@@ -58,6 +62,7 @@ const titlesFor = (t: T): Record<string, string> => ({
   '/cabinet/generator': t('Генератор', 'Генератор'),
   '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
   '/cabinet/subscription': t('Тарифы «Помощник ПВЗ»', '«ПВЗ көмекшісі» тарифтері'),
+  '/cabinet/access': t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'),
   '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
   '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),

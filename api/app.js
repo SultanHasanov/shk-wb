@@ -1,7 +1,7 @@
 const { sendApiError } = require('../server/_supabase');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { enforceProgramVersion } = require('../server/_program-version');
-const { requireUser } = require('../server/_user-auth');
+const { requireUser, optionalUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
@@ -15,6 +15,9 @@ const { crackClientQr } = require('../server/_wb-crack');
 const wallet = require('../server/_wallet');
 const appUpdate = require('../server/_app-update');
 const payments = require('./payments');
+const permissions = require('../server/_app-permissions');
+const { generationPrices } = require('../server/_generation-billing');
+const { CELL_PRINT_PRICES } = require('../server/_payments');
 const cabinet = require('./cabinet');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
@@ -38,6 +41,17 @@ function sendError(res, error) {
   if (error.code === 'SYNC_NOT_CONFIGURED') return res.status(503).json({ error: error.publicMessage, code: error.code });
   if (error.code && error.status) return res.status(error.status).json({ error: error.message, code: error.code, ...(error.extra || {}) });
   return sendApiError(res, error);
+}
+
+// Действие закрыто владельцем на этом ПК (кабинет → «Доступ сотрудников») — 403 DENIED_BY_OWNER.
+// Для эндпоинтов до requireUser: без входа (ключ WBPK) ограничений нет — их ставит аккаунт.
+async function ownerAllows(req, key) {
+  if (!req.headers['x-device-id']) return;
+  const user = await optionalUser(req).catch(() => null);
+  if (!user) return;
+  await account.requireAllowed(req, user.id, key).catch(error => {
+    if (error.code === 'DENIED_BY_OWNER') throw error;
+  });
 }
 
 function body(req) {
@@ -112,6 +126,7 @@ module.exports = async function handler(req, res) {
     if (action === 'device' && req.method === 'DELETE') {
       const user = await requireUser(req, res);
       if (!user) return;
+      await account.requireAllowed(req, user.id, 'act.account');
       await account.revokeDevice(user.id, req.query.id);
       return res.status(204).end();
     }
@@ -119,7 +134,13 @@ module.exports = async function handler(req, res) {
       const user = await requireUser(req, res);
       if (!user) return;
       if (!await enforceRateLimit(req, res, { scope: 'app-device-rename', limit: 30, windowSeconds: 600, key: user.id })) return;
-      return res.status(200).json(await account.renameDevice(user.id, req.query.id, body(req).name));
+      const b = body(req);
+      // кабинет: что закрыто на этом ПК (только с сайта — программа себе доступ не меняет)
+      if (Array.isArray(b.denied)) {
+        if (req.headers['x-device-id']) return res.status(403).json({ error: 'Доступ меняется только в кабинете на сайте', code: 'DENIED_BY_OWNER' });
+        return res.status(200).json(await account.setDeviceAccess(user.id, req.query.id, b.denied));
+      }
+      return res.status(200).json(await account.renameDevice(user.id, req.query.id, b.name));
     }
 
     // Обновление и аренда — ДО проверки версии: устаревшая программа должна узнать,
@@ -215,6 +236,7 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'client-qr' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-client-qr', limit: 60, windowSeconds: 60 })) return;
+      await ownerAllows(req, 'act.client_qr');
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
@@ -231,6 +253,7 @@ module.exports = async function handler(req, res) {
     if (action === 'crack-code' && req.method === 'POST') {
       if (!await crackFallbackEnabled()) return res.status(403).json({ error: 'Резервный подбор отключён', code: 'CRACK_DISABLED' });
       if (!await enforceRateLimit(req, res, { scope: 'app-crack-code', limit: 5, windowSeconds: 60 })) return;
+      await ownerAllows(req, 'act.client_qr');
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
@@ -263,14 +286,25 @@ module.exports = async function handler(req, res) {
     // «лимит компьютеров» докупают компьютер, пока этот ещё не подключён.
     if (action === 'pay' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-pay', limit: 20, windowSeconds: 600, key: user.id })) return;
+      // ПК ещё не подключён (окно «лимит компьютеров») — ограничений по нему нет
+      await account.requireAllowed(req, user.id, 'act.pay').catch(error => {
+        if (error.code === 'DENIED_BY_OWNER') throw error;
+      });
       const b = body(req);
-      const kind = b.kind === 'addon' ? 'app_addon' : 'app_subscription';
+      const product =
+        b.kind === 'addon' ? { productKind: 'app_addon', appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
+        : b.kind === 'wallet' ? { productKind: 'wallet_topup', walletAmount: Number(b.amount || 0) }
+        : b.kind === 'cell_print' ? {
+          productKind: 'cell_print_license',
+          durationDays: Number(b.days || 0),
+          deviceLimit: Number(b.devices || 0),
+          marketplaceScope: String(b.scope || 'wb'),
+          ...(b.renewalTargetKey ? { renewalTargetKey: String(b.renewalTargetKey) } : {}),
+        }
+        : { productKind: 'app_subscription', appPlan: String(b.plan || ''), appTermMonths: Number(b.months || 0) };
       req.query.action = 'create';
       req.body = {
-        productKind: kind,
-        ...(kind === 'app_addon'
-          ? { appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
-          : { appPlan: String(b.plan || ''), appTermMonths: Number(b.months || 0) }),
+        ...product,
         accepted: b.accepted === true,
         paymentMethod: 'sbp_qr',
         returnTo: 'cabinet',
@@ -287,6 +321,10 @@ module.exports = async function handler(req, res) {
     // ПК держит inbox постоянно, а большая загрузка идёт сотней кусков ---
     if (action.startsWith('relay-')) {
       if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
+      // inbox — этот ПК отдаёт свои данные другим; закрыта только загрузка к себе
+      if (['relay-ask', 'relay-get', 'relay-ack'].includes(action) && permissions.isDenied(device, 'act.load_pc')) {
+        return res.status(403).json({ error: 'Владелец закрыл загрузку с другого ПК на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.load_pc' });
+      }
       if (action === 'relay-inbox' && req.method === 'POST') return res.status(200).json(await relay.inbox(user.id, device, body(req)));
       if (action === 'relay-peers' && req.method === 'GET') return res.status(200).json(relay.peers(user.id, device));
       if (action === 'relay-ask' && req.method === 'POST') return res.status(200).json(await relay.ask(user.id, device, body(req)));
@@ -321,7 +359,16 @@ module.exports = async function handler(req, res) {
     // Полные данные аккаунта с сайта: баланс, покупки, активы (ключи WBPK + лицензии печати
     // ячеек с устройствами), рефералы. Делегируем серверным функциям кабинета.
     if (action === 'wallet' && req.method === 'GET') {
-      return res.status(200).json(await wallet.walletSummary(user.id, req.query.limit));
+      // цены генерации — для раздела «Стикеры» программы (не дублировать их там)
+      const [summary, prices] = await Promise.all([
+        wallet.walletSummary(user.id, req.query.limit),
+        generationPrices(user.id).catch(() => null),
+      ]);
+      return res.status(200).json({ ...summary, ...(prices ? { stickerPrices: prices } : {}) });
+    }
+    if (action === 'cell-print-prices' && req.method === 'GET') {
+      // цены лицензии «Печати ячеек» для окна оплаты в программе: {дней: {ПК: ₽}}
+      return res.status(200).json({ prices: CELL_PRINT_PRICES });
     }
     if (action === 'orders' && req.method === 'GET') {
       return res.status(200).json({ items: await cabinet.getOrders(user.id, 25) });
@@ -339,10 +386,12 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'password-change' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-password-change', limit: 5, windowSeconds: 600, key: user.id })) return;
+      if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       const b = body(req);
       return res.status(200).json(await account.changePassword(user, b.current, b.password));
     }
     if (action === 'logout-others' && req.method === 'POST') {
+      if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       return res.status(200).json(await account.logoutOthers(user, device.id));
     }
     if (action === 'security-log' && req.method === 'GET') {
@@ -358,6 +407,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(await sync.registerPoint(user.id, device.id, b.wbPointId, b.name));
     }
     if (action === 'point' && req.method === 'DELETE') {
+      if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       await sync.revokePoint(user.id, req.query.id);
       return res.status(204).end();
     }
