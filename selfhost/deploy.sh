@@ -26,7 +26,8 @@ VITE_SUPABASE_URL=https://shk-wb.ru/supabase npm run build
 
 release="$(date +%Y%m%d-%H%M%S)"
 archive="$(mktemp -d)/shk-wb-$release.tar.gz"
-tar -czf "$archive" dist api server selfhost vercel.json package.json package-lock.json
+# Установщики программ кладутся в архив, только если изменились (см. pack-release.sh).
+bash selfhost/pack-release.sh "$host" "$archive"
 
 scp ${SSH_OPTS:-} "$archive" "$host:/tmp/shk-wb.tar.gz"
 ssh ${SSH_OPTS:-} "$host" bash -s -- "$release" < selfhost/release.sh

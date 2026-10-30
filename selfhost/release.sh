@@ -10,6 +10,17 @@ previous="$(readlink -f /srv/shk-wb/current 2>/dev/null || true)"
 mkdir -p "$dir"
 tar -xzf /tmp/shk-wb.tar.gz -C "$dir"
 rm /tmp/shk-wb.tar.gz
+# Неизменившиеся установщики pack-release.sh в архив не кладёт — берём их из текущего релиза.
+if [ -n "$previous" ] && [ -d "$previous/api/_private" ]; then
+  mkdir -p "$dir/api/_private"
+  for file in "$previous"/api/_private/*.exe; do
+    [ -f "$file" ] || continue
+    [ -f "$dir/api/_private/$(basename "$file")" ] || cp -p "$file" "$dir/api/_private/"
+  done
+fi
+for name in program-installer.exe cell-print-installer.exe; do
+  [ -f "$dir/api/_private/$name" ] || echo "ВНИМАНИЕ: в релизе нет api/_private/$name — кнопка «Скачать» не сработает" >&2
+done
 cd "$dir"
 npm ci --omit=dev --no-audit --no-fund --loglevel=error
 npm cache clean --force >/dev/null 2>&1
