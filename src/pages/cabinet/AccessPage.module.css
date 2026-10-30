@@ -74,8 +74,9 @@
 }
 
 .preset {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
   padding: var(--sp-3);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -94,14 +95,8 @@
 
 .lists {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-6);
-}
-
-@media (max-width: 640px) {
-  .lists {
-    grid-template-columns: 1fr;
-  }
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-4);
 }
 
 .saveBar {
@@ -114,4 +109,103 @@
   padding: var(--sp-3) 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
+}
+
+/* Свёрнутая инструкция «Как это работает». */
+.howto {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--fs-14);
+}
+
+.howto summary {
+  cursor: pointer;
+  font-weight: var(--fw-semibold);
+}
+
+.howto .steps {
+  margin-top: var(--sp-2);
+}
+
+/* Дошли ли настройки до программы. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--success);
+  font-size: var(--fs-12);
+}
+
+.status.pending {
+  color: var(--warning);
+}
+
+/* Кружок выбора шаблона: заполнен у выбранного. */
+.radio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 2px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.preset.on .radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface);
+  background: var(--accent);
+}
+
+.presetText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Группа переключателей с «Открыть все / Закрыть все». */
+.group {
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.groupHead h3 {
+  margin: 0;
+  font-size: var(--fs-15, 15px);
+}
+
+.groupHead .muted {
+  font-size: var(--fs-12);
+}
+
+.groupToggle {
+  margin-left: auto;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent-dark);
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .lists {
+    grid-template-columns: 1fr;
+  }
 }

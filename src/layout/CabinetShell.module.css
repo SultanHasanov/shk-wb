@@ -55,7 +55,7 @@
 }
 
 .groupTitle {
-  padding: var(--sp-2);
+  padding: var(--sp-4) var(--sp-2) var(--sp-1);
   color: var(--text-tertiary);
   font-size: var(--fs-11);
   font-weight: var(--fw-bold);
@@ -186,6 +186,37 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+}
+
+/* Баланс в шапке (прототип): сумма и кнопка «Пополнить» в одной пилюле. */
+.balanceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 5px 5px 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-14);
+  white-space: nowrap;
+}
+
+.balanceChip b {
+  font-weight: var(--fw-bold);
+}
+
+.balanceTopup {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-13, 13px);
+  font-weight: var(--fw-semibold);
+}
+
+.balanceChip:hover .balanceTopup {
+  background: var(--accent-dark);
 }
 
 /* ---- Аккаунт-меню ---- */
@@ -335,7 +366,8 @@
   }
 
   .mobileMenuButton,
-  .language {
+  .language,
+  .balanceChip {
     display: none !important;
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -29,7 +29,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useStores } from '../stores/root-store';
 import s from './CabinetShell.module.css';
 import { ApiError, api } from '../api/client';
-import { cabinetKey, useCabinet } from '../api/cabinet';
+import { cabinetKey, money, useCabinet } from '../api/cabinet';
 import { legacyStickerCodes } from '../lib/legacy-assets';
 import { forgetPendingOrder, readPendingOrders } from '../lib/pending-orders';
 import { preferCurrency } from '../lib/currency';
@@ -37,24 +37,47 @@ import { LanguageSwitch } from '../components/LanguageSwitch';
 import { type T, useLocalePath, useT } from '../i18n';
 import { APP_SUBSCRIPTIONS_LIVE } from '../lib/app-release';
 
-const cabinetNavItems = (t: T) => [
-  { to: '/cabinet', label: t('Обзор', 'Шолу'), Icon: Home, end: true },
-  // Раньше за генерацией приходилось уходить на публичную главную и возвращаться руками
-  { to: '/cabinet/generator', label: t('Генератор', 'Генератор'), Icon: QrCode, end: false },
-  ...(APP_SUBSCRIPTIONS_LIVE ? [
-    { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
-    { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
-  ] : []),
-  { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
-  { to: '/cabinet/packages', label: t('Пакеты и код', 'Пакеттер мен код'), Icon: Package, end: false },
-  { to: '/cabinet/history', label: t('История генераций', 'Генерациялар тарихы'), Icon: FileClock, end: false },
-  { to: '/cabinet/orders', label: t('Заказы', 'Тапсырыстар'), Icon: Receipt, end: false },
-  // Раньше маршрут /cabinet/referrals существовал, но отсутствовал в навигации —
-  // попасть на него через интерфейс было нельзя.
-  { to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users, end: false },
-  { to: '/cabinet/profile', label: t('Профиль', 'Профиль'), Icon: User, end: false },
-  { to: '/cabinet/settings', label: t('Настройки', 'Баптаулар'), Icon: Settings, end: false },
-  { to: '/cabinet/notifications', label: t('Уведомления', 'Хабарламалар'), Icon: Bell, end: false },
+type NavItem = { to: string; label: string; Icon: typeof Home; end: boolean };
+
+/** Сайдбар разбит на группы, как в прототипе: без заголовка — главное, дальше программы, оплаты, аккаунт. */
+const cabinetNavGroups = (t: T): { title: string | null; items: NavItem[] }[] => [
+  {
+    title: null,
+    items: [
+      { to: '/cabinet', label: t('Обзор', 'Шолу'), Icon: Home, end: true },
+      // Раньше за генерацией приходилось уходить на публичную главную и возвращаться руками
+      { to: '/cabinet/generator', label: t('Генератор', 'Генератор'), Icon: QrCode, end: false },
+    ],
+  },
+  {
+    title: t('Программы', 'Бағдарламалар'),
+    items: [
+      ...(APP_SUBSCRIPTIONS_LIVE ? [
+        { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
+        { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
+      ] : []),
+      { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
+    ],
+  },
+  {
+    title: t('Оплаты', 'Төлемдер'),
+    items: [
+      { to: '/cabinet/packages', label: t('Пакеты и код', 'Пакеттер мен код'), Icon: Package, end: false },
+      { to: '/cabinet/history', label: t('История генераций', 'Генерациялар тарихы'), Icon: FileClock, end: false },
+      { to: '/cabinet/orders', label: t('Заказы', 'Тапсырыстар'), Icon: Receipt, end: false },
+      // Раньше маршрут /cabinet/referrals существовал, но отсутствовал в навигации —
+      // попасть на него через интерфейс было нельзя.
+      { to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users, end: false },
+    ],
+  },
+  {
+    title: t('Аккаунт', 'Аккаунт'),
+    items: [
+      { to: '/cabinet/profile', label: t('Профиль', 'Профиль'), Icon: User, end: false },
+      { to: '/cabinet/settings', label: t('Настройки', 'Баптаулар'), Icon: Settings, end: false },
+      { to: '/cabinet/notifications', label: t('Уведомления', 'Хабарламалар'), Icon: Bell, end: false },
+    ],
+  },
 ];
 
 const titlesFor = (t: T): Record<string, string> => ({
@@ -94,7 +117,8 @@ export const CabinetShell = observer(() => {
 
   const t = useT();
   const lp = useLocalePath();
-  const cabinetNav = cabinetNavItems(t);
+  const navGroups = cabinetNavGroups(t);
+  if (cabinet.data?.partner) navGroups[0].items.unshift(partnerNavItem(t));
   const titles = titlesFor(t);
   const email = auth.displayName || t('Пользователь', 'Пайдаланушы');
 
@@ -283,8 +307,10 @@ export const CabinetShell = observer(() => {
         </NavLink>
 
         <nav className={s.group} aria-label={t('Навигация кабинета', 'Кабинет навигациясы')}>
-          <div className={s.groupTitle}>{t('Кабинет', 'Кабинет')}</div>
-          {(cabinet.data?.partner ? [partnerNavItem(t), ...cabinetNav] : cabinetNav).map(({ to, label, Icon, end }) => (
+          {navGroups.map(group => (
+            <Fragment key={group.title ?? 'main'}>
+          {group.title && <div className={s.groupTitle}>{group.title}</div>}
+          {group.items.map(({ to, label, Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -307,6 +333,8 @@ export const CabinetShell = observer(() => {
               </span>
               <span className={s.label}>{label}</span>
             </NavLink>
+          ))}
+            </Fragment>
           ))}
         </nav>
 
@@ -334,6 +362,12 @@ export const CabinetShell = observer(() => {
           <span className={s.title}>{titles[location.pathname] ?? t('Кабинет', 'Кабинет')}</span>
 
           <div className={s.topActions}>
+            {cabinet.data?.wallet && (
+              <NavLink to="/cabinet/packages" className={s.balanceChip}>
+                {t('Баланс', 'Баланс')} <b>{money(cabinet.data.wallet.balanceKopecks)}</b>
+                <span className={s.balanceTopup}>{t('Пополнить', 'Толықтыру')}</span>
+              </NavLink>
+            )}
             <span className={s.language}><LanguageSwitch /></span>
             <div className={s.account} ref={accountRef}>
               <button

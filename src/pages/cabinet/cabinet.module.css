@@ -740,3 +740,114 @@
 @media (max-width: 768px) {
   .overviewMobile { display: block; }
 }
+
+/* ---- Обзор на десктопе (прототип Cabinet_Overview) ---- */
+.dkTiles {
+  align-items: stretch;
+}
+
+/* Плитка баланса — акцентная, целиком ссылка на «Баланс и пакеты». */
+.dkBalance {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-5);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--accent);
+  color: #fff;
+}
+
+.dkBalance:hover {
+  background: var(--accent-dark);
+}
+
+.dkBalance span,
+.dkBalance small {
+  color: #f6d4ee;
+  font-size: var(--fs-13, 13px);
+}
+
+.dkBalance strong {
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: var(--fw-black);
+}
+
+.dkActions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+.dkActions a {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+
+.dkActions a:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.dkActions svg {
+  flex: none;
+  padding: 9px;
+  box-sizing: content-box;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dkStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.dkOperation {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dkOperation > div {
+  min-width: 0;
+}
+
+.dkOperation strong,
+.dkOperation small {
+  display: block;
+}
+
+.dkOperation small {
+  color: var(--text-muted);
+  font-size: var(--fs-12, 12px);
+}
+
+.dkOperation > b {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono);
+}
+
+.dkOperation + a {
+  display: inline-block;
+  margin-top: var(--sp-3);
+}
+
+@media (max-width: 1100px) {
+  .dkActions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -110,21 +110,43 @@ export function OverviewPage(){
     <div className={c.overviewDesktop}>
     <header className="page-head"><h1>{t('Обзор','Шолу')}</h1><p>{t('Ключи, лимиты, уведомления и последние заказы.','Кілттер, лимиттер, хабарламалар және соңғы тапсырыстар.')}</p></header>
     {overview.needsAttention>0&&<Card accent><div className="row"><TriangleAlert color="var(--accent)"/><strong>{t('Есть ключи, срок которых скоро закончится','Мерзімі жақында бітетін кілттер бар')}</strong><Link className="accent" to="/cabinet/keys">{t('Проверить →','Тексеру →')}</Link></div></Card>}
-    <div className="grid grid-3 section">
-      <Card><Stat value={overview.activeKeys} label={t('активных ключей','белсенді кілт')} icon={<KeyRound size={20}/>}/><Link className="accent" to="/cabinet/keys">{t('Смотреть ключи →','Кілттерді көру →')}</Link></Card>
+    {/* Плитки и быстрые действия — по прототипу: баланс в рублях первым, дальше подписка, подборы, генерации. */}
+    <div className={`grid grid-4 section ${c.dkTiles}`}>
+      <Link to="/cabinet/packages" className={c.dkBalance}>
+        <span>{t('Баланс','Баланс')}</span>
+        <strong>{walletMoney(wallet?.balanceKopecks??0)}</strong>
+        <small>{t('для генераций и покупок с баланса','генерациялар мен баланстан сатып алуларға')}</small>
+      </Link>
+      <Card><Stat value={subscription?.title??t('Нет тарифа','Тариф жоқ')} label={subscription?t(`подписка до ${new Date(subscription.paidUntil||subscription.endsAt).toLocaleDateString('ru-RU')}`,'жазылым'):t('подписка «Помощник ПВЗ»','«ПВЗ көмекшісі» жазылымы')} icon={<AppWindow size={20}/>}/><Link className="accent" to="/cabinet/subscription">{subscription?t('Продлить →','Ұзарту →'):t('Выбрать тариф →','Тарифті таңдау →')}</Link></Card>
+      <Card><Stat value={quota?`${quota.used} / ${quota.limit}`:String(account?.packsLeft??0)} label={t('подборов кода в этом месяце','осы айдағы код іріктеулері')} icon={<KeyRound size={20}/>}/>{quota&&<Progress value={quota.used} max={Math.max(1,quota.limit)}/>}</Card>
       <Card><Stat value={overview.stickersLeft} label={t('генераций осталось','генерация қалды')} icon={<Package size={20}/>}/><Progress value={used} max={Math.max(1,overview.stickersTotal)} label={<><span>{t('Использовано','Пайдаланылды')}</span><strong>{t(`${used} из ${overview.stickersTotal}`,`${overview.stickersTotal} ішінен ${used}`)}</strong></>}/></Card>
-      <Card><Stat value={overview.needsAttention} label={t('требуют внимания','назар аударуды қажет етеді')} icon={<TriangleAlert size={20}/>}/><Link className="accent" to="/cabinet/notifications">{t('Открыть уведомления →','Хабарламаларды ашу →')}</Link></Card>
     </div>
-    <section className="section"><h2>{t('Программы','Бағдарламалар')}</h2>
-      <div className="grid grid-2">
-        <HelperSummary t={t}/>
-        <Card><div className="stack">
-          <div className="row"><Printer size={18} color="var(--accent)"/><strong>{t('Печать ячеек','Ұяшық басып шығару')}</strong></div>
-          <div><strong>{cellActive?t(`${cellActive} активных лицензий`,`${cellActive} белсенді лицензия`):t('Нет лицензий','Лицензиялар жоқ')}</strong>{cellLicenses.length>cellActive&&<span className="muted"> · {t(`всего ${cellLicenses.length}`,`барлығы ${cellLicenses.length}`)}</span>}</div>
-          <Link className="accent" to="/cabinet/keys">{t('Ключи и устройства →','Кілттер мен құрылғылар →')}</Link>
-        </div></Card>
-      </div>
-    </section>
+    <div className={c.dkActions}>
+      <Link to="/cabinet/generator"><WalletCards size={18}/><span>{t('Сгенерировать код','Код жасау')}</span></Link>
+      <Link to="/cabinet/subscription"><RefreshCw size={18}/><span>{t('Продлить подписку','Жазылымды ұзарту')}</span></Link>
+      <Link to="/cabinet/packages"><PackagePlus size={18}/><span>{t('Пополнить баланс','Балансты толықтыру')}</span></Link>
+      <Link to="/cabinet/referrals"><UserPlus size={18}/><span>{t('Пригласить','Шақыру')}</span></Link>
+    </div>
+    <div className="grid grid-2 section">
+      <section><h2>{t('Программы','Бағдарламалар')}</h2>
+        <div className={c.dkStack}>
+          <HelperSummary t={t}/>
+          <Card><div className="stack">
+            <div className="row"><Printer size={18} color="var(--accent)"/><strong>{t('Печать ячеек','Ұяшық басып шығару')}</strong></div>
+            <div><strong>{cellActive?t(`${cellActive} активных лицензий`,`${cellActive} белсенді лицензия`):t('Нет лицензий','Лицензиялар жоқ')}</strong>{cellLicenses.length>cellActive&&<span className="muted"> · {t(`всего ${cellLicenses.length}`,`барлығы ${cellLicenses.length}`)}</span>}</div>
+            <Link className="accent" to="/cabinet/keys">{t('Ключи и устройства →','Кілттер мен құрылғылар →')}</Link>
+          </div></Card>
+        </div>
+      </section>
+      <section><h2>{t('Последние операции','Соңғы операциялар')}</h2>
+        <Card>{recentWallet.length?recentWallet.map((entry,index)=><div className={c.dkOperation} key={`${entry.createdAt}-${index}`}>
+          <div><strong>{entry.note&&entry.note!=='legacy_stickers_conversion'?entry.note:walletOperation(entry.kind,t)}</strong><small>{dateTime(entry.createdAt)}</small></div>
+          <b className={entry.amountKopecks>0?c.plus:c.minus}>{entry.amountKopecks>0?'+':''}{walletMoney(entry.amountKopecks)}</b>
+        </div>):<span className="muted">{t('Операций пока нет','Әзірге операциялар жоқ')}</span>}
+          <Link className="accent" to="/cabinet/packages">{t('Баланс и история →','Баланс және тарих →')}</Link>
+        </Card>
+      </section>
+    </div>
     <section className="section"><h2>{t('Последние заказы','Соңғы тапсырыстар')}</h2>{orders.length?<Table><thead><tr><th>{t('Дата','Күні')}</th><th>{t('Покупка','Сатып алу')}</th><th>{t('Сумма','Сомасы')}</th><th>{t('Статус','Мәртебесі')}</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td>{dateTime(o.createdAt)}</td><td>{o.product}</td><td>{money(Math.round(o.amount*100))}</td><td>{status(o.status)}</td></tr>)}</tbody></Table>:<Card>{t('Покупок пока нет.','Әзірге сатып алулар жоқ.')}</Card>}</section>
     </div>
   </div>;
