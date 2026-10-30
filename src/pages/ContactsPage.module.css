@@ -22,3 +22,49 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Телефон: как экран приложения ----
+   Telegram — самый быстрый способ, поэтому он первым; карточки сбоку — короткие
+   плашки; кнопка «Отправить» прилипает к низу экрана над таббаром. */
+@media (max-width: 768px) {
+  .layout {
+    gap: var(--sp-3);
+  }
+
+  .side {
+    order: -1;
+    gap: var(--sp-3);
+  }
+
+  .side svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .side h2 {
+    font-size: var(--fs-16);
+  }
+
+  .side :global(.stack) {
+    gap: var(--sp-2);
+  }
+
+  .formCard h2 {
+    font-size: var(--fs-20);
+  }
+
+  .submitBar {
+    position: sticky;
+    bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    z-index: 2;
+    margin: 0 calc(-1 * var(--sp-4));
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Клавиатура открыта — таббар скрыт, кнопка встаёт прямо над клавиатурой. */
+  :global(.keyboard-open) .submitBar {
+    bottom: 0;
+  }
+}

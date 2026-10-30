@@ -186,6 +186,7 @@ function DeviceAccess({ device, others, allOthers, onDirtyChange }: {
   const items = useMemo(() => new Map([...permissionSections(t), ...permissionActions(t)].map(p => [p.key, p])), [t]);
   const presets = permissionPresets(t);
   const [denied, setDenied] = useState<string[]>(device.denied ?? []);
+  const [compact] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 768px)').matches);
   const saved = device.denied ?? [];
   const dirty = denied.length !== saved.length || denied.some(k => !saved.includes(k));
   const preset = matchingPreset(presets, denied);
@@ -244,24 +245,29 @@ function DeviceAccess({ device, others, allOthers, onDirtyChange }: {
           )}
         </div>
         <div className={s.lists}>
-          {groups.map(g => {
+          {groups.map((g, index) => {
             const open = g.items.filter(p => !denied.includes(p.key)).length;
             const allOpen = open === g.items.length;
             return (
-              <section key={g.id} className={s.group}>
-                <div className={s.groupHead}>
+              // На телефоне группы свёрнуты (кроме первой): 26 переключателей — это 4 экрана.
+              <details key={g.id} className={s.group} open={!compact || index === 0}>
+                <summary className={s.groupHead}>
                   <h3>{g.title}</h3>
                   <span className="muted">{t(`${open} из ${g.items.length}`, `${g.items.length} ішінен ${open}`)}</span>
-                  <button type="button" className={s.groupToggle} onClick={() => setGroup(g.keys, !allOpen)}>
+                  <button
+                    type="button"
+                    className={s.groupToggle}
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); setGroup(g.keys, !allOpen); }}
+                  >
                     {allOpen ? t('Закрыть все', 'Бәрін жабу') : t('Открыть все', 'Бәрін ашу')}
                   </button>
-                </div>
+                </summary>
                 {g.items.map(p => (
                   <Switch key={p.key} checked={!denied.includes(p.key)} onChange={e => toggle(p.key, e.target.checked)} description={p.hint}>
                     {p.title}
                   </Switch>
                 ))}
-              </section>
+              </details>
             );
           })}
         </div>

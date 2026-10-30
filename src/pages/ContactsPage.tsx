@@ -114,7 +114,7 @@ export function ContactsPage() {
 
       <div className="page">
         <div className={s.layout}>
-          <Card>
+          <Card className={s.formCard}>
             <h2>{t('Написать в поддержку', 'Қолдау қызметіне жазу')}</h2>
             <p className="muted" style={{ fontSize: 'var(--fs-14)' }}>
               {t(
@@ -168,14 +168,16 @@ export function ContactsPage() {
               </Checkbox>
               {errors.consent && <Alert tone="error">{errors.consent.message}</Alert>}
 
-              <Button size="lg" loading={isSubmitting}>
-                <Send size={18} />
-                {t('Отправить обращение', 'Өтінішті жіберу')}
-              </Button>
+              <div className={s.submitBar}>
+                <Button size="lg" block loading={isSubmitting}>
+                  <Send size={18} />
+                  {t('Отправить обращение', 'Өтінішті жіберу')}
+                </Button>
+              </div>
             </form>
           </Card>
 
-          <div className="stack-lg">
+          <div className={`stack-lg ${s.side}`}>
             <Card>
               <div className="stack">
                 <MessageCircle size={32} color="var(--accent)" />

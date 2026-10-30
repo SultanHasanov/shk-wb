@@ -173,6 +173,21 @@
     flex-wrap: nowrap;
   }
 
+  /* Длинный бейдж («Начнётся после бесплатного периода») сжимал «Ваш тариф»
+     в столбик по слову: подпись тарифа занимает остаток, бейдж — до 55%. */
+  .planHead > div {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .planHead > :last-child:not(div) {
+    flex: none;
+    max-width: 55%;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.3;
+  }
+
   .planName {
     margin-top: 2px;
     font-size: 22px;

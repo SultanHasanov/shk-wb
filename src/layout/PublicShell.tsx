@@ -253,6 +253,10 @@ export const PublicShell = observer(() => {
             </div>
 
             <div className={s.sheetLinks}>
+              {/* «Вопросы» есть в шапке десктопа, а на телефоне до FAQ было не добраться. */}
+              <Link to={`${lp('/')}#faq`} className={s.sheetLink} onClick={() => setMoreOpen(false)}>
+                {t('Вопросы', 'Сұрақтар')}
+              </Link>
               {moreLinks(t).map(item => (
                 <Link key={item.to} to={lp(item.to)} className={s.sheetLink}>
                   {item.label}

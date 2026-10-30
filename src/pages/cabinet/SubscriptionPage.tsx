@@ -439,7 +439,9 @@ export function SubscriptionPage() {
       {account.data.unlimited && (
         <Alert tone="success"><InfinityIcon size={16} style={{ verticalAlign: -3 }} /> {t('Безлимитный аккаунт: все разделы и услуги открыты бессрочно, подборы не списываются, лимитов на компьютеры и пункты нет.', 'Шексіз аккаунт: барлық бөлімдер мен қызметтер мерзімсіз ашық.')}</Alert>
       )}
-      {account.data.freeMode && account.data.freeUntil && (
+      {/* Не больше одной плашки: безлимиту бесплатный период не важен, а при известной
+          дате окончания предупреждение уже говорит, что сейчас всё бесплатно. */}
+      {!account.data.unlimited && account.data.freeMode && account.data.freeUntil && (
         <Alert tone="warning">
           {t(
             `Бесплатный период закончится ${date(account.data.freeUntil)}. После этого разделы программы будут работать по тарифу. Оформите тариф заранее — оплаченный срок начнётся после бесплатного периода, ни один день не пропадёт.`,
@@ -447,7 +449,7 @@ export function SubscriptionPage() {
           )}
         </Alert>
       )}
-      {account.data.freeMode && (
+      {!account.data.unlimited && account.data.freeMode && !account.data.freeUntil && (
         <Alert tone="success">
           {t(
             'Сейчас все функции программы бесплатны: войдите в «Помощник ПВЗ» этим аккаунтом — тариф Про включится сам, подборы не списываются, лимита компьютеров нет. Оплаченная подписка в это время не расходуется — она продлится на длину бесплатного периода.',

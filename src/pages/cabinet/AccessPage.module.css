@@ -178,6 +178,8 @@
 .groupHead {
   display: flex;
   align-items: baseline;
+  cursor: pointer;
+  list-style: none;
   gap: var(--sp-2);
   padding-bottom: var(--sp-1);
   border-bottom: 1px solid var(--border);
@@ -204,8 +206,39 @@
   cursor: pointer;
 }
 
+/* Стрелка свёрнутой группы — своя, у summary маркер убран. */
+.groupHead::-webkit-details-marker {
+  display: none;
+}
+
+.groupHead h3::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 8px 2px 2px;
+  border-right: 2px solid var(--text-tertiary);
+  border-bottom: 2px solid var(--text-tertiary);
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+
+.group[open] .groupHead h3::before {
+  transform: rotate(45deg);
+}
+
+.group:not([open]) .groupHead {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 @media (max-width: 640px) {
   .lists {
     grid-template-columns: 1fr;
+    gap: var(--sp-2);
+  }
+
+  .group {
+    padding: var(--sp-3);
   }
 }
