@@ -63,6 +63,12 @@ export function getPack(quantity: number): Pack {
 
 export const HEADLINE_PACK_LIST: readonly Pack[] = HEADLINE_PACKS.map(getPack);
 
+/** Пакеты по номеру, которые продаёт Telegram-бот (без поштучной покупки) — для витрины цен. */
+export const CUSTOM_PACK_LIST: readonly Pack[] = Object.entries(CUSTOM_GENERATION_PACKAGES)
+  .map(([quantity, total]) => ({ quantity: Number(quantity), total, perUnit: total / Number(quantity) }))
+  .filter(pack => pack.quantity > 1)
+  .sort((a, b) => a.quantity - b.quantity);
+
 /* ============ Ключи «Печати ячеек» ============
    Матрица «срок × количество компьютеров». Тот же источник истины —
    CELL_PRINT_PRICES в server/_payments.js, сверяется тем же спеком. */

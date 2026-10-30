@@ -190,7 +190,17 @@ app.use((req, res, next) => {
   res.sendFile(file, { dotfiles: 'deny', lastModified: true, cacheControl: false });
 });
 
-app.use((req, res) => res.status(404).type('text/plain').send('404: NOT_FOUND'));
+// Неизвестная страница — оболочка SPA с кодом 404 (React покажет NotFoundPage).
+// API и прочие методы — голый текст, как на Vercel: программы ждут именно его.
+const notFoundPage = path.join(dist, '404.html');
+app.use((req, res) => {
+  const isPage = (req.method === 'GET' || req.method === 'HEAD') && !req.resolvedPath.startsWith('/api/');
+  if (isPage && fs.existsSync(notFoundPage)) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).sendFile(notFoundPage, { lastModified: false, cacheControl: false });
+  }
+  res.status(404).type('text/plain').send('404: NOT_FOUND');
+});
 
 app.listen(port, '127.0.0.1', () => console.log(`shk-wb listening on 127.0.0.1:${port}`));
 

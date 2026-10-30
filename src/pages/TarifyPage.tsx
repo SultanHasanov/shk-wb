@@ -9,7 +9,7 @@ import {
   CELL_PRINT_DEVICES,
   CELL_PRINT_DURATIONS,
   getCellPrintPrice,
-  HEADLINE_PACK_LIST,
+  CUSTOM_PACK_LIST,
 } from '../lib/pricing';
 import { useMoney } from '../lib/currency';
 import { useDocumentMeta } from '../lib/seo';
@@ -96,7 +96,7 @@ export function TarifyPage() {
         )}
       >
         <div className="grid grid-4">
-          {HEADLINE_PACK_LIST.map(pack => (
+          {CUSTOM_PACK_LIST.map(pack => (
             <Card key={pack.quantity}>
               <div className={s.ladderCard}>
                 <div className="metric">{formatTotal(pack.total)}</div>

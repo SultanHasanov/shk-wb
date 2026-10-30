@@ -279,6 +279,11 @@ async function launchChromium() {
 
 const shellHtml = readFileSync(resolve(output, 'index.html'), 'utf8');
 
+// Оболочка без пререндера — для неизвестных адресов: selfhost/server.cjs отдаёт её
+// с кодом 404, и React рисует NotFoundPage. Снимок главной для этого не годится:
+// в нём canonical на «/» и мелькнул бы чужой контент.
+writeFileSync(resolve(output, '404.html'), shellHtml.replace('</head>', '  <meta name="robots" content="noindex" />\n</head>'));
+
 /** Каждая публичная страница снимается дважды: русская и казахская (/kz). */
 const LOCALIZED_ROUTES = Object.keys(PUBLIC_PAGES).flatMap(route => [[route, 'ru'], [route, 'kk']]);
 const browser = await launchChromium();

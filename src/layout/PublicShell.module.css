@@ -107,11 +107,6 @@
   font-weight: var(--fw-semibold);
 }
 
-/* Элементы только для телефона (иконка аккаунта и мини-плашка WB в шапке). */
-.mobileOnly {
-  display: none;
-}
-
 .wbMini {
   display: inline-flex;
   align-items: center;
@@ -139,6 +134,13 @@
 .acctBtn:hover {
   border-color: var(--border-strong);
   color: var(--accent-dark);
+}
+
+/* Элементы только для телефона (иконка аккаунта и мини-плашка WB в шапке).
+   Стоит после .wbMini и .acctBtn: у них свой display, и при равной специфичности
+   побеждает правило ниже — иначе они видны и на десктопе. */
+.mobileOnly {
+  display: none;
 }
 
 /* ---- Контент ---- */
