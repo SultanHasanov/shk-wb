@@ -1,0 +1,36 @@
+/* Карточка «как поставить на компьютер» — только телефон (класс mobile-only). */
+.card {
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 100%;
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-15, 15px);
+}
+
+.icon {
+  flex: none;
+  display: inline-flex;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+}

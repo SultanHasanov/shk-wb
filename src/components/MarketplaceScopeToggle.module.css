@@ -1,0 +1,20 @@
+/* Три варианта в одну строку. Раньше это была .grid-3, и на телефоне три кнопки
+   вставали столбиком во всю ширину — выглядело как три разных действия. */
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.row > * {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .row button {
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: var(--fs-13);
+  }
+}

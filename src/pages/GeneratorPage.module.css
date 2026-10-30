@@ -688,6 +688,81 @@
   .finalCta button {
     width: 100%;
   }
+
+  /* Образец результата — мини-плашка строкой (прототип MobileHome), а не
+     стикер 190px на полэкрана между формой и остальной страницей. */
+  .sample {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    text-align: left;
+  }
+
+  .sampleFrame {
+    flex: none;
+    width: 88px;
+  }
+
+  .sampleTitle {
+    margin: 0;
+    font-size: var(--fs-14);
+  }
+
+  .sampleText {
+    margin: 4px 0 0;
+    font-size: var(--fs-12);
+  }
+
+  /* Сеть пунктов: без второй рамки вокруг схемы, пункты в две колонки. */
+  .net {
+    padding: var(--sp-4);
+    gap: var(--sp-4);
+    border-radius: 16px;
+  }
+
+  .netTitle {
+    font-size: 22px;
+  }
+
+  .netList {
+    margin: 12px 0 16px;
+  }
+
+  .diagram {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .spokes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .spoke {
+    padding: 10px 12px;
+  }
+
+  /* Карточки программ: поля 16px, мелкий скриншот окна на телефоне не читался. */
+  .pcard {
+    padding: var(--sp-4);
+    border-radius: 16px;
+  }
+
+  .pcard h3 {
+    margin-top: 10px;
+  }
+
+  .pcard figure {
+    display: none;
+  }
+
+  .pcardFoot {
+    margin-top: 14px;
+    padding-top: 14px;
+  }
 }
 
 /* Настройки листа перед печатью: сетка и сколько штук из пачки. */

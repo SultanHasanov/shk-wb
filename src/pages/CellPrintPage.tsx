@@ -6,6 +6,7 @@ import {
   Download,
   FileSpreadsheet,
   Gauge,
+  KeyRound,
   Layers,
   MonitorCheck,
   Printer,
@@ -24,6 +25,7 @@ import { FeatureGrid } from '../components/FeatureGrid';
 import { SpecList } from '../components/SpecList';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { MobileActionBar } from '../components/MobileActionBar';
+import { SendToPc } from '../components/SendToPc';
 import { MarketplaceScopeToggle } from '../components/MarketplaceScopeToggle';
 import {
   Accordion,
@@ -325,13 +327,14 @@ export const CellPrintPage = observer(() => {
           <Button size="lg" onClick={goToKey}>
             {t('Выбрать ключ', 'Кілт таңдау')}
           </Button>
-          <a href="/api/payments/download-cell-print">
+          <a href="/api/payments/download-cell-print" className="desktop-only">
             <Button size="lg" variant="secondary">
               <Download size={18} />
               {t('Скачать бесплатно', 'Тегін жүктеп алу')}
             </Button>
           </a>
         </div>
+        <SendToPc program={t('«Печать ячеек» для Windows', '«Ұяшық басып шығару» Windows үшін')} />
       </Hero>
 
       <div className="page">
@@ -371,7 +374,7 @@ export const CellPrintPage = observer(() => {
                 <li>{t('Срок ключа начинается при первой активации, а не с даты оплаты', 'Кілт мерзімі төлем күнінен емес, алғашқы белсендіруден басталады')}</li>
                 <li>{t('Установщик и обновления включены', 'Орнатқыш пен жаңартулар кіреді')}</li>
               </ul>
-              <div className="row">
+              <div className="row desktop-only">
                 <a href="/api/payments/download-cell-print">
                   <Button variant="secondary">
                     <Download size={18} />
@@ -392,19 +395,6 @@ export const CellPrintPage = observer(() => {
                 )}
               </p>
 
-              <Field label={t('Период', 'Кезең')}>
-                <Select
-                  value={p.durationDays}
-                  onChange={e => (p.durationDays = Number(e.target.value))}
-                >
-                  {CELL_PRINT_DURATIONS.map(d => (
-                    <option key={d.days} value={d.days}>
-                      {locale === 'kk' ? d.labelKk : d.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
               <Field label={t('Для какого маркетплейса', 'Қай маркетплейс үшін')}>
                 <MarketplaceScopeToggle
                   value={p.marketplaceScope}
@@ -412,18 +402,34 @@ export const CellPrintPage = observer(() => {
                 />
               </Field>
 
-              <Field label={t('Количество компьютеров', 'Компьютерлер саны')}>
-                <Select
-                  value={p.deviceLimit}
-                  onChange={e => (p.deviceLimit = Number(e.target.value))}
-                >
-                  {CELL_PRINT_DEVICES.map(n => (
-                    <option key={n} value={n}>
-                      {devicesLabel(n)}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              {/* Срок и число ПК — рядом: два селекта друг под другом растягивали форму на экран. */}
+              <div className={s.pair}>
+                <Field label={t('Период', 'Кезең')}>
+                  <Select
+                    value={p.durationDays}
+                    onChange={e => (p.durationDays = Number(e.target.value))}
+                  >
+                    {CELL_PRINT_DURATIONS.map(d => (
+                      <option key={d.days} value={d.days}>
+                        {locale === 'kk' ? d.labelKk : d.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+
+                <Field label={t('Количество компьютеров', 'Компьютерлер саны')}>
+                  <Select
+                    value={p.deviceLimit}
+                    onChange={e => (p.deviceLimit = Number(e.target.value))}
+                  >
+                    {CELL_PRINT_DEVICES.map(n => (
+                      <option key={n} value={n}>
+                        {devicesLabel(n)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
 
               {/* Итог до оплаты. Раньше сумму человек впервые видел уже в ЮKassa. */}
               <div className={s.total}>
@@ -657,14 +663,12 @@ export const CellPrintPage = observer(() => {
         )}
       />
 
-      {/* Телефон: липкая панель скачивания над таббаром (по прототипу). */}
-      <MobileActionBar note={t('Бесплатно', 'Тегін')} subnote={t('ключ — от 150 ₽', 'кілт — 150 ₽ бастап')}>
-        <a href="/api/payments/download-cell-print">
-          <Button>
-            <Download size={18} />
-            {t('Скачать', 'Жүктеп алу')}
-          </Button>
-        </a>
+      {/* Телефон: установщик скачивают на ПК, а ключ можно купить и с телефона. */}
+      <MobileActionBar note={t('Ключ — от 150 ₽', 'Кілт — 150 ₽ бастап')} subnote={t('программа для Windows', 'Windows бағдарламасы')}>
+        <Button onClick={goToKey}>
+          <KeyRound size={18} />
+          {t('Выбрать ключ', 'Кілт таңдау')}
+        </Button>
       </MobileActionBar>
     </>
   );

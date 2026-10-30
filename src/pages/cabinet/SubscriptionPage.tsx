@@ -468,7 +468,7 @@ export function SubscriptionPage() {
       <Packs addons={plans.data.addons?.filter(a => a.kind === 'pack' && !a.mirror) ?? []} account={account.data} onChoose={setCheckout} />
       <Packs mirror addons={plans.data.addons?.filter(a => a.kind === 'pack' && a.mirror) ?? []} account={account.data} onChoose={setCheckout} />
       <div className="row">
-        <a href={PROGRAM_DOWNLOAD_URL}><Button variant="secondary"><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
+        <a href={PROGRAM_DOWNLOAD_URL} className="desktop-only"><Button variant="secondary"><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
       </div>
       {checkout && <CheckoutModal checkout={checkout} account={account.data} availableKopecks={cabinet.data?.referral.availableKopecks ?? 0} onClose={() => setCheckout(null)} />}
     </div>

@@ -1013,7 +1013,7 @@ export const GeneratorPage = observer(() => {
               <span className={s.pcardPrice}>{t('от', 'бастап')} <b>190</b> ₽/{t('мес', 'ай')}</span>
               <span className={s.pcardBtns}>
                 <Link to="/program"><Button variant="secondary" size="sm">{t('Подробнее', 'Толығырақ')}</Button></Link>
-                <a href={PROGRAM_DOWNLOAD_URL}><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
+                <a href={PROGRAM_DOWNLOAD_URL} className="desktop-only"><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
               </span>
             </div>
           </article>
@@ -1035,7 +1035,7 @@ export const GeneratorPage = observer(() => {
               <span className={s.pcardPrice}>{t('от', 'бастап')} <b>150</b> ₽</span>
               <span className={s.pcardBtns}>
                 <Link to="/cell-print"><Button variant="secondary" size="sm">{t('Подробнее', 'Толығырақ')}</Button></Link>
-                <a href={CELL_PRINT_DOWNLOAD_URL}><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
+                <a href={CELL_PRINT_DOWNLOAD_URL} className="desktop-only"><Button size="sm">{t('Скачать', 'Жүктеу')}</Button></a>
               </span>
             </div>
           </article>

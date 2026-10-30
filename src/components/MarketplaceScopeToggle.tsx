@@ -4,6 +4,7 @@ import {
   type CellPrintMarketplaceScope,
 } from '../lib/pricing';
 import { useT } from '../i18n';
+import s from './MarketplaceScopeToggle.module.css';
 
 export function MarketplaceScopeToggle({
   value,
@@ -16,7 +17,7 @@ export function MarketplaceScopeToggle({
 }) {
   const t = useT();
   return (
-    <div className="grid grid-3" role="group" aria-label={t('Для какого маркетплейса', 'Қай маркетплейс үшін')}>
+    <div className={s.row} role="group" aria-label={t('Для какого маркетплейса', 'Қай маркетплейс үшін')}>
       {CELL_PRINT_SCOPE_OPTIONS.map(option => (
         <Button
           key={option.value}

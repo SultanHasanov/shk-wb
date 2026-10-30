@@ -275,6 +275,11 @@ h3 {
     font-size: var(--fs-24);
   }
 
+  /* Скачивание установщика Windows с телефона бессмысленно — такие кнопки прячем. */
+  .desktop-only {
+    display: none !important;
+  }
+
   /* Клавиатура открыта (useKeyboardOpen): таббар и липкие панели не закрывают поле. */
   .keyboard-open [data-hide-on-keyboard] {
     display: none !important;

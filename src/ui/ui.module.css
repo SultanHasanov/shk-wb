@@ -1147,6 +1147,37 @@ button.priceCell:hover {
   .cardFlush {
     padding: 0;
   }
+
+  /* Показатель — строкой «иконка · цифра / подпись», как в настройках приложения:
+     столбиком с цифрой 36px карточка «Бесплатно» занимала треть экрана. */
+  .stat {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: 'icon value' 'icon label';
+    align-items: center;
+    column-gap: var(--sp-3);
+    row-gap: 2px;
+  }
+
+  .stat:not(:has(.statIcon)) {
+    display: flex;
+  }
+
+  .statIcon {
+    grid-area: icon;
+    width: 36px;
+    height: 36px;
+    margin-bottom: 0;
+  }
+
+  .statValue {
+    grid-area: value;
+    font-size: var(--fs-20, 20px);
+  }
+
+  .statLabel {
+    grid-area: label;
+  }
 }
 
 /* Над нижним таббаром мобильного приложения, иначе тост ложится на навигацию. */

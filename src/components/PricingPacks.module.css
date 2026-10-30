@@ -290,3 +290,119 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ---- Телефон: выбор цены как в приложении ----
+   Две крупные карты «от 3 ₽ / 20 ₽» и сетка 2×3 занимали три экрана. Здесь —
+   две компактные карты в ряд и пакеты одним списком строк «кол-во · цена». */
+@media (max-width: 768px) {
+  .packRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .pack {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .pack strong {
+    font-size: 22px;
+  }
+
+  .pack span {
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  .ladder {
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin-top: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .lad {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'q p' 'q u';
+    align-items: center;
+    gap: 0 12px;
+    min-height: 56px;
+    padding: 8px 16px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+  }
+
+  .lad:first-child {
+    border-top: 0;
+  }
+
+  .lad:active {
+    background: var(--accent-soft);
+  }
+
+  .ladQ {
+    grid-area: q;
+    font-size: 15px;
+  }
+
+  .ladP {
+    grid-area: p;
+    text-align: right;
+  }
+
+  .ladU {
+    grid-area: u;
+    text-align: right;
+  }
+
+  /* «Пополнить баланс» — просто кнопка под списком, без отдельной пустой карточки. */
+  .checkout {
+    margin-top: 12px;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .checkout a,
+  .checkout button {
+    width: 100%;
+  }
+
+  /* Модалка оплаты: пакеты тем же списком строк. */
+  .packageTable {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .packageOption {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: 'q p' 'q u';
+    align-items: center;
+    gap: 0 12px;
+    min-height: 52px;
+    padding: 8px 14px;
+  }
+
+  .packageOption strong {
+    grid-area: q;
+  }
+
+  .packageOption span {
+    grid-area: p;
+    font-weight: var(--fw-bold);
+    text-align: right;
+  }
+
+  .packageOption small {
+    grid-area: u;
+    text-align: right;
+  }
+}

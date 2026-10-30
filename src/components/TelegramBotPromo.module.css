@@ -106,14 +106,38 @@
   display: none;
 }
 
+/* Телефон: компактная плашка «аватар · заголовок · текст», кнопка под ней.
+   Список «✓ …» дублирует текст и на телефоне только удлинял блок. */
 @media (max-width: 768px) {
   .promo {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-4);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    border-radius: 16px;
+    box-shadow: none;
+  }
+
+  .avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .title {
+    font-size: var(--fs-16);
+  }
+
+  .text {
+    margin-top: 4px;
+    font-size: var(--fs-13);
+  }
+
+  .points {
+    display: none;
   }
 
   .cta {
+    grid-column: 1 / -1;
     align-self: stretch;
     justify-content: center;
   }

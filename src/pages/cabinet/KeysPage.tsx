@@ -98,7 +98,7 @@ export function KeysPage() {
         <div className="row"><h2 style={{ margin: 0 }}>{t('Пакеты подборов', 'Іріктеу пакеттері')}</h2><Badge tone="success">{t('Скачивание бесплатно', 'Жүктеу тегін')}</Badge></div>
         <p className="muted" style={{ margin: 0 }}>{t('Подборы кода сверх месячного лимита подписки «Помощник ПВЗ». Пакет не сгорает, подбор списывается только за найденный код.', '«ПВЗ көмекшісі» жазылымының айлық лимитінен тыс код іріктеулері. Пакеттің мерзімі өтпейді, іріктеу тек табылған код үшін есептеледі.')}</p>
         <div className="row">
-          <a href={PROGRAM_DOWNLOAD_URL}><Button><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
+          <a href={PROGRAM_DOWNLOAD_URL} className="desktop-only"><Button><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
           <Button variant="secondary" onClick={() => setCheckout({ kind: 'program_license' })}><KeyRound size={16} />{t('Купить пакет', 'Пакет сатып алу')}</Button>
         </div>
       </div></Card>
@@ -107,7 +107,7 @@ export function KeysPage() {
         <div className="row"><h2 style={{ margin: 0 }}>{t('Печать ячеек', 'Ұяшық басып шығару')}</h2><Badge tone="success">{t('Скачивание бесплатно', 'Жүктеу тегін')}</Badge></div>
         <p className="muted" style={{ margin: 0 }}>{t('Выберите срок и число компьютеров. Лицензия начинает действовать при первой активации.', 'Мерзім мен компьютерлер санын таңдаңыз. Лицензия алғашқы белсендіруден бастап жарамды.')}</p>
         <div className="row">
-          <a href={CELL_PRINT_DOWNLOAD_URL}><Button><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
+          <a href={CELL_PRINT_DOWNLOAD_URL} className="desktop-only"><Button><Download size={16} />{t('Скачать программу', 'Бағдарламаны жүктеп алу')}</Button></a>
           <Button variant="secondary" onClick={() => setCheckout({ kind: 'cell_print_license' })}><KeyRound size={16} />{t('Купить пакет', 'Пакет сатып алу')}</Button>
         </div>
       </div></Card>

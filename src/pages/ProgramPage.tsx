@@ -25,6 +25,7 @@ import { SpecList } from '../components/SpecList';
 import { AppPlansTable } from '../components/AppPlansTable';
 import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { MobileActionBar } from '../components/MobileActionBar';
+import { SendToPc, useShareLink } from '../components/SendToPc';
 import { Accordion, Alert, Button, Card, Checkbox, ScreenshotSlot, Stat } from '../ui';
 import { RELEASES } from '../data/releases';
 import {
@@ -185,6 +186,7 @@ export function ProgramPage() {
   const locale = useLocale();
   const lp = useLocalePath();
   const plans = useAppPlans();
+  const share = useShareLink();
   useDocumentMeta(
     t('Программа для ПВЗ ВБ — «Помощник ПВЗ» для Windows', '«ПВЗ көмекшісі» — Windows-қа арналған Wildberries БП бағдарламасы'),
     t(
@@ -240,7 +242,7 @@ export function ProgramPage() {
         ]}
       >
         <div className={s.heroActions}>
-          <a href={PROGRAM_DOWNLOAD_URL}>
+          <a href={PROGRAM_DOWNLOAD_URL} className="desktop-only">
             <Button size="lg">
               <Download size={18} />
               {t('Скачать бесплатно', 'Тегін жүктеп алу')}
@@ -250,6 +252,7 @@ export function ProgramPage() {
             {t('Смотреть тарифы', 'Тарифтерді көру')}
           </Button>
         </div>
+        <SendToPc program={t('«Помощник ПВЗ» для Windows', '«ПВЗ көмекшісі» Windows үшін')} />
       </Hero>
 
       <div className="page">
@@ -422,14 +425,12 @@ export function ProgramPage() {
         )}
       />
 
-      {/* Телефон: липкая панель скачивания над таббаром (по прототипу). */}
-      <MobileActionBar note={t('Бесплатно', 'Тегін')} subnote={t('платите за тариф', 'тариф үшін төлейсіз')}>
-        <a href={PROGRAM_DOWNLOAD_URL}>
-          <Button>
-            <Download size={18} />
-            {t('Скачать программу', 'Бағдарламаны жүктеу')}
-          </Button>
-        </a>
+      {/* Телефон: установщик Windows скачивать некуда — панель отправляет ссылку себе на ПК. */}
+      <MobileActionBar note={t('Для Windows', 'Windows үшін')} subnote={t('ставится на компьютер', 'компьютерге орнатылады')}>
+        <Button onClick={() => share(t('«Помощник ПВЗ» для Windows', '«ПВЗ көмекшісі» Windows үшін'))}>
+          <Send size={18} />
+          {t('Ссылка на ПК', 'ДК-ға сілтеме')}
+        </Button>
       </MobileActionBar>
     </>
   );
