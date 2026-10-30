@@ -18,7 +18,9 @@ export function useKeyboardOpen() {
     const vv = window.visualViewport;
     let timer = 0;
     const apply = () => {
-      const squeezed = vv ? vv.height < window.innerHeight * 0.75 : false;
+      // При масштабировании пальцем видимая высота тоже падает, и зум принимался за
+      // клавиатуру — таббар пропадал. Поэтому сжатие учитываем только без зума.
+      const squeezed = vv ? vv.scale < 1.05 && vv.height < window.innerHeight * 0.75 : false;
       root.classList.toggle('keyboard-open', isField(document.activeElement) || squeezed);
     };
     const onFocusIn = (e: FocusEvent) => {
