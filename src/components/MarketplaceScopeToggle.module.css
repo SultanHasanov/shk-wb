@@ -5,8 +5,11 @@
   gap: 6px;
 }
 
-.row > * {
+/* Ширина по тексту, а не поровну: у Button block width:100%, и три кнопки делили
+   строку на трети — «WB + Ozon −10%» на 390px обрезалась. */
+.row > button {
   flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   white-space: nowrap;
 }
