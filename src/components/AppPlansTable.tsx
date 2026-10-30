@@ -192,8 +192,9 @@ export function AppPlansTable({ variant = 'compact' }: { variant?: 'compact' | '
   const plans = useAppPlans();
 
   if (plans.data) {
+    // Обёртка с gap: плашка, переключатель срока и карточки шли вплотную друг к другу.
     return (
-      <>
+      <div className={s.wrap}>
         {plans.data.freeMode && (
           <Alert tone="success">
             {t(
@@ -203,7 +204,7 @@ export function AppPlansTable({ variant = 'compact' }: { variant?: 'compact' | '
           </Alert>
         )}
         {variant === 'full' ? <FullCards plans={plans.data} /> : <CompactCards plans={plans.data} />}
-      </>
+      </div>
     );
   }
   if (plans.isError) {

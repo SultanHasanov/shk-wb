@@ -22,6 +22,7 @@ import { AppLoginPage } from '../pages/AppLoginPage';
 import { ScrollToHash } from './ScrollToHash';
 import { useMetrikaPageviews } from '../lib/metrika';
 import { useLocaleEffects } from '../i18n';
+import { useKeyboardOpen } from '../lib/useKeyboardOpen';
 
 // Админка грузится отдельным чанком: её видит один человек, а весит она как
 // половина публичного сайта. Кабинет — по той же причине: посетителю из поиска
@@ -60,6 +61,7 @@ export function App() {
   // доходить до Метрики, иначе визит обрывается на публичной странице.
   useMetrikaPageviews();
   useLocaleEffects();
+  useKeyboardOpen();
 
   return (
     <>

@@ -56,15 +56,20 @@
 @media (max-width: 768px) {
   .section,
   .inner {
-    padding: 40px var(--sp-4);
+    padding: 28px var(--sp-4);
   }
 
   .title {
-    font-size: 26px;
+    font-size: 24px;
+  }
+
+  .lead {
+    font-size: 15px;
+    margin-top: 8px;
   }
 
   .head {
-    margin-bottom: 22px;
+    margin-bottom: 16px;
   }
 }
 

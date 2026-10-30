@@ -261,6 +261,24 @@ h3 {
   .mobile-only {
     display: inline-flex;
   }
+
+  /* Телефон — плотнее, как в приложении: на десктопе шаг 20/16px, тут 12px. */
+  .grid {
+    gap: var(--sp-3);
+  }
+
+  .stack {
+    gap: var(--sp-3);
+  }
+
+  .metric {
+    font-size: var(--fs-24);
+  }
+
+  /* Клавиатура открыта (useKeyboardOpen): таббар и липкие панели не закрывают поле. */
+  .keyboard-open [data-hide-on-keyboard] {
+    display: none !important;
+  }
 }
 
 @media (max-width: 479px) {

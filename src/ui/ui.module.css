@@ -302,16 +302,23 @@
 }
 
 /* Длинные подписи («12 месяцев −25%») не умещаются в строку на телефоне.
-   Сжаться они не могут (white-space: nowrap), поэтому переключатель вылезал
-   за экран и горизонтально прокручивалась вся страница. Переносим на вторую
-   строку: flex-basis по содержимому, иначе при basis 0 перенос не срабатывает. */
+   Сжаться они не могут (white-space: nowrap); перенос в 2×2 выглядел как
+   россыпь кнопок. Как в приложениях — одна строка чипов, прокрутка внутри
+   переключателя (страница горизонтально не едет). */
 @media (max-width: 760px) {
   .segmented {
-    flex-wrap: wrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+
+  .segmented::-webkit-scrollbar {
+    display: none;
   }
 
   .segment {
-    flex: 1 1 auto;
+    flex: 1 0 auto;
+    padding: var(--sp-2) var(--sp-3);
   }
 }
 
@@ -1119,6 +1126,26 @@ button.priceCell:hover {
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+
+/* Карточки на телефоне: 24px полей + 16px секции съедали четверть экрана.
+   Вложенная карточка — подложка без рамки, а не ещё одна рамка с полями. */
+@media (max-width: 768px) {
+  .card {
+    padding: var(--sp-4);
+    border-radius: 16px;
+    box-shadow: none;
+  }
+
+  .card .card {
+    padding: var(--sp-3);
+    border-color: transparent;
+    background: var(--surface-muted);
+  }
+
+  .cardFlush {
+    padding: 0;
   }
 }
 

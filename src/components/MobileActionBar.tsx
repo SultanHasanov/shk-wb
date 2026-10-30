@@ -20,7 +20,7 @@ export function MobileActionBar({
   return (
     <>
       <div className={s.spacer} aria-hidden="true" />
-      <div className={s.bar}>
+      <div className={s.bar} data-hide-on-keyboard="">
         <span className={s.note}>
           {note}
           {subnote != null && <small>{subnote}</small>}

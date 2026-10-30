@@ -31,7 +31,7 @@ export type TabItem = {
  */
 export function TabBar({ items, label }: { items: readonly TabItem[]; label: string }) {
   return (
-    <nav className={s.tabbar} aria-label={label}>
+    <nav className={s.tabbar} aria-label={label} data-hide-on-keyboard="">
       {items.map(item => {
         const Icon = item.Icon;
         const badge =
