@@ -18,7 +18,7 @@ const TITLES: Record<string, Text> = {
   program: { ru: 'Помощник ПВЗ', kk: 'ПВЗ көмекшісі' },
   tarify: { ru: 'Тарифы', kk: 'Тарифтер' },
   'vozvratnye-stikery-wb': { ru: 'Возвратные стикеры', kk: 'Қайтару стикерлері' },
-  'qr-korobov-wb': { ru: 'QR коробов WB', kk: 'WB қорап QR-кодтары' },
+  'qr-korobov-wb': { ru: 'Возвратные коробки', kk: 'WB қорап QR-кодтары' },
   contacts: { ru: 'Контакты', kk: 'Байланыс' },
   offer: { ru: 'Публичная оферта', kk: 'Жария оферта' },
   privacy: { ru: 'Политика конфиденциальности', kk: 'Құпиялылық саясаты' },

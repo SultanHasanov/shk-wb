@@ -69,3 +69,36 @@ describe('версии программ в JSON-LD', () => {
     expect(PUBLIC_PAGES['/cell-print'].graph[0].softwareVersion).toBe(RELEASES.cellPrint);
   });
 });
+
+/**
+ * Заголовки собраны по данным Wordstat (research/wordstat/2026-10-28): у каждой
+ * продуктовой страницы в title стоит её ключ, а не общая формулировка. Тест
+ * держит и ключ, и длину: Яндекс обрезает примерно на 70 знаках, и ключ,
+ * уехавший за обрез, перестаёт работать.
+ */
+describe('title публичных страниц под ключевые запросы', () => {
+  const KEYS: Record<string, string> = {
+    '/': 'Генератор ШК ВБ',
+    '/vozvratnye-stikery-wb': 'Возвратный стикер ВБ',
+    '/qr-korobov-wb': 'Возвратная коробка ВБ',
+    '/program': 'Программа для ПВЗ ВБ',
+    '/cell-print': 'Печать ячеек для ПВЗ',
+  };
+
+  it.each(Object.entries(KEYS))('%s содержит ключ в начале title', (route, key) => {
+    const { title } = PUBLIC_PAGES[route].fallback;
+    expect(title.indexOf(key)).toBe(0);
+  });
+
+  it('ни один title не длиннее 70 знаков', () => {
+    for (const [route, page] of Object.entries(PUBLIC_PAGES))
+      expect(page.fallback.title.length, route).toBeLessThanOrEqual(70);
+  });
+
+  it('description заполнено и укладывается в 180 знаков', () => {
+    for (const [route, page] of Object.entries(PUBLIC_PAGES)) {
+      expect(page.fallback.description.length, route).toBeGreaterThan(50);
+      expect(page.fallback.description.length, route).toBeLessThanOrEqual(180);
+    }
+  });
+});
