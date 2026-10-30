@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Clock, Laptop, Lock, MapPin, ShieldCheck } from 'lucide-react';
 import { Alert, Badge, Button, Card, EmptyState, Segmented, Switch, useToast } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
@@ -98,9 +98,13 @@ function AccessEditor({ account }: { account: AppAccount }) {
     return p?.name || t(`Пункт №${wb}`, `№${wb} пункт`);
   };
   const tabs = [...groups.keys()].sort((a, b) => (a === NO_POINT ? 1 : b === NO_POINT ? -1 : pointName(a).localeCompare(pointName(b))));
-  const [point, setPoint] = useState(tabs[0]);
+  // ?device=<id> — программа открывает кабинет с экрана «Раздел закрыт» сразу на своём ПК
+  const [params] = useSearchParams();
+  const wanted = params.get('device');
+  const wantedPoint = wanted ? tabs.find(k => groups.get(k)?.some(d => d.id === wanted)) : undefined;
+  const [point, setPoint] = useState(wantedPoint ?? tabs[0]);
   const devices = groups.get(point) ?? [];
-  const [deviceId, setDeviceId] = useState<string | null>(devices[0]?.id ?? null);
+  const [deviceId, setDeviceId] = useState<string | null>(wantedPoint ? wanted : devices[0]?.id ?? null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
     if (!devices.some(d => d.id === deviceId)) setDeviceId(devices[0]?.id ?? null);

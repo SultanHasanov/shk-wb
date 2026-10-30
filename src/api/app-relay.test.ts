@@ -43,7 +43,13 @@ function mockSupabase({ ent = { plan: 'standard', device_limit: 2, addons: { mir
     let body: unknown = null;
     if (url.includes('consume_api_rate_limit')) body = true;
     else if (url.includes('/auth/v1/user')) body = { id: user, email: 'owner@test.ru' };
-    else if (url.includes('app_devices?')) {
+    else if (url.includes('app_devices?') && url.includes('order=last_seen_at')) {
+      // список ПК аккаунта (listDevices): рабочий ПК с базой пункта был в сети вчера
+      body = user === USER ? [
+        { id: HOME, device_hash: HASH[HOME], name: 'Домашний', app_version: '1.8.0', last_seen_at: new Date().toISOString() },
+        { id: WORK, device_hash: HASH[WORK], name: 'Рабочий', app_version: '1.7.0', last_seen_at: '2026-10-30T18:07:00Z', point_wb: '900001' },
+      ] : [];
+    } else if (url.includes('app_devices?')) {
       const id = Object.keys(HASH).find(k => url.includes(HASH[k]));
       body = id ? [{ id, name: id === WORK ? 'Рабочий' : 'Домашний', last_seen_at: new Date().toISOString() }] : [];
     } else if (url.includes('rpc/app_entitlements')) body = ent;
@@ -84,8 +90,18 @@ describe('загрузка с другого ПК', () => {
     const res = await call('relay-peers', HOME);
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ devices: [{ id: WORK, name: 'Рабочий', online: true, points: [{ wb: '900001', history: 500 }] }] });
+    // с рабочего ПК себя не видно; домашний не отмечался в передатчике — виден как «не в сети»
     const self = await call('relay-peers', WORK);
-    expect((self.body as { devices: unknown[] }).devices).toEqual([]);
+    expect((self.body as { devices: { id: string; online: boolean }[] }).devices).toMatchObject([{ id: HOME, online: false, points: [] }]);
+  });
+
+  it('выключенный ПК аккаунта виден (не в сети, с номером пункта), даже если передатчик его не помнит', async () => {
+    mockSupabase();
+    const res = await call('relay-peers', HOME);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      devices: [{ id: WORK, name: 'Рабочий', online: false, seenAt: '2026-10-30T18:07:00.000Z', appVersion: '1.7.0', points: [{ wb: '900001' }] }],
+    });
   });
 
   it('без услуги — 403, ничего не создаётся', async () => {

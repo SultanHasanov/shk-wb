@@ -137,4 +137,42 @@ describe('доступ сотрудников: сервер', () => {
     await handler(request('device', { method: 'DELETE', query: { id: DEV_ID } }), res);
     expect(res.statusCode).toBe(403);
   });
+
+  it('ПК сотрудника получает ссылку в кабинет без автовхода', async () => {
+    mockSupabase(url => {
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow(['act.account'])] };
+    });
+    const res = response();
+    await handler(request('site-link', { method: 'POST', body: { next: '/cabinet/access?device=' + DEV_ID } }), res);
+    expect(res.statusCode).toBe(200);
+    const url = (res.body as { url: string }).url;
+    expect(url).toContain('/cabinet/access?device=' + DEV_ID);
+    expect(url).not.toContain('th=');
+  });
+
+  it('ПК без права менять сотрудников не перезаписывает общий график, но и не получает ошибку', async () => {
+    const calls: string[] = [];
+    mockSupabase(url => {
+      calls.push(url);
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow(['act.staff_edit'])] };
+    });
+    const res = response();
+    await handler(request('docs', { method: 'PUT', body: { key: 'schedule', point: '123', base: 7, data: { rates: 1 } } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ version: 7, ignored: true });
+    expect(calls.some(u => u.includes('app_doc_put'))).toBe(false);
+  });
+
+  it('токен Ivideon не уходит на ПК, где закрыто «Видео по ШК»', async () => {
+    mockSupabase(url => {
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow(['video'])] };
+    });
+    const sync = require('../../server/_app-sync.js') as { docsGet: (...a: unknown[]) => Promise<Record<string, unknown>> };
+    vi.spyOn(sync, 'docsGet').mockResolvedValue({ ivideon: { version: 1, data: 'tok' }, telegram: { version: 1, data: 'tg' } });
+    const res = response();
+    await handler(request('secrets'), res);
+    expect(res.statusCode).toBe(200);
+    expect((res.body as { docs: Record<string, unknown> }).docs).not.toHaveProperty('ivideon');
+    expect((res.body as { docs: Record<string, unknown> }).docs).toHaveProperty('telegram');
+  });
 });

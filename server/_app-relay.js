@@ -195,19 +195,37 @@ async function allowedPoints(userId) {
   return rows.map(r => String(r.wb_point_id));
 }
 
-// ПК аккаунта, которые сейчас (или недавно) были в сети, и их пункты.
-function peers(userId, device, now = Date.now()) {
+// Все ПК аккаунта (кроме этого) и их пункты. «В сети» и подробности о пунктах — из памяти
+// передатчика; ПК, которых в памяти нет (выключены, сервер перезапускался), берутся из
+// app_devices — иначе получатель видел «других компьютеров нет», хотя в аккаунте они есть.
+// accountDevices — listDevices() аккаунта; пустой список (сбой БД) — показываем только память.
+function peers(userId, device, accountDevices = [], now = Date.now()) {
   startSweeper();
   const map = presence.get(userId) || new Map();
+  const known = new Map((accountDevices || []).map(d => [d.id, d]));
   const devices = [];
   for (const [id, d] of map) {
-    if (id === device.id) continue;
+    if (id === device.id || (known.size && !known.has(id))) continue;
+    const acc = known.get(id);
     devices.push({
       id,
-      name: d.name,
+      name: acc?.name || d.name,
       online: now - d.seenAt < ONLINE_MS,
       seenAt: new Date(d.seenAt).toISOString(),
       points: d.points || [],
+      appVersion: acc?.appVersion || null,
+    });
+  }
+  for (const [id, acc] of known) {
+    if (id === device.id || map.has(id)) continue;
+    devices.push({
+      id,
+      name: acc.name || 'Компьютер',
+      online: false,
+      seenAt: acc.lastSeenAt ? new Date(acc.lastSeenAt).toISOString() : new Date(0).toISOString(),
+      // что именно лежит на том ПК, станет известно, когда он включится; пока — только номер пункта
+      points: acc.pointWb && WB_RE.test(String(acc.pointWb)) ? [{ wb: String(acc.pointWb), name: '', live: true }] : [],
+      appVersion: acc.appVersion || null,
     });
   }
   devices.sort((a, b) => Number(b.online) - Number(a.online) || b.seenAt.localeCompare(a.seenAt));

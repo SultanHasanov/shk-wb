@@ -81,6 +81,12 @@ async function finishLogin(res, session, userId, deviceHash, deviceName, version
   return res.status(200).json({ session: tokens });
 }
 
+// Общие документы (server/_app-sync.js) → какой доступ нужен ПК, чтобы их менять или получать.
+const DOC_WRITE_PERMS = Object.freeze({
+  notes: 'notes', settings: 'settings', staff: 'act.staff_edit', schedule: 'act.staff_edit', video: 'act.video_settings',
+});
+const SECRET_WRITE_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'act.video_settings' });
+const SECRET_READ_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'video' });
 const SITE_LINK_TARGETS = /^\/cabinet(\/[a-z-]+)?(\?[a-z0-9=&_-]{0,80})?$/i;
 
 module.exports = async function handler(req, res) {
@@ -326,7 +332,10 @@ module.exports = async function handler(req, res) {
         return res.status(403).json({ error: 'Владелец закрыл загрузку с другого ПК на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.load_pc' });
       }
       if (action === 'relay-inbox' && req.method === 'POST') return res.status(200).json(await relay.inbox(user.id, device, body(req)));
-      if (action === 'relay-peers' && req.method === 'GET') return res.status(200).json(relay.peers(user.id, device));
+      if (action === 'relay-peers' && req.method === 'GET') {
+        const list = await account.listDevices(user.id).catch(() => []);
+        return res.status(200).json(relay.peers(user.id, device, list));
+      }
       if (action === 'relay-ask' && req.method === 'POST') return res.status(200).json(await relay.ask(user.id, device, body(req)));
       if (action === 'relay-put' && req.method === 'POST') return res.status(200).json(relay.put(user.id, device, req.query, req.body));
       if (action === 'relay-ack' && req.method === 'POST') return res.status(200).json(relay.ack(user.id, device, req.query));
@@ -440,10 +449,20 @@ module.exports = async function handler(req, res) {
     }
     if ((action === 'docs' || action === 'secrets') && req.method === 'GET') {
       const point = req.query.point ? String(req.query.point) : null;
-      return res.status(200).json({ docs: await sync.docsGet(user.id, device.id, { point, secret: action === 'secrets' }) });
+      const docs = await sync.docsGet(user.id, device.id, { point, secret: action === 'secrets' });
+      // токены не уезжают на ПК, где владелец закрыл раздел, которому они нужны
+      if (action === 'secrets') {
+        for (const [key, perm] of Object.entries(SECRET_READ_PERMS)) if (permissions.isDenied(device, perm)) delete docs[key];
+      }
+      return res.status(200).json({ docs });
     }
     if ((action === 'docs' || action === 'secrets') && req.method === 'PUT') {
       const b = body(req);
+      // ПК, где это закрыто владельцем, не меняет общие данные для всех ПК (ставки, график, камеры, токены).
+      // Отвечаем «принято» без записи: старые версии программы на 403 застревали бы в ошибке синхронизации,
+      // а так при следующем изменении с другого ПК их копия просто перезапишется общей.
+      const perm = (action === 'secrets' ? SECRET_WRITE_PERMS : DOC_WRITE_PERMS)[String(b.key || '')];
+      if (perm && permissions.isDenied(device, perm)) return res.status(200).json({ version: Number(b.base) || 0, ignored: true });
       return res.status(200).json(await sync.docPut(user.id, device.id, {
         key: b.key, point: b.point || null, base: b.base, data: b.data, secret: action === 'secrets',
       }));
@@ -452,6 +471,9 @@ module.exports = async function handler(req, res) {
       if (!await enforceRateLimit(req, res, { scope: 'app-site-link', limit: 20, windowSeconds: 600, key: user.id })) return;
       const next = String(body(req).next || '/cabinet/subscription');
       if (!SITE_LINK_TARGETS.test(next)) return res.status(400).json({ error: 'Некорректная страница', code: 'VALIDATION_ERROR' });
+      // ПК сотрудника (закрыто «Управлять аккаунтом»): ссылка без входа — иначе сотрудник попал бы в кабинет
+      // владельца и открыл бы себе доступ сам. Сайт попросит пароль.
+      if (permissions.isDenied(device, 'act.account')) return res.status(200).json({ url: `${publicOrigin(req)}${next}`, signedIn: false });
       const tokenHash = await account.magicTokenHash(user.id);
       return res.status(200).json({ url: `${publicOrigin(req)}/app-login?th=${encodeURIComponent(tokenHash)}&next=${encodeURIComponent(next)}` });
     }
