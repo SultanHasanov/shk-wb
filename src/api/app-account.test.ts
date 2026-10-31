@@ -9,6 +9,8 @@ type Plans = {
   planPrice: (plan: string, months: number) => number | null;
   orderSnapshot: (plan: string, months: number) => { app: Record<string, number | string>; total: number } | null;
   publicPlans: () => { plans: Array<{ id: string; prices: Record<string, number> }> };
+  effectiveFeatures: (plan: string, addons: object, free: boolean, codesLimit?: number) => string[];
+  PLANS: Record<string, { compare: Record<string, number> }>;
 };
 const plans = require('../../server/_app-plans.js') as Plans;
 type Handler = (req: unknown, res: unknown) => Promise<unknown>;
@@ -43,19 +45,31 @@ function mockSupabase(route: Route) {
 
 describe('тарифы программы', () => {
   it('считает цену со скидкой за срок', () => {
-    expect(plans.planPrice('standard', 1)).toBe(390);
-    expect(plans.planPrice('pro', 12)).toBe(Math.round(790 * 12 * 0.75));
+    expect(plans.planPrice('standard', 1)).toBe(239);
+    expect(plans.planPrice('standard', 6)).toBe(1032);
+    expect(plans.planPrice('pro', 12)).toBe(Math.round(399 * 12 * 0.65));
     expect(plans.planPrice('pro', 2)).toBeNull();
     expect(plans.planPrice('vip', 1)).toBeNull();
   });
   it('кладёт лимиты в снимок заказа', () => {
-    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 100, stickers: 0, devices: 4, monthly_price: 790 }, total: 2133 });
+    expect(plans.orderSnapshot('pro', 3)).toMatchObject({ app: { plan: 'pro', codes: 10, stickers: 50, devices: 4, monthly_price: 399 }, total: 934 });
+  });
+  it('держит обе цены не дороже аналога −20%', () => {
+    for (const id of ['standard', 'pro']) {
+      for (const [months, compare] of Object.entries(plans.PLANS[id].compare)) {
+        expect(plans.planPrice(id, Number(months))).toBeLessThanOrEqual(Math.round(compare * 0.8));
+      }
+    }
+  });
+  it('оставляет купившим старый Стандарт его разделы', () => {
+    expect(plans.effectiveFeatures('standard', {}, false, 0)).not.toContain('reviews');
+    expect(plans.effectiveFeatures('standard', {}, false, 30)).toEqual(expect.arrayContaining(['reviews', 'expensive', 'telegram']));
   });
   it('отдаёт тарифы публично', async () => {
     const res = response();
     await handler({ method: 'GET', query: { action: 'plans' }, headers: {} }, res);
     expect(res.statusCode).toBe(200);
-    expect((res.body as ReturnType<Plans['publicPlans']>).plans.map(p => p.id)).toEqual(['basic', 'standard', 'pro']);
+    expect((res.body as ReturnType<Plans['publicPlans']>).plans.map(p => p.id)).toEqual(['standard', 'pro']);
   });
 });
 
@@ -232,8 +246,9 @@ describe('разделы по тарифам и услуга «Архив»', ()
   });
   it('Стандарт открывает ячейки, коробки, ШК и примерку, но не досье и сотрудников', () => {
     const f = p.effectiveFeatures('standard', {}, false);
-    expect(f).toEqual(expect.arrayContaining(['cells', 'boxes', 'goods', 'tryon', 'notes', 'reviews']));
+    expect(f).toEqual(expect.arrayContaining(['cells', 'boxes', 'goods', 'tryon', 'notes']));
     expect(f).not.toContain('dossier');
+    expect(f).not.toContain('reviews');
     expect(f).not.toContain('staff');
     expect(f).not.toContain('archive');
   });

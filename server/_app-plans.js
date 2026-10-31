@@ -6,14 +6,19 @@
 // каждый месяц от даты начала. Снимок лимитов сохраняется в подписке при покупке.
 
 const PLAN_ORDER = Object.freeze(['basic', 'standard', 'pro']);
+// В продаже только два тарифа. «Базовый» остаётся для действующих подписок и пакетов кодов.
+const SALE_PLANS = Object.freeze(['standard', 'pro']);
 
 // Разделы программы по тарифам. Программа открывает раздел, только если его фича
 // есть в списке (список приходит в подписанной аренде, см. _app-update.js).
 const BASIC_FEATURES = Object.freeze(['code']);
-const STANDARD_FEATURES = Object.freeze([
-  ...BASIC_FEATURES, 'cells', 'expensive', 'way', 'boxes', 'goods', 'search', 'reviews', 'telegram', 'tryon', 'notes',
+const STANDARD_FEATURES = Object.freeze([...BASIC_FEATURES, 'cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
+const PRO_FEATURES = Object.freeze([
+  ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers',
 ]);
-const PRO_FEATURES = Object.freeze([...STANDARD_FEATURES, 'dossier', 'risky', 'staff', 'stickers']);
+// Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
+// узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
+const LEGACY_STANDARD_EXTRA = Object.freeze(['expensive', 'reviews', 'telegram']);
 
 const PLANS = Object.freeze({
   basic: Object.freeze({
@@ -30,29 +35,32 @@ const PLANS = Object.freeze({
   standard: Object.freeze({
     id: 'standard',
     title: 'Стандарт',
-    monthlyPrice: 390,
-    codes: 30,
+    monthlyPrice: 239,
+    // Цена аналога за тот же срок — сайт и программа показывают её зачёркнутой рядом с нашей.
+    compare: Object.freeze({ 1: 299, 3: 699, 6: 1290 }),
+    codes: 0,
     stickers: 0,
     devices: 2,
     points: 1,
-    summary: 'Вся работа с ячейками, товарами и отзывами',
+    summary: 'Ячейки, товары, поиск клиента и заметки',
     features: STANDARD_FEATURES,
   }),
   pro: Object.freeze({
     id: 'pro',
     title: 'Про',
-    monthlyPrice: 790,
-    codes: 100,
-    stickers: 0, // квота стикеров не выдаётся: генерация оплачивается с баланса
+    monthlyPrice: 399,
+    compare: Object.freeze({ 1: 499, 3: 1199, 6: 2290 }),
+    codes: 10,
+    stickers: 50, // месячный пакет генераций (app_sticker_quota_code), сверх — с баланса
     devices: 4,
     points: 2,
-    summary: 'Досье клиентов, стикеры, сотрудники и зарплата',
+    summary: 'Всё из Стандарта, коды клиента, стикеры, досье, отзывы и сотрудники',
     features: PRO_FEATURES,
   }),
 });
 
 // Скидка за срок, в процентах.
-const TERMS = Object.freeze({ 1: 0, 3: 10, 6: 15, 12: 25 });
+const TERMS = Object.freeze({ 1: 0, 3: 22, 6: 28, 12: 35 });
 
 const FEATURE_TITLES = Object.freeze({
   code: 'Подбор кода, QR и копирование',
@@ -119,6 +127,10 @@ const ADDONS = Object.freeze({
   }),
 });
 
+function isSalePlan(value) {
+  return SALE_PLANS.includes(value);
+}
+
 function isPlan(value) {
   return Object.prototype.hasOwnProperty.call(PLANS, value);
 }
@@ -154,13 +166,14 @@ function addonSnapshot(addon, months) {
 
 /**
  * Итоговый список фич: тариф + активные услуги. Бесплатный режим = Про со всеми услугами.
- * addons — { archive: { ends_at } } из app_entitlements.
+ * addons — { archive: { ends_at } } из app_entitlements; codesLimit — снимок лимита кодов подписки.
  */
-function effectiveFeatures(plan, addons, free) {
+function effectiveFeatures(plan, addons, free, codesLimit = 0) {
   // зеркало в бесплатный режим не входит — только купленное (место в облаке)
   const mirror = mirrorLimit(plan, addons, false) > 0 ? ['mirror'] : [];
   if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
   const base = isPlan(plan) ? [...PLANS[plan].features] : [];
+  if (plan === 'standard' && Number(codesLimit) > 0) base.push(...LEGACY_STANDARD_EXTRA);
   for (const [id, info] of Object.entries(addons || {})) {
     if (addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) base.push(...ADDONS[id].features);
   }
@@ -224,10 +237,10 @@ function orderSnapshot(plan, months) {
 
 function publicPlans() {
   return {
-    order: PLAN_ORDER,
+    order: SALE_PLANS,
     terms: Object.keys(TERMS).map(months => ({ months: Number(months), discountPercent: TERMS[months] })),
     features: FEATURE_TITLES,
-    plans: PLAN_ORDER.map(id => {
+    plans: SALE_PLANS.map(id => {
       const p = PLANS[id];
       return {
         id,
@@ -240,6 +253,7 @@ function publicPlans() {
         points: p.points,
         features: p.features,
         prices: Object.fromEntries(Object.keys(TERMS).map(months => [months, planPrice(id, Number(months))])),
+        comparePrices: { ...(p.compare || {}) },
       };
     }),
     addons: Object.values(ADDONS).map(a => ({
@@ -256,7 +270,7 @@ function publicPlans() {
 }
 
 module.exports = {
-  ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, TERMS,
-  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isTerm, mirrorLimit,
+  ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, SALE_PLANS, TERMS,
+  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isSalePlan, isTerm, mirrorLimit,
   orderSnapshot, planPrice, planRank, publicPlans,
 };

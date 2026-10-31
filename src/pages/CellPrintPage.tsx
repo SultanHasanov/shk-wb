@@ -664,7 +664,7 @@ export const CellPrintPage = observer(() => {
       />
 
       {/* Телефон: установщик скачивают на ПК, а ключ можно купить и с телефона. */}
-      <MobileActionBar note={t('Ключ — от 150 ₽', 'Кілт — 150 ₽ бастап')} subnote={t('программа для Windows', 'Windows бағдарламасы')}>
+      <MobileActionBar note={t('Ключ — от 249 ₽ в месяц', 'Кілт — айына 249 ₽ бастап')} subnote={t('программа для Windows', 'Windows бағдарламасы')}>
         <Button onClick={goToKey}>
           <KeyRound size={18} />
           {t('Выбрать ключ', 'Кілт таңдау')}

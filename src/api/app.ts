@@ -15,6 +15,8 @@ export type AppPlan = {
   points?: number;
   features: string[];
   prices: Record<string, number>;
+  /** цена аналога за тот же срок (1/3/6 мес) — показываем зачёркнутой */
+  comparePrices?: Record<string, number>;
 };
 /** Доп. услуги: архив клиентов и пакеты ПК/пунктов (kind 'pack'). prices — цена за весь срок по числу месяцев. */
 export type AppAddonId = 'archive' | 'devices_1' | 'devices_3' | 'points_1' | 'points_3' | 'mirror_1' | 'mirror_3';

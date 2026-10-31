@@ -28,10 +28,38 @@ function planHighlight(plans: AppPlans, plan: AppPlan) {
 }
 
 function planLimits(plan: AppPlan, t: T) {
-  const parts = [t(`${plan.codes} подборов`, `${plan.codes} іріктеу`)];
+  const parts: string[] = [];
+  if (plan.codes > 0) parts.push(t(`${plan.codes} кодов клиента`, `${plan.codes} клиент коды`));
+  if (plan.stickers > 0) parts.push(t(`${plan.stickers} стикеров`, `${plan.stickers} стикер`));
   if (plan.points && plan.points > 1) parts.push(t(`${plan.points} пункта`, `${plan.points} пункт`));
   parts.push(devicesShort(plan.devices, t));
   return parts.join(' · ');
+}
+
+/** Цена аналога за тот же срок, зачёркнутая, и наша выгода в процентах. */
+function CompareLine({ plan, months }: { plan: AppPlan; months: number }) {
+  const t = useT();
+  const { formatTotal } = useMoney();
+  const compare = plan.comparePrices?.[String(months)];
+  const price = plan.prices[String(months)];
+  if (!compare || !price || price >= compare) return null;
+  return (
+    <div className={s.compare}>
+      <s>{formatTotal(compare)}</s> {t('у аналогов', 'аналогтарда')}
+      <span className={s.save}>−{Math.round((1 - price / compare) * 100)}%</span>
+    </div>
+  );
+}
+
+/** Строка над карточками: зачем выбирать нас. */
+function VsLine({ plans }: { plans: AppPlans }) {
+  const t = useT();
+  if (!plans.plans.some(plan => plan.comparePrices?.['1'])) return null;
+  return (
+    <p className={s.vs}>
+      {t('На 20% дешевле аналогов — и больше функций в каждом тарифе', 'Аналогтардан 20% арзан — әр тарифте мүмкіндіктер көбірек')}
+    </p>
+  );
 }
 
 /** Строка «Пакеты расширения» под тарифами: что можно докупить и скидки за срок. */
@@ -72,19 +100,21 @@ function CompactCards({ plans }: { plans: AppPlans }) {
 
   return (
     <>
+      <VsLine plans={plans} />
       <div className={s.plans}>
         {plans.plans.map(plan => {
-          const popular = plan.id === 'standard';
+          const popular = plan.id === 'pro';
           const highlight = planHighlight(plans, plan);
           return (
             <div key={plan.id} className={`${s.plan} ${popular ? s.planPopular : ''}`}>
               <div className={s.planTop}>
                 <h3 className={s.planName}>{plan.title}</h3>
-                {popular && <span className={s.flag}>{t('Выбирают чаще', 'Жиі таңдайды')}</span>}
+                {popular && <span className={s.flag}>{t('Рекомендуем', 'Ұсынамыз')}</span>}
               </div>
               <div className={s.cost}>
                 <b>{formatTotal(plan.prices['1'] ?? plan.monthlyPrice)}</b> <span>{t('/ мес', '/ ай')}</span>
               </div>
+              <CompareLine plan={plan} months={1} />
               <p className={s.sum}>{plan.summary}</p>
               <ul className={s.bullets}>
                 {highlight && (
@@ -93,10 +123,12 @@ function CompactCards({ plans }: { plans: AppPlans }) {
                     {highlight}
                   </li>
                 )}
-                <li>
-                  <Check size={16} aria-hidden="true" />
-                  {planLimits(plan, t)}
-                </li>
+                {planLimits(plan, t) && (
+                  <li>
+                    <Check size={16} aria-hidden="true" />
+                    {planLimits(plan, t)}
+                  </li>
+                )}
               </ul>
               <Link className={s.planAction} to={lp(`/cabinet/subscription?plan=${plan.id}`)}>
                 <Button variant={popular ? 'primary' : 'secondary'} block>
@@ -132,15 +164,16 @@ function FullCards({ plans }: { plans: AppPlans }) {
           }))}
         />
       </div>
+      <VsLine plans={plans} />
       <div className={s.plans}>
         {plans.plans.map(plan => {
           const price = plan.prices[String(months)];
-          const popular = plan.id === 'standard';
+          const popular = plan.id === 'pro';
           return (
             <div key={plan.id} className={`${s.plan} ${popular ? s.planPopular : ''}`}>
               <div className={s.planTop}>
                 <h3 className={s.planName}>{plan.title}</h3>
-                {popular && <span className={s.flag}>{t('Выбирают чаще', 'Жиі таңдайды')}</span>}
+                {popular && <span className={s.flag}>{t('Рекомендуем', 'Ұсынамыз')}</span>}
               </div>
               <div className={s.cost}>
                 <b>{formatTotal(price)}</b>{' '}
@@ -150,10 +183,11 @@ function FullCards({ plans }: { plans: AppPlans }) {
                     : t('/ мес', '/ ай')}
                 </span>
               </div>
+              <CompareLine plan={plan} months={months} />
               <p className={s.sum}>{plan.summary}</p>
               <ul className={s.limits}>
-                <li>{t(`${plan.codes} подборов кода в месяц`, `Айына ${plan.codes} код іріктеу`)}</li>
-                {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров в месяц`, `Айына ${plan.stickers} стикер`)}</li>}
+                {plan.codes > 0 && <li>{t(`${plan.codes} кодов клиента в месяц`, `Айына ${plan.codes} клиент коды`)}</li>}
+                {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров по ШК в месяц`, `Айына ШК бойынша ${plan.stickers} стикер`)}</li>}
                 <li>{plan.devices === 1 ? t('1 компьютер', '1 компьютер') : t(`До ${plan.devices} компьютеров`, `${plan.devices} компьютерге дейін`)}</li>
               </ul>
               <ul className={s.planFeatures}>

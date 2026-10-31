@@ -38,6 +38,14 @@
 Миграции применяются через `npx supabase db query --linked -f <файл>` (история миграций в Supabase не ведётся).
 - Тарифы `server/_app-plans.js`: разделы `BASIC/STANDARD/PRO_FEATURES` (+boxes, goods, tryon, notes, risky; `sync` убран),
   услуга `ADDONS.archive` 590 ₽/6 мес, 990 ₽/12 мес, `minPlan: standard`; `effectiveFeatures(plan, addons, free)`.
+- **Тарифы с 31.10.2026 (под аналог WBCash Omni, −20%)**: в продаже два — `SALE_PLANS = ['standard','pro']`.
+  Стандарт 239 ₽ (0 кодов, разделы как у Omni), Про 399 ₽ (10 кодов, 50 стикеров/мес, всё остальное).
+  `TERMS 3:22 6:28 12:35`; `compare` = цена аналога → `publicPlans().plans[].comparePrices`, сайт и программа
+  показывают её зачёркнутой. «Базовый» не продаётся (payments/бот проверяют `isSalePlan`), но остаётся в `PLANS`
+  для старых подписок и выдачи из админки. **Старый Стандарт** (снимок `codes_limit > 0`) сохраняет
+  `LEGACY_STANDARD_EXTRA` (дорогие, отзывы, Telegram) — `effectiveFeatures(plan, addons, free, ent.codes_limit)`.
+  Цена и лимиты купленного — в снимке подписки, новые условия только со следующей покупки.
+  Квота стикеров Про снова работает: `reserveGeneration` сперва зовёт `rpc/app_sticker_quota_code`.
 - Миграция `20261020_app_addons.sql`: `app_addons`, `app_apply_addon`, `complete_app_addon_order`, `admin_grant/revoke_app_addon`,
   `app_entitlements.addons`. Проверено на PGlite (скрипт в scratchpad сессии, 11/11). Оплата `productKind:'app_addon'`.
 - Права в ПОДПИСАННОЙ аренде: `/api/app/lease` с `Authorization` → `payload.rights {user,plan,features,archive_until,free}`

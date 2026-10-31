@@ -65,7 +65,7 @@ async function entitlementsFor(userId) {
   const mirror = mirrorLimit(plan, addons, unlimited);
   return {
     ent, free, unlimited, plan, addons, mirror,
-    features: withMirror(effectiveFeatures(plan, addons, all), mirror),
+    features: withMirror(effectiveFeatures(plan, addons, all, ent.codes_limit), mirror),
     limits: accountLimits(plan, addons, ent.device_limit, all),
   };
 }
@@ -358,7 +358,7 @@ async function accountSummary(user, currentHash) {
     flags: { crackFallback: crackFallback === true },
     ...(all ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
-    features: withMirror(effectiveFeatures(plan, rawAddons, all), mirrorLimit(plan, rawAddons, unlimited)),
+    features: withMirror(effectiveFeatures(plan, rawAddons, all, ent.codes_limit), mirrorLimit(plan, rawAddons, unlimited)),
     // Услуги: куплена до endsAt; active = действует сейчас (на тарифе ниже нужного — false).
     addons: Object.values(ADDONS).map(a => {
       const endsAt = rawAddons[a.id]?.ends_at || null;

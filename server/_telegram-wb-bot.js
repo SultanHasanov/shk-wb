@@ -7,7 +7,7 @@ const { generateStickers, getAccessStatus, selectAccessCode } = require('./_stic
 const { BATCH_QUANTITY, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
-const { PLANS, TERMS, orderSnapshot, planPrice } = require('./_app-plans');
+const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
@@ -264,13 +264,13 @@ async function showClientCode(chatId, messageId, from) {
     '• 🔎 прямо здесь в боте — по номеру телефона или ячейке;',
     '• 🖥 в программе «Помощник ПВЗ» — в ячейке клиента или поиском по телефону.',
     '',
-    `Для доступа к ячейкам в программе нужен тариф «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
+    `Для доступа к ячейкам в программе нужен тариф «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
     '',
     'Пример: <code>Код 191607973</code>',
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     [{ text: '🔎 Найти ID в боте', callback_data: 'code:find' }],
-    [{ text: `🛒 Купить «Базовый» — ${PLANS.basic.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:basic' }],
+    [{ text: `🛒 Купить «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:standard' }],
     [{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }],
     MENU_ROW,
   ]) });
@@ -527,7 +527,7 @@ async function showHelperInfo(chatId, messageId) {
     '<b>🖥 Помощник ПВЗ</b>',
     'Программа для ПК пункта: код клиента, ячейки, отзывы с авторами, досье клиентов, график и зарплата сотрудников.',
     '',
-    ...['basic', 'standard', 'pro'].map(id => `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`),
+    ...SALE_PLANS.map(id => `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес (у аналогов ${PLANS[id].compare[1]} ₽)`),
     ...(free ? [`🎁 Сейчас ${free}`] : []),
     '',
     `Скачать: ${PROGRAM_URL}`,
@@ -1535,7 +1535,7 @@ async function resolveShopItem(userId, parts) {
     };
   }
   if (kind === 'helper') {
-    const months = Number(b), snap = orderSnapshot(a, months);
+    const months = Number(b), snap = isSalePlan(a) ? orderSnapshot(a, months) : null;
     if (!snap) return { error: 'Такого тарифа нет.' };
     return {
       title: `<b>🖥 «${PLANS[a].title}» на ${monthsLabel(months)}</b>`,
@@ -1629,12 +1629,12 @@ async function showShop(from, chatId, messageId, parts) {
     ]);
     const freeNote = free ? '\nОплата начнёт действовать после бесплатного периода.' : '';
     return showScreen(chatId, messageId, `<b>🖥 Подписка «Помощник ПВЗ»</b>\nСейчас: ${helperStatusLine(ent, free)}${freeNote}\n${balanceLine}`, { reply_markup: choiceKeyboard([
-      ...['basic', 'standard', 'pro'].map(id => [{ text: `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`, callback_data: `shop:helper:${id}` }]),
+      ...SALE_PLANS.map(id => [{ text: `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`, callback_data: `shop:helper:${id}` }]),
       back('shop:home'),
     ]) });
   }
   if (kind === 'helper' && a && !b) {
-    if (!PLANS[a]) return showShop(from, chatId, messageId, ['helper']);
+    if (!isSalePlan(a)) return showShop(from, chatId, messageId, ['helper']);
     return showScreen(chatId, messageId, `<b>🖥 «${PLANS[a].title}»</b> — ${PLANS[a].summary.toLowerCase()}\n${balanceLine}\n\nНа какой срок?`, { reply_markup: choiceKeyboard([
       ...Object.keys(TERMS).map(Number).map(months => [{ text: `${monthsLabel(months)} — ${planPrice(a, months)} ₽${TERMS[months] ? ` (−${TERMS[months]}%)` : ''}`, callback_data: `shop:helper:${a}:${months}` }]),
       back('shop:helper'),

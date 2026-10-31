@@ -174,7 +174,7 @@ function Limits({ account }: { account: AppAccount }) {
         <h2 style={{ margin: 0 }}>{t('Лимиты этого месяца', 'Осы айдың лимиттері')}</h2>
         {q ? (
           <>
-            <Progress value={q.codes.used} max={q.codes.limit} tone={q.codes.used >= q.codes.limit ? 'danger' : 'accent'} label={t(`Подборы кода: ${q.codes.used} из ${q.codes.limit}`, `Код іріктеу: ${q.codes.limit} ішінен ${q.codes.used}`)} />
+            {q.codes.limit > 0 && <Progress value={q.codes.used} max={q.codes.limit} tone={q.codes.used >= q.codes.limit ? 'danger' : 'accent'} label={t(`Коды клиента: ${q.codes.used} из ${q.codes.limit}`, `Клиент кодтары: ${q.codes.limit} ішінен ${q.codes.used}`)} />}
             {q.stickers.limit > 0 && <Progress value={q.stickers.used} max={q.stickers.limit} label={t(`Стикеры: ${q.stickers.used} из ${q.stickers.limit}`, `Стикерлер: ${q.stickers.limit} ішінен ${q.stickers.used}`)} />}
             <p className="muted" style={{ margin: 0 }}>{t(`Обновятся ${date(q.resetAt)}. Неизрасходованное не переносится.`, `${date(q.resetAt)} жаңарады. Жұмсалмағаны келесі айға ауыспайды.`)}</p>
           </>
@@ -358,6 +358,7 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
       <div className={s.plans}>
         {plans.plans.map(plan => {
           const price = plan.prices[String(months)];
+          const compare = plan.comparePrices?.[String(months)] ?? 0;
           const isCurrent = current === plan.id;
           const action = !current ? t('Оформить', 'Рәсімдеу') : isCurrent ? t('Продлить', 'Ұзарту') : RANK[plan.id] > RANK[current] ? t('Перейти', 'Ауысу') : t('Перейти после окончания', 'Аяқталғаннан кейін ауысу');
           return (
@@ -372,14 +373,20 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
                 <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
                   {months > 1 ? t(`за ${monthsWord(months, t)} · ${formatTotal(Math.round(price / months))} в месяц`, `${monthsWord(months, t)} · айына ${formatTotal(Math.round(price / months))}`) : t('в месяц', 'айына')}
                 </div>
+                {compare > price && (
+                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
+                    <s>{formatTotal(compare)}</s> {t('у аналогов', 'аналогтарда')} ·{' '}
+                    <strong style={{ color: 'var(--success)' }}>−{Math.round((1 - price / compare) * 100)}%</strong>
+                  </div>
+                )}
               </div>
               <div className={s.mobilePlanSummary}>
                 <span>{plan.summary}</span>
-                <span>{t(`${plan.codes} подборов · ${plan.devices} ПК${(plan.points ?? 1) > 1 ? ` · ${plan.points} пункта` : ''}`, `${plan.codes} іріктеу · ${plan.devices} ПК`)}</span>
+                <span>{t(`${plan.codes > 0 ? `${plan.codes} кодов клиента · ` : ''}${plan.devices} ПК${(plan.points ?? 1) > 1 ? ` · ${plan.points} пункта` : ''}`, `${plan.codes > 0 ? `${plan.codes} клиент коды · ` : ''}${plan.devices} ПК`)}</span>
               </div>
               <ul className={s.limits}>
-                <li>{t(`${plan.codes} подборов кода в месяц`, `Айына ${plan.codes} код іріктеу`)}</li>
-                {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров в месяц`, `Айына ${plan.stickers} стикер`)}</li>}
+                {plan.codes > 0 && <li>{t(`${plan.codes} кодов клиента в месяц`, `Айына ${plan.codes} клиент коды`)}</li>}
+                {plan.stickers > 0 && <li>{t(`${plan.stickers} стикеров по ШК в месяц`, `Айына ШК бойынша ${plan.stickers} стикер`)}</li>}
                 <li>{(plan.points ?? 1) === 1 ? t('1 пункт', '1 пункт') : t(`${plan.points} пункта`, `${plan.points} пункт`)}</li>
                 <li>{plan.devices === 1 ? t('1 компьютер', '1 компьютер') : t(`До ${plan.devices} компьютеров`, `${plan.devices} компьютерге дейін`)}</li>
               </ul>

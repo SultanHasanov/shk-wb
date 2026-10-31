@@ -24,6 +24,9 @@ async function reserveGeneration({ userId, requestKey, mode, category }) {
   if (!userId || !normalizedMode || !['product', 'box'].includes(category) || !String(requestKey || '').trim()) {
     throw billingError('VALIDATION_ERROR', 'Некорректные параметры оплаты генерации');
   }
+  // Месячный пакет стикеров тарифа Про: создаётся при первом обращении в окне подписки,
+  // и резерв ниже спишет его раньше баланса. Сбой не должен мешать оплате с баланса.
+  await supabaseFetch('rpc/app_sticker_quota_code', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
   const result = parseResult(await supabaseFetch('rpc/reserve_sticker_generation', {
     method: 'POST',
     body: JSON.stringify({

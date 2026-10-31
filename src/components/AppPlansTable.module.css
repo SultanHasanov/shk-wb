@@ -7,7 +7,7 @@
 
 .plans {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -62,6 +62,35 @@
 .cost span {
   font-size: 14px;
   color: var(--text-muted);
+}
+
+.compare {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.compare s {
+  color: var(--text-tertiary);
+}
+
+.save {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--success);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.vs {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent-dark);
 }
 
 .sum {

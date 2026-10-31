@@ -14,7 +14,7 @@ const {
   yookassa,
 } = require('../server/_payments');
 const { topupBonus, validTopup } = require('../server/_wallet');
-const { ADDONS, addonSnapshot, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
+const { ADDONS, addonSnapshot, isSalePlan, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
@@ -190,7 +190,8 @@ module.exports = async function handler(req, res) {
         return res.status(401).json({ error: 'Для оплаты через Telegram войдите в аккаунт' });
       const appPlan = String(req.body?.appPlan || '');
       const appTerm = Number(req.body?.appTermMonths || 0);
-      const appSnapshot = productKind === 'app_subscription' ? orderSnapshot(appPlan, appTerm) : null;
+      // «Базовый» снят с продажи: его выдаёт только админка (server/_admin-users.js).
+      const appSnapshot = productKind === 'app_subscription' && isSalePlan(appPlan) ? orderSnapshot(appPlan, appTerm) : null;
       if (productKind === 'app_subscription') {
         // Подписка живёт на аккаунте: без входа её некуда зачислить.
         if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы оформить подписку' });

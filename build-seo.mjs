@@ -233,8 +233,8 @@ export const PUBLIC_PAGES = {
           // Матрица «срок × устройства» из CELL_PRINT_PRICES: 5 × 6 тарифов
           '@type': 'AggregateOffer',
           priceCurrency: 'RUB',
-          lowPrice: '50',
-          highPrice: '10000',
+          lowPrice: '79',
+          highPrice: '19900',
           offerCount: '30',
           availability: 'https://schema.org/InStock',
           url: `${ORIGIN}/cell-print`,

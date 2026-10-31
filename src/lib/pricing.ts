@@ -75,11 +75,11 @@ export const CUSTOM_PACK_LIST: readonly Pack[] = Object.entries(CUSTOM_GENERATIO
 
 export const CELL_PRINT_PRICES: Readonly<Record<number, Readonly<Record<number, number>>>> =
   Object.freeze({
-    7: Object.freeze({ 1: 50, 2: 85, 3: 115, 5: 175, 10: 300, 20: 500 }),
-    30: Object.freeze({ 1: 150, 2: 255, 3: 345, 5: 525, 10: 900, 20: 1500 }),
-    90: Object.freeze({ 1: 350, 2: 595, 3: 805, 5: 1225, 10: 2100, 20: 3500 }),
-    180: Object.freeze({ 1: 600, 2: 1020, 3: 1380, 5: 2100, 10: 3600, 20: 6000 }),
-    365: Object.freeze({ 1: 1000, 2: 1700, 3: 2300, 5: 3500, 10: 6000, 20: 10000 }),
+    7: Object.freeze({ 1: 79, 2: 135, 3: 179, 5: 279, 10: 469, 20: 790 }),
+    30: Object.freeze({ 1: 249, 2: 419, 3: 569, 5: 869, 10: 1490, 20: 2490 }),
+    90: Object.freeze({ 1: 599, 2: 1019, 3: 1379, 5: 2090, 10: 3590, 20: 5990 }),
+    180: Object.freeze({ 1: 1090, 2: 1850, 3: 2490, 5: 3790, 10: 6490, 20: 10900 }),
+    365: Object.freeze({ 1: 1990, 2: 3390, 3: 4590, 5: 6990, 10: 11990, 20: 19900 }),
   });
 
 /** Сроки в том же порядке, что в таблице цен. 180 дней в старом селекте не было,
