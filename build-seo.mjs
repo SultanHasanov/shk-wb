@@ -266,6 +266,27 @@ export const PUBLIC_PAGES = {
     ],
   },
 
+  '/sravnenie': {
+    fallback: {
+      title: 'Программы для ПВЗ на 20% дешевле аналогов — ШК ВБ',
+      description:
+        '«Помощник ПВЗ» и «Печать ячеек» против аналогов: цены за каждый срок, функции тарифов и расчёт печати этикеток для пункта выдачи Wildberries.',
+    },
+    ogType: 'website',
+    image: OG_GENERATOR,
+    graph: [
+      {
+        '@type': 'WebPage',
+        '@id': `${ORIGIN}/sravnenie#page`,
+        url: `${ORIGIN}/sravnenie`,
+        name: 'Сравнение с аналогами',
+        description: 'Цены и функции «Помощника ПВЗ» и «Печати ячеек» в сравнении с аналогами.',
+        inLanguage: 'ru-RU',
+      },
+      breadcrumbs('/sravnenie', 'Сравнение с аналогами'),
+    ],
+  },
+
   '/contacts': {
     fallback: {
       title: 'Контакты и поддержка — ШК ВБ',

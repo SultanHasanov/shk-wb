@@ -61,6 +61,11 @@ describe('тарифы программы', () => {
       }
     }
   });
+  it('не обещает код клиента в Стандарте, но пускает в раздел по пакетам', () => {
+    const std = plans.publicPlans().plans.find(p => p.id === 'standard') as unknown as { features: string[] };
+    expect(std.features).not.toContain('code');
+    expect(plans.effectiveFeatures('standard', {}, false, 0)).toContain('code');
+  });
   it('оставляет купившим старый Стандарт его разделы', () => {
     expect(plans.effectiveFeatures('standard', {}, false, 0)).not.toContain('reviews');
     expect(plans.effectiveFeatures('standard', {}, false, 30)).toEqual(expect.arrayContaining(['reviews', 'expensive', 'telegram']));

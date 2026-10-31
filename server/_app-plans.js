@@ -12,9 +12,11 @@ const SALE_PLANS = Object.freeze(['standard', 'pro']);
 // Разделы программы по тарифам. Программа открывает раздел, только если его фича
 // есть в списке (список приходит в подписанной аренде, см. _app-update.js).
 const BASIC_FEATURES = Object.freeze(['code']);
-const STANDARD_FEATURES = Object.freeze([...BASIC_FEATURES, 'cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
+// Код клиента в Стандарт не входит (кодов в месяц 0), поэтому в списке разделов его нет.
+// Раздел при этом открыт на любом тарифе — коды берутся из пакетов, см. effectiveFeatures.
+const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
 const PRO_FEATURES = Object.freeze([
-  ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers',
+  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers',
 ]);
 // Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
 // узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
@@ -63,7 +65,7 @@ const PLANS = Object.freeze({
 const TERMS = Object.freeze({ 1: 0, 3: 22, 6: 28, 12: 35 });
 
 const FEATURE_TITLES = Object.freeze({
-  code: 'Подбор кода, QR и копирование',
+  code: 'Код клиента: QR и копирование',
   cells: 'Ячейки и карточка клиента',
   way: 'Товары «В пути»',
   search: 'Поиск по SID и телефону',
@@ -172,7 +174,8 @@ function effectiveFeatures(plan, addons, free, codesLimit = 0) {
   // зеркало в бесплатный режим не входит — только купленное (место в облаке)
   const mirror = mirrorLimit(plan, addons, false) > 0 ? ['mirror'] : [];
   if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
-  const base = isPlan(plan) ? [...PLANS[plan].features] : [];
+  // 'code' открыт на любом тарифе: подбор всё равно списывается из месячного лимита или пакетов.
+  const base = isPlan(plan) ? [...PLANS[plan].features, ...BASIC_FEATURES] : [];
   if (plan === 'standard' && Number(codesLimit) > 0) base.push(...LEGACY_STANDARD_EXTRA);
   for (const [id, info] of Object.entries(addons || {})) {
     if (addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) base.push(...ADDONS[id].features);

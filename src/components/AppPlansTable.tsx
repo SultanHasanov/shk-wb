@@ -54,10 +54,12 @@ function CompareLine({ plan, months }: { plan: AppPlan; months: number }) {
 /** Строка над карточками: зачем выбирать нас. */
 function VsLine({ plans }: { plans: AppPlans }) {
   const t = useT();
+  const lp = useLocalePath();
   if (!plans.plans.some(plan => plan.comparePrices?.['1'])) return null;
   return (
     <p className={s.vs}>
-      {t('На 20% дешевле аналогов — и больше функций в каждом тарифе', 'Аналогтардан 20% арзан — әр тарифте мүмкіндіктер көбірек')}
+      {t('На 20% дешевле аналогов — и больше функций в каждом тарифе', 'Аналогтардан 20% арзан — әр тарифте мүмкіндіктер көбірек')}{' '}
+      <Link to={lp('/sravnenie')}>{t('Подробное сравнение', 'Толық салыстыру')}</Link>
     </p>
   );
 }

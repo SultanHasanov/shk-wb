@@ -8,6 +8,7 @@ import { GeneratorPage } from '../pages/GeneratorPage';
 import { CellPrintPage } from '../pages/CellPrintPage';
 import { ProgramPage } from '../pages/ProgramPage';
 import { TarifyPage } from '../pages/TarifyPage';
+import { ComparePage } from '../pages/ComparePage';
 import { ReturnStickersPage } from '../pages/ReturnStickersPage';
 import { BoxCodesPage } from '../pages/BoxCodesPage';
 import { ContactsPage } from '../pages/ContactsPage';
@@ -37,6 +38,7 @@ const publicRoutes = (
     <Route path="cell-print" element={<CellPrintPage />} />
     <Route path="program" element={<ProgramPage />} />
     <Route path="tarify" element={<TarifyPage />} />
+    <Route path="sravnenie" element={<ComparePage />} />
     <Route path="vozvratnye-stikery-wb" element={<ReturnStickersPage />} />
     <Route path="qr-korobov-wb" element={<BoxCodesPage />} />
     <Route path="contacts" element={<ContactsPage />} />

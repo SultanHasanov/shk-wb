@@ -195,3 +195,8 @@ export function formatPerUnit(value: number): string {
 export const MIN_PER_UNIT = Math.min(
   ...Object.entries(PACKAGE_PRICES).map(([qty, total]) => total / Number(qty)),
 );
+
+/* ============ Аналог «Печати ячеек» для страницы сравнения ============
+   Платят за каждую этикетку: 10 000 — 400 ₽, 50 000 — 2 000 ₽ (публичная страница оплаты
+   на 31.10.2026). Цены аналога «Помощника» — в server/_app-plans.js (`compare`). */
+export const ANALOG_LABEL_PRICE = 0.04;

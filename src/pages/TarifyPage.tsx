@@ -126,6 +126,14 @@ export function TarifyPage() {
         )}
       >
         <AppPlansTable variant="full" />
+        <div className={s.ladderCta}>
+          <Link to={lp('/sravnenie')}>
+            <Button variant="secondary">
+              {t('Сравнить с аналогами', 'Аналогтармен салыстыру')}
+              <ArrowRight size={16} />
+            </Button>
+          </Link>
+        </div>
       </Section>
 
       {/* Матрица «Печати ячеек»: срок × число ПК. */}

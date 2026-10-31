@@ -1,0 +1,42 @@
+/* Таблицы сравнения: базовая .table не переносит строки (nowrap) и пишет заголовки строк
+   капсом — на телефоне видна была только первая колонка. Класс удвоен, чтобы перебить
+   .table th/td независимо от порядка подключения стилей. */
+.cmp.cmp th,
+.cmp.cmp td {
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.cmp.cmp .rowHead {
+  position: static;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-regular);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.note {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .cmp.cmp th,
+  .cmp.cmp td {
+    padding: var(--sp-2) var(--sp-2);
+    font-size: 12.5px;
+  }
+
+  .cmp.cmp .rowHead {
+    font-size: 12.5px;
+  }
+}
