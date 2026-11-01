@@ -1136,6 +1136,18 @@ function formatWbDate(value) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
+/**
+ * Время из goods отзыва WB: московское, но с ложной «Z» («2026-11-01T13:07:56Z» — выдача в 13:07 МСК,
+ * а не в 16:07). Показываем цифры как есть, без перевода пояса.
+ */
+function formatReviewGoodsTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return escapeHtml(String(value).slice(0, 19));
+  const zone = /(?:Z|[+-]00:?00)$/i.test(String(value).trim()) ? 'UTC' : 'Europe/Moscow';
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: zone, dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
 /** Только дата, без времени: «22 окт. 2026 г.» — в шапке отзыва. */
 function formatWbDay(value) {
   if (!value) return '—';
@@ -1300,9 +1312,8 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
       ? loadPickupEvents(from.id, connection, identifiers).then(events => ({ events })).catch(error => ({ error }))
       : { events: [] },
   ]);
-  // Источник правды — goods/list пункта: там ШК, ячейка и верное время. goods из отзыва — запасной вариант:
-  // ШК в них нет, а время WB отдаёт со сдвигом в будущее (01.11.2026: «взял 16:07» при 15:54 МСК),
-  // поэтому у них показываем только дату.
+  // Источник правды — goods/list пункта: там ШК, ячейка и верное время. goods из отзыва — запасной вариант
+  // (rid, shk_id, status, status_updated): время в них московское с ложной «Z» — см. formatReviewGoodsTime.
   const fromReview = !salesResult.events?.length && reviewEvents.length > 0;
   const pickupResult = fromReview ? { events: reviewEvents } : salesResult;
   const wanted = new Set(identifiers.map(String));
@@ -1332,15 +1343,14 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
     const recent = pickupResult.events.slice(0, 5).map((item, index) => {
       const returned = pickupAction(item.status) === 'returned';
       const label = returned ? '↩️ отказ' : '✅ взял';
-      const shk = item.shk_code || item.barcode || item.sticker_code;
-      const when = fromReview ? formatWbDay(item.status_updated) : formatWbDate(item.status_updated);
+      const shk = item.shk_code || item.barcode || item.sticker_code || item.shk_id;
+      const when = fromReview ? formatReviewGoodsTime(item.status_updated) : formatWbDate(item.status_updated);
       const parts = [`${index + 1}. ${label} · ${when}`];
       if (item.cell) parts.push(`яч. <code>${escapeHtml(item.cell)}</code>`);
       if (shk) parts.push(`ШК <code>${escapeHtml(shk)}</code>`);
       return parts.join(' · ');
     });
-    const note = fromReview ? '\n<i>Выдача уже выпала из текущего списка пункта — ШК и точное время WB по ней не отдаёт.</i>' : '';
-    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}${note}`;
+    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}`;
   }
   const phone = maskWbPhone(user?.phone ?? user?.mobile);
   const found = phone !== '—' || Boolean(!pickupResult.error && pickupResult.events.length);
@@ -2214,4 +2224,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

@@ -142,6 +142,12 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.reviewAuthorIds({ id: 'not-a-uuid', user_id: 0, user_sid: '0' })).toEqual([]);
   });
 
+  it('время из goods отзыва — московское с ложной Z, пояс не переводим', () => {
+    expect(bot.formatReviewGoodsTime('2026-11-01T13:07:56Z')).toMatch(/13:07/);
+    expect(bot.formatReviewGoodsTime('2026-11-01T13:07:56+03:00')).toMatch(/13:07/);
+    expect(bot.formatReviewGoodsTime('')).toBe('—');
+  });
+
   it('учитывает и выдачи, и отказы клиента', () => {
     const result = bot.findPickupEvents([
       { buyer: { user_sid: '5' }, status: 'GOODS_RECIEVED', status_updated: '2026-10-05T10:00:00+03:00' },
