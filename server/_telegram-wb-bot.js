@@ -1285,18 +1285,26 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
   const reviewEvents = (Array.isArray(review?.goods) ? review.goods : [])
     .filter(item => item?.status_updated)
     .sort((left, right) => new Date(right.status_updated || 0) - new Date(left.status_updated || 0));
-  const [users, pickupResult] = await Promise.all([
+  if (reviewEvents.length) {
+    // Формат goods внутри отзыва не задокументирован: пишем в журнал ключи и сырое время (без ПДн), чтобы сверить.
+    const sample = reviewEvents[0];
+    console.info('WB review goods shape', Object.keys(sample).join(','), JSON.stringify(sample.status_updated));
+  }
+  const [users, salesResult] = await Promise.all([
     // users-data отвечает 403 «недостаточно прав» аккаунтам без роли руководителя — телефон тогда берём из продаж.
     identifiers.length ? wbPvz.loadUsers(connection.session, identifiers).catch(error => {
       console.warn('WB users-data failed', error.status, error.message);
       return [];
     }) : [],
-    reviewEvents.length
-      ? { events: reviewEvents }
-      : identifiers.length
-        ? loadPickupEvents(from.id, connection, identifiers).then(events => ({ events })).catch(error => ({ error }))
-        : { events: [] },
+    identifiers.length
+      ? loadPickupEvents(from.id, connection, identifiers).then(events => ({ events })).catch(error => ({ error }))
+      : { events: [] },
   ]);
+  // Источник правды — goods/list пункта: там ШК, ячейка и верное время. goods из отзыва — запасной вариант:
+  // ШК в них нет, а время WB отдаёт со сдвигом в будущее (01.11.2026: «взял 16:07» при 15:54 МСК),
+  // поэтому у них показываем только дату.
+  const fromReview = !salesResult.events?.length && reviewEvents.length > 0;
+  const pickupResult = fromReview ? { events: reviewEvents } : salesResult;
   const wanted = new Set(identifiers.map(String));
   let user = users.find(item => wanted.has(String(item.id)) || wanted.has(String(item.user_sid)));
   if (!user && String(review?.user_name || '').trim()) user = { name: String(review.user_name).trim() };
@@ -1325,12 +1333,14 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
       const returned = pickupAction(item.status) === 'returned';
       const label = returned ? '↩️ отказ' : '✅ взял';
       const shk = item.shk_code || item.barcode || item.sticker_code;
-      const parts = [`${index + 1}. ${label} · ${formatWbDate(item.status_updated)}`];
+      const when = fromReview ? formatWbDay(item.status_updated) : formatWbDate(item.status_updated);
+      const parts = [`${index + 1}. ${label} · ${when}`];
       if (item.cell) parts.push(`яч. <code>${escapeHtml(item.cell)}</code>`);
       if (shk) parts.push(`ШК <code>${escapeHtml(shk)}</code>`);
       return parts.join(' · ');
     });
-    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}`;
+    const note = fromReview ? '\n<i>Выдача уже выпала из текущего списка пункта — ШК и точное время WB по ней не отдаёт.</i>' : '';
+    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}${note}`;
   }
   const phone = maskWbPhone(user?.phone ?? user?.mobile);
   const found = phone !== '—' || Boolean(!pickupResult.error && pickupResult.events.length);
