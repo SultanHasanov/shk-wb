@@ -10,7 +10,7 @@ const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENS
 const { buildClientQr } = require('./_wb-code');
 const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
-const { notifyAdminSpend } = require('./_admin-alerts');
+const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { isTechnicalTelegramUser } = require('./_telegram-account');
 const wbPvz = require('./_wb-pvz');
@@ -164,13 +164,56 @@ async function deleteWbConnection(telegramId) {
   await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
 }
 
-/** Сессия генератора исчезает, а эта запись остаётся для статистики и рассылок. */
-async function touchSubscriber(from, chatId) {
-  if (process.env.TELEGRAM_LOCAL_POLLING === '1') return;
-  if (!from?.id || !chatId) return;
-  await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
+// Новый подписчик: activated_at ставит база при первой вставке (в теле upsert его нет, поэтому он не
+// перезаписывается). Свежий activated_at — значит, человек пишет боту впервые. Окно с запасом на разницу
+// часов; повтор в пределах окна (второе сообщение того же новичка) отсекает память процесса.
+const NEW_SUBSCRIBER_WINDOW_MS = 2 * 60 * 1000;
+const announcedSubscribers = new Set();
+
+function isFreshSubscriber(row, telegramId, now = Date.now()) {
+  const activated = Date.parse(row?.activated_at || '');
+  if (!Number.isFinite(activated) || Math.abs(now - activated) > NEW_SUBSCRIBER_WINDOW_MS) return false;
+  const key = Number(telegramId);
+  if (announcedSubscribers.has(key)) return false;
+  if (announcedSubscribers.size > 5000) announcedSubscribers.clear();
+  announcedSubscribers.add(key);
+  return true;
+}
+
+/** Откуда пришёл новичок — по первому сообщению. Текст самого сообщения в уведомление не попадает. */
+function newUserSource(text) {
+  const payload = /^\/start(?:@\w+)?\s+([A-Za-z0-9_-]+)$/i.exec(String(text || '').trim())?.[1] || '';
+  const referral = REFERRAL_PAYLOAD.exec(payload);
+  if (referral) return { source: `по приглашению (код ${referral[1].toUpperCase()})`, referralCode: referral[1].toUpperCase() };
+  if (/^club_/.test(payload)) return { source: 'из «Клуба вопросов»' };
+  if (payload) return { source: `по ссылке со start=${payload}` };
+  if (/^\/start\b/i.test(String(text || '').trim())) return { source: 'сам, через /start' };
+  return { source: text ? 'сразу написал сообщение' : 'нажал кнопку или прислал фото' };
+}
+
+async function notifyNewBotUser(from, text) {
+  const { source, referralCode } = newUserSource(text);
+  let inviterUserId = null;
+  if (referralCode) {
+    const [owners, aliases] = await Promise.all([
+      supabaseFetch(`referral_accounts?referral_code=eq.${encodeURIComponent(referralCode)}&select=user_id&limit=1`).catch(() => []),
+      supabaseFetch(`referral_code_aliases?referral_code=eq.${encodeURIComponent(referralCode)}&select=user_id&limit=1`).catch(() => []),
+    ]);
+    inviterUserId = owners[0]?.user_id || aliases[0]?.user_id || null;
+  }
+  await notifyAdminNewUser({ from, source, inviterUserId });
+}
+
+/**
+ * Сессия генератора исчезает, а эта запись остаётся для статистики и рассылок.
+ * text — первое сообщение (для уведомления админу о новичке: откуда пришёл). Возвращает true для новичка.
+ */
+async function touchSubscriber(from, chatId, text = '') {
+  if (process.env.TELEGRAM_LOCAL_POLLING === '1') return false;
+  if (!from?.id || !chatId) return false;
+  const rows = await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
     method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify({
       telegram_user_id: Number(from.id),
       chat_id: Number(chatId),
@@ -181,6 +224,10 @@ async function touchSubscriber(from, chatId) {
       blocked_at: null,
     }),
   });
+  if (!isFreshSubscriber(Array.isArray(rows) ? rows[0] : null, from.id)) return false;
+  // Не задерживаем ответ человеку: уведомление уходит фоном, его ошибка боту не мешает.
+  notifyNewBotUser(from, text).catch(error => console.warn('Уведомление о новом пользователе', error?.message || error));
+  return true;
 }
 
 function choiceKeyboard(rows) { return { inline_keyboard: rows }; }
@@ -2206,7 +2253,7 @@ async function handleCallback(callback) {
 async function handleMessage(message) {
   const from = message.from, chatId = message.chat.id, text = String(message.text || '').trim();
   if (message.chat.type !== 'private') return sendMessage(chatId, 'Используйте личный чат с ботом.');
-  await touchSubscriber(from, chatId);
+  await touchSubscriber(from, chatId, text);
   const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
   if (startMatch) {
     await clearSession(from.id);
@@ -2349,4 +2396,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

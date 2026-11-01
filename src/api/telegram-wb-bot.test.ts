@@ -21,6 +21,8 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   findPickupEvents: (goods: Array<Record<string, unknown>>, userIds: number | number[]) => Array<Record<string, unknown>>;
   formatReviewGoodsTime: (value: string) => string;
   wizardView: (state: string, draft: Record<string, unknown>) => { text: string; rows: Array<Array<Record<string, any>>> };
+  newUserSource: (text: string) => { source: string; referralCode?: string };
+  isFreshSubscriber: (row: Record<string, unknown> | null, telegramId: number, now?: number) => boolean;
 };
 const generation = require('../../server/_sticker-generation.js') as {
   normalizePrefix: (value: unknown) => string;
@@ -56,6 +58,23 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.wizardView('await_code', { category: 'box', mode: 'custom' }).text).not.toContain('фото');
     const pick = bot.wizardView('await_code', { category: 'product', mode: 'custom', photoCodes: ['47671114039', '58899100266'] });
     expect(pick.rows.flat().map(button => button.callback_data)).toEqual(['gen:pick:47671114039', 'gen:pick:58899100266', 'gen:back', 'gen:cancel']);
+  });
+
+  it('для уведомления о новичке понимает, откуда он пришёл, и не пересказывает его сообщение', () => {
+    expect(bot.newUserSource('/start r_abc123')).toEqual({ source: 'по приглашению (код ABC123)', referralCode: 'ABC123' });
+    expect(bot.newUserSource('/start club_code').source).toBe('из «Клуба вопросов»');
+    expect(bot.newUserSource('/start').source).toBe('сам, через /start');
+    expect(bot.newUserSource('/start promo_vk').source).toBe('по ссылке со start=promo_vk');
+    expect(bot.newUserSource('мой телефон 79991234567').source).toBe('сразу написал сообщение');
+    expect(bot.newUserSource('').source).toBe('нажал кнопку или прислал фото');
+  });
+
+  it('считает новичком только свежую запись подписчика и уведомляет один раз', () => {
+    const now = Date.parse('2026-11-01T20:00:00Z');
+    expect(bot.isFreshSubscriber({ activated_at: '2026-10-01T10:00:00Z' }, 111, now)).toBe(false);
+    expect(bot.isFreshSubscriber({ activated_at: '2026-11-01T19:59:58Z' }, 222, now)).toBe(true);
+    expect(bot.isFreshSubscriber({ activated_at: '2026-11-01T19:59:59Z' }, 222, now)).toBe(false);
+    expect(bot.isFreshSubscriber(null, 333, now)).toBe(false);
   });
 
   it('на подтверждении показывает источник оплаты без цены на кнопке', () => {

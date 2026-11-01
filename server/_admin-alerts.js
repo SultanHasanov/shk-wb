@@ -1,8 +1,9 @@
-const { supabaseFetch } = require('./_supabase');
+const { supabaseFetch, supabaseFetchWithMeta } = require('./_supabase');
 const { sendMessage } = require('./_telegram-api');
 
 // Уведомления админу в Telegram о каждой оплате: заказы (ЮKassa и покупки с баланса) и списания
-// с баланса в боте («Код клиента», «Кто поставил оценку»). Кому — ADMIN_PAYMENT_TELEGRAM_IDS через запятую.
+// с баланса в боте («Код клиента», «Кто поставил оценку»), а также о новом пользователе бота.
+// Кому — ADMIN_PAYMENT_TELEGRAM_IDS через запятую.
 const DEFAULT_ADMIN_IDS = '439335621';
 
 const PRODUCT_TITLES = {
@@ -75,4 +76,18 @@ async function notifyAdminSpend({ userId, priceRub, title, balanceKopecks }) {
   await sendToAdmins(lines.join('\n'));
 }
 
-module.exports = { notifyAdminOrder, notifyAdminSpend, sendToAdmins };
+/** Новый человек написал боту впервые: кто, откуда пришёл, кто пригласил, сколько всего в боте. */
+async function notifyAdminNewUser({ from, source, inviterUserId }) {
+  const name = [from.first_name, from.last_name].filter(Boolean).join(' ').trim() || 'без имени';
+  const lines = [
+    '<b>👤 Новый пользователь бота</b>',
+    `<a href="tg://user?id=${Number(from.id)}">${escapeHtml(name)}</a>${from.username ? ` · @${escapeHtml(from.username)}` : ''} (${Number(from.id)})`,
+    `Откуда: ${escapeHtml(source)}`,
+  ];
+  if (inviterUserId) lines.push(`Пригласил: ${await payerLine(inviterUserId, null)}`);
+  const { count } = await supabaseFetchWithMeta('telegram_bot_subscribers?select=telegram_user_id&limit=1', { headers: { Range: '0-0' } }).catch(() => ({ count: null }));
+  if (count) lines.push(`<i>Всего в боте: ${count}</i>`);
+  await sendToAdmins(lines.join('\n'));
+}
+
+module.exports = { notifyAdminNewUser, notifyAdminOrder, notifyAdminSpend, sendToAdmins };
