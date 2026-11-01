@@ -16,7 +16,7 @@ const BASIC_FEATURES = Object.freeze(['code']);
 // Раздел при этом открыт на любом тарифе — коды берутся из пакетов, см. effectiveFeatures.
 const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
 const PRO_FEATURES = Object.freeze([
-  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers',
+  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video',
 ]);
 // Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
 // узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
@@ -80,6 +80,7 @@ const FEATURE_TITLES = Object.freeze({
   risky: 'Предупреждение о клиентах с частыми отказами',
   stickers: 'Печать стикеров товаров и коробок',
   staff: 'Сотрудники: график, зарплата, аванс, удержания WB',
+  video: 'Видео по ШК: архив камер Ivideon на момент приёмки',
   archive: 'Архив клиентов в облаке: на любом ПК и по всем пунктам',
 });
 
