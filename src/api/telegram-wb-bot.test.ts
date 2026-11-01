@@ -51,6 +51,13 @@ describe('Telegram sticker generator bot', () => {
     ]);
   });
 
+  it('в шаге «По номеру» предлагает фото, а несколько номеров с фото даёт выбрать кнопкой', () => {
+    expect(bot.wizardView('await_code', { category: 'product', mode: 'custom' }).text).toContain('пришлите фото');
+    expect(bot.wizardView('await_code', { category: 'box', mode: 'custom' }).text).not.toContain('фото');
+    const pick = bot.wizardView('await_code', { category: 'product', mode: 'custom', photoCodes: ['47671114039', '58899100266'] });
+    expect(pick.rows.flat().map(button => button.callback_data)).toEqual(['gen:pick:47671114039', 'gen:pick:58899100266', 'gen:back', 'gen:cancel']);
+  });
+
   it('на подтверждении показывает источник оплаты без цены на кнопке', () => {
     const packageView = bot.wizardView('confirm', {
       category: 'product', mode: 'custom', code: '12345678901', accessCode: '123456', packageRemaining: 9,

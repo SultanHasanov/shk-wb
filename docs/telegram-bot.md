@@ -27,7 +27,7 @@ Telegram → `tg-relay-three.vercel.app/webhook` → сервер — это н�
   Витрины `showFindCode`/`showHelperInfo`/`showCellPrintInfo`/`showSupport`, канал https://t.me/wbtools_ru в меню.
   Команды бота — `BOT_COMMANDS` (setMyCommands в `scripts/run-telegram-bot-local.cjs`; для боевого бота вызвать отдельно).
 - **Баланс** (`server/_wallet.js`, миграция `20261023_wallet.sql` ПРИМЕНЕНА): `wallet_accounts`/`wallet_ledger`, всё через
-  `wallet_move` с уникальным `event_key`. Пополнение = заказ `wallet_topup` (100/300/500/1000 или своя 100–50000 ₽, бонус +5% от
+  `wallet_move` с уникальным `event_key`. Пополнение = заказ `wallet_topup` (100/300/500/1000 или своя 20–50000 ₽ — `MIN_TOPUP`, бонус +5% от
   500, +10% от 1000; Mini App `/bot-checkout?kind=topup&amount=N`). Покупка с баланса = обычный заказ `amount=0, gross_amount=0,
   wallet_paid_kopecks=цена` → `wallet_pay_order` → штатный `completeOrder` → при ошибке `wallet_refund_order`
   (`payWithWallet`). Так реферальная комиссия и выручка считаются один раз — с пополнения. `notifyCompleted` молчит для таких заказов.
@@ -35,7 +35,7 @@ Telegram → `tg-relay-three.vercel.app/webhook` → сервер — это н�
   код (`renewal_target_key`). Магазин `shop:*` (подписка Помощника, ключ Печати ячеек новый/продление, пакет подборов WBPK) —
   цену считает `resolveShopItem` на сервере, кнопка оплаты `shop:pay:<nonce>:…` + claim в `telegram_generation_requests`.
   «Кто поставил оценку» = 25 ₽ с баланса (`bot_review_spend` переопределён, повтор того же автора бесплатный).
-  Не хватает денег → одна кнопка «💳 Пополнить на X ₽ и купить» (`topupAndBuyRow`, X = недостающее, мин. 25 ₽):
+  Не хватает денег → одна кнопка «💳 Пополнить на X ₽ и купить» (`topupAndBuyRow`, X = недостающее, мин. 20 ₽ — `MIN_TOPUP`):
   `/bot-checkout?kind=topup&amount=X&then=<gen|rv:ф:стр:№|shop:…>&m=<экран>` → `pricing_snapshot.wallet.then/message`
   (api/payments.js проверяет формат; переиспользование старого счёта для wallet_topup отключено) → после зачисления
   `notifyCompleted` вызывает `afterWalletTopup` (ленивый require бота) и покупка проходит сама.
@@ -51,5 +51,21 @@ Telegram → `tg-relay-three.vercel.app/webhook` → сервер — это н�
   Миграция `20261025_bot_referrals.sql` ПРИМЕНЕНА. Тексты бота — короткие (просьба пользователя: «коротко и понятно»).
 - `20261024_bot_session_states.sql` (ПРИМЕНЕНА): в проверку состояний сессии добавлены `await_access_code` (ввод кода
   доступа падал с 400 ещё до этих правок) и `await_topup_amount`.
+## ШК с фото (2026-11-01, НЕ ВЫЛОЖЕНО)
+- Человек присылает скриншот WB Point («Подмена», «Зависшие ШК», карточка ШК) или фото экрана WB-PVZ — бот
+  читает номер сам. Локально, без внешних сервисов: `server/_shk-vision.js` = `sharp` (серый, ширина 2000,
+  normalize) + `tesseract.js` (PSM 11, только цифры), до трёх проходов. Языковой файл —
+  `server/assets/tessdata/eng.traineddata.gz`, в интернет за ним не ходим. Распознавания по одному, таймаут 30 с,
+  воркер (~100–150 МБ) выгружается после 5 мин простоя. Занимает 1–2 с на фото.
+- Правило номера (`extractShkCodes`): 11 цифр подряд или «7 цифр + 4 цифры»; у WB-PVZ значок «копировать»
+  справа OCR читает как «0» → «4894976 81720» → берём первые 4. Баркод (13), ПВЗ (8), цены и даты не проходят.
+- Где работает: шаг мастера «По номеру» (1 номер → подтверждение, 2–5 → кнопки `gen:pick:<ШК>`) и фото вне мастера
+  (кнопка `gen:num:<ШК>` → сразу подтверждение). Голые 7–12 цифр текстом → выбор «стикер по ШК» / «QR клиента по ID».
+  Фото не чаще раза в 10 с на человека. Коробки (10 цифр) — только в мастере.
+- Скачивание: `downloadFile` в `server/_telegram-api.js`; на сервере через релей — новый маршрут
+  `GET <релей>/file?path=<file_path>` в `supabase/functions/tg-relay`. **Порядок выпуска: сначала задеплоить
+  релей и проверить `/file` (не 404), потом выкладывать сайт.**
+- Тесты: `src/api/shk-vision.test.ts` на пяти реальных примерах `src/test/fixtures/shk-*.jpg` (1280 px, как отдаёт Telegram).
+
 - Тестовый бот @wb_newtest_bot: `TELEGRAM_BOT_TOKEN=<токен> PUBLIC_APP_URL=https://shk-wb.ru node scripts/run-telegram-bot-local.cjs`
   (боевой Supabase). Вход через Mini App в тестовом боте не работает (initData подписан боевым ботом).

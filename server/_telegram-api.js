@@ -142,4 +142,28 @@ async function deleteMessage(chatId, messageId) {
   }
 }
 
-module.exports = { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest };
+/**
+ * Скачать файл из сообщения (фото, документ) по file_id. С VPS api.telegram.org недоступен —
+ * тогда и getFile, и сам файл идут через релей (GET <релей>/file?path=…, тот же Bearer-токен).
+ */
+async function downloadFile(fileId, { maxBytes = 20 * 1024 * 1024, timeoutMs = 20_000 } = {}) {
+  const file = await telegramRequest('getFile', { file_id: fileId });
+  const filePath = String(file?.file_path || '');
+  if (!filePath) throw new Error('Telegram не отдал путь к файлу');
+  if (Number(file.file_size || 0) > maxBytes) throw new Error('Файл слишком большой');
+  const token = botToken();
+  const relayBase = String(process.env.TELEGRAM_API_BASE || '').trim().replace(/\/$/, '');
+  const url = relayBase
+    ? `${relayBase}/file?path=${encodeURIComponent(filePath)}`
+    : `https://api.telegram.org/file/bot${token}/${filePath}`;
+  const response = await fetch(url, {
+    headers: relayBase ? { Authorization: `Bearer ${token}` } : {},
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`Telegram file: HTTP ${response.status}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxBytes) throw new Error('Файл слишком большой');
+  return buffer;
+}
+
+module.exports = { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest };

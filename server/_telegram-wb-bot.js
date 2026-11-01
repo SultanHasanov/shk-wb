@@ -2,9 +2,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { supabaseFetch } = require('./_supabase');
-const { answerCallbackQuery, deleteMessage, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
+const { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
+const shkVision = require('./_shk-vision');
 const { generateStickers, getAccessStatus, selectAccessCode } = require('./_sticker-generation');
-const { BATCH_QUANTITY, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
+const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
 const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
@@ -236,6 +237,7 @@ async function showMainMenu(from, chatId, messageId, { greet = false, invited = 
       '',
       'Что умеет бот:',
       '🏷 Стикеры и QR для коробок — читаются сканером WB',
+      '📷 Пришлите скриншот с номером ШК — сделаю стикер',
       '🔑 QR-код клиента',
       '⭐ Кто поставил оценку в отзывах ПВЗ',
       '',
@@ -255,18 +257,14 @@ function clientQrUrl(qrText) {
 
 async function showClientCode(chatId, messageId, from) {
   const [free, { price, club }] = await Promise.all([helperFreeText(), clientCodePrice(from?.id)]);
+  // Коротко: что прислать и сколько стоит; где взять ID — кнопками ниже.
   const text = [
     '<b>🔑 Код клиента</b>',
     ...(club ? [clubLine] : []),
-    `Отправьте <code>Код ID</code> — пришлю QR. За QR спишется <b>${wallet.formatRub(price)}</b> с баланса бота.`,
+    `Отправьте ID клиента, например <code>Код 191607973</code>, — пришлю QR за <b>${wallet.formatRub(price)}</b>.`,
     '',
-    '<b>Где взять ID (SID) клиента:</b>',
-    '• 🔎 прямо здесь в боте — по номеру телефона или ячейке;',
-    '• 🖥 в программе «Помощник ПВЗ» — в ячейке клиента или поиском по телефону.',
-    '',
-    `Для доступа к ячейкам в программе нужен тариф «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес${free ? ` (сейчас ${free})` : ''}.`,
-    '',
-    'Пример: <code>Код 191607973</code>',
+    'ID найдёте здесь в боте по ячейке или телефону, или в программе «Помощник ПВЗ»',
+    `(тариф «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес${free ? `, сейчас ${free}` : ''}).`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     [{ text: '🔎 Найти ID в боте', callback_data: 'code:find' }],
@@ -365,7 +363,7 @@ const reviewPrice = telegramId => clubPrice(telegramId, REVIEW_PRICE);
 
 const clubLine = '🎁 У вас скидка 20% как у участника клуба.';
 
-/** «Код <SID>» → списать 50 ₽ и прислать только QR-код. */
+/** «Код <SID>» → списать цену QR (CLIENT_CODE_PRICE, со скидкой клуба меньше) и прислать только QR-код. */
 async function handleClientCode(from, chatId, sid) {
   const { qrText: freeQr } = buildClientQr(sid);
   if (clientCodeFreeFor(from.id)) {
@@ -605,14 +603,23 @@ function wizardView(state, draft) {
     ] };
   }
   if (state === 'await_quantity') {
-    return { text: `${trail}${error}<b>Пачка содержит ровно 50 кодов</b>\nСтоимость — 20 ₽, результат придёт одним PDF-файлом.`, rows: [
+    return { text: `${trail}${error}<b>Пачка содержит ровно 50 кодов</b>\nСтоимость — ${wallet.formatRub(GENERATION_PRICES.batch / 100)}, результат придёт одним PDF-файлом.`, rows: [
       [{ text: 'Продолжить — 50 шт.', callback_data: `gen:qty:${BATCH_QUANTITY}` }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
   if (state === 'await_code') {
     const length = draft.category === 'box' ? 10 : 11;
-    return { text: `${trail}${error}<b>Отправьте номер сообщением</b>\n${draft.category === 'box' ? 'Номер коробки' : 'ШК'} — ровно ${length} цифр.`, rows: [[GEN_BACK, GEN_CANCEL]] };
+    // С фото распознано несколько номеров — выбрать кнопкой (или прислать номер цифрами).
+    if (Array.isArray(draft.photoCodes) && draft.photoCodes.length) {
+      return { text: `${trail}${error}<b>На фото несколько номеров — какой нужен?</b>\nИли отправьте номер цифрами.`, rows: [
+        ...draft.photoCodes.map(code => [{ text: code, callback_data: `gen:pick:${code}` }]),
+        [GEN_BACK, GEN_CANCEL],
+      ] };
+    }
+    const what = draft.category === 'box' ? 'Номер коробки' : 'ШК';
+    const photoHint = draft.category === 'box' ? '' : '\n📷 Или пришлите фото/скриншот экрана с номером — прочитаю сам.';
+    return { text: `${trail}${error}<b>Отправьте номер сообщением</b>\n${what} — ровно ${length} цифр.${photoHint}`, rows: [[GEN_BACK, GEN_CANCEL]] };
   }
   // state === 'confirm'
   if (draft.unlimited) {
@@ -654,14 +661,19 @@ async function wizardBack(from, chatId, session, messageId) {
   const draft = session.draft || {};
   const state = session.state;
   if (state === 'choose_mode') { delete draft.category; return renderWizard(from, chatId, 'choose_kind', draft, messageId); }
+  // Выбор из нескольких номеров с фото → «Назад» возвращает к вводу номера.
+  if (state === 'await_code' && draft.photoCodes) {
+    delete draft.photoCodes;
+    return renderWizard(from, chatId, 'await_code', draft, messageId);
+  }
   if (state === 'await_quantity' || state === 'await_code') {
-    delete draft.mode; delete draft.quantity; delete draft.code; delete draft.prefix;
+    delete draft.mode; delete draft.quantity; delete draft.code; delete draft.prefix; delete draft.photoCodes;
     return renderWizard(from, chatId, 'choose_mode', draft, messageId);
   }
   if (state === 'confirm') {
     delete draft.accessCode; delete draft.packageRemaining; delete draft.walletCost; delete draft.balanceKopecks; delete draft.unlimited;
     if (draft.mode === 'range') { delete draft.mode; delete draft.quantity; return renderWizard(from, chatId, 'choose_mode', draft, messageId); }
-    delete draft.code;
+    delete draft.code; delete draft.photoCodes;
     return renderWizard(from, chatId, 'await_code', draft, messageId);
   }
   return renderWizard(from, chatId, 'choose_kind', draft, messageId);
@@ -805,7 +817,9 @@ async function requestConfirmation(from, chatId, draft, messageId) {
   const discounts = await supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(draft.userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []);
   const discounted = discounts.length > 0;
   draft.discountAvailable = discounted;
-  draft.walletCost = draft.mode === 'range' ? (discounted ? 16 : 20) : (discounted ? 6 : 7.5);
+  // Цены в копейках — те же, что в SQL reserve_sticker_generation (менять вместе).
+  const prices = discounted ? GENERATION_DISCOUNT_PRICES : GENERATION_PRICES;
+  draft.walletCost = (draft.mode === 'range' ? prices.batch : prices.custom) / 100;
   draft.balanceKopecks = await wallet.getBalanceKopecks(draft.userId);
   await renderWizard(from, chatId, 'confirm', draft, messageId);
 }
@@ -1012,6 +1026,96 @@ async function startForCategory(from, chatId, category) {
   await renderWizard(from, chatId, 'choose_mode', { userId, category, nonce: wizardNonce() });
 }
 
+/** Стикер по уже известному номеру (с фото или из сообщения): сразу на подтверждение. */
+async function startWithCode(from, chatId, code, messageId) {
+  const userId = await findUser(from.id);
+  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы сделать стикер, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  await requestConfirmation(from, chatId, { userId, category: 'product', mode: 'custom', code, nonce: wizardNonce() }, messageId);
+}
+
+// ── ШК с фото: скриншот WB Point или фото экрана WB-PVZ (распознавание — server/_shk-vision.js) ──
+const PHOTO_COOLDOWN_MS = 10_000;
+const lastPhotoAt = new Map();
+
+/** Не чаще одного фото в 10 с: OCR грузит сервер, а серия фото подряд — обычно случайность. */
+function photoTooOften(telegramId) {
+  const now = Date.now(), key = Number(telegramId);
+  if (now - (lastPhotoAt.get(key) || 0) < PHOTO_COOLDOWN_MS) return true;
+  if (lastPhotoAt.size > 5000) lastPhotoAt.clear();
+  lastPhotoAt.set(key, now);
+  return false;
+}
+
+/** Номера с картинки; null — не удалось скачать или распознать (это не то же, что «номера нет»). */
+async function shkFromImage(image, length) {
+  try {
+    const buffer = await downloadFile(image.fileId, { maxBytes: shkVision.MAX_IMAGE_BYTES });
+    return await shkVision.recognizeShk(buffer, { length });
+  } catch (error) {
+    console.warn('ШК с фото: не распознано', error?.message || error);
+    return null;
+  }
+}
+
+function photoFailText(codes, length) {
+  return codes
+    ? `Не нашёл на фото номер из ${length} цифр. Пришлите номер цифрами или более чёткий снимок, где номер виден целиком.`
+    : 'Не получилось прочитать фото. Пришлите номер цифрами или другой снимок.';
+}
+
+/** Фото в шаге «По номеру»: один номер — сразу подтверждение, несколько — выбор кнопкой. */
+async function acceptWizardPhoto(from, chatId, draft, message, image) {
+  await deleteMessage(chatId, message.message_id).catch(() => {});
+  const length = draft.category === 'box' ? 10 : 11;
+  delete draft.photoCodes;
+  if (photoTooOften(from.id)) { draft.error = 'Предыдущее фото ещё читается — подождите несколько секунд.'; return renderWizard(from, chatId, 'await_code', draft); }
+  draft.msgId = await showScreen(chatId, draft.msgId, `${wizardTrail(draft)}🔍 Читаю номер с фото…`);
+  const codes = await shkFromImage(image, length);
+  if (!codes?.length) { draft.error = photoFailText(codes, length); return renderWizard(from, chatId, 'await_code', draft); }
+  if (codes.length > 1) { draft.photoCodes = codes; return renderWizard(from, chatId, 'await_code', draft); }
+  draft.code = codes[0];
+  return requestConfirmation(from, chatId, draft);
+}
+
+/** Фото вне мастера: нашли ШК — предлагаем стикер по нему. */
+async function acceptLoosePhoto(from, chatId, image) {
+  if (photoTooOften(from.id)) return;
+  const status = await sendMessage(chatId, '🔍 Читаю номер ШК с фото…');
+  const codes = await shkFromImage(image, 11);
+  if (!codes?.length) {
+    await showScreen(chatId, status?.message_id, photoFailText(codes, 11), { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    return;
+  }
+  const text = codes.length === 1
+    ? `Нашёл ШК <code>${codes[0]}</code>. Сделать стикер?`
+    : '<b>На фото несколько номеров ШК</b>\nДля какого сделать стикер?';
+  const rows = codes.map(code => [{ text: `🏷 Стикер ${code}`, callback_data: `gen:num:${code}` }]);
+  rows.push(MENU_ROW);
+  await showScreen(chatId, status?.message_id, text, { reply_markup: choiceKeyboard(rows) });
+}
+
+/** Куда направить фото с учётом того, какой ввод сейчас ждёт бот. */
+async function handlePhoto(from, chatId, message, image, session) {
+  if (session?.state === 'await_code') return acceptWizardPhoto(from, chatId, session.draft || {}, message, image);
+  if (session?.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
+  const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения', await_client_query: 'номер ячейки или телефон', await_quantity: 'количество' }[session?.state];
+  const wb = waiting ? null : await getWbConnection(from.id);
+  const wbWaiting = wb?.state === 'await_phone' ? 'номер телефона сотрудника' : wb?.state === 'await_code' ? 'код из SMS WB' : null;
+  if (waiting || wbWaiting) return sendMessage(chatId, `Сейчас жду ${waiting || wbWaiting} цифрами — фото здесь не подойдёт. /cancel — отменить.`);
+  return acceptLoosePhoto(from, chatId, image);
+}
+
+/** Голый номер без команды: 11 цифр — может быть ШК; 7–12 цифр — ID клиента из программы. */
+async function offerForNumber(from, chatId, digits) {
+  const free = clientCodeFreeFor(from.id);
+  const { price } = free ? { price: 0 } : await clientCodePrice(from.id);
+  const rows = [];
+  if (digits.length === 11) rows.push([{ text: `🏷 Стикер по ШК ${digits}`, callback_data: `gen:num:${digits}` }]);
+  rows.push([{ text: `🔑 QR клиента по ID — ${free ? 'бесплатно' : wallet.formatRub(price)}`, callback_data: `code:qr:${digits}` }]);
+  rows.push(MENU_ROW);
+  await sendMessage(chatId, `Что сделать с номером <code>${digits}</code>?`, { reply_markup: choiceKeyboard(rows) });
+}
+
 /** Баланс в рублях. */
 async function walletRub(userId) {
   return (await wallet.getBalanceKopecks(userId)) / 100;
@@ -1075,7 +1179,8 @@ async function showHelp(chatId, messageId) {
   await showScreen(chatId, messageId, [
     '<b>❓ Как пользоваться</b>',
     '🏷 Стикеры и QR — выберите тип и количество, придёт PDF.',
-    '🔑 Код клиента — отправьте <code>Код ID</code>, придёт QR. ID можно найти в боте по ячейке или телефону.',
+    '📷 ШК можно не вводить: пришлите скриншот или фото экрана с номером — бот прочитает его сам.',
+    '🔑 Код клиента — отправьте <code>Код ID</code>, придёт QR. ID можно найти в боте по ячейке или телефону (нужен вход в кабинет WB по SMS).',
     '⭐ Отзывы — войдите в кабинет WB по SMS, затем «Кто поставил оценку».',
     '💰 Оплата — с баланса: «👤 Профиль» → «Пополнить».',
     '/cancel — отменить текущее действие.',
@@ -2012,6 +2117,9 @@ async function handleCallback(callback) {
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
   if (authorMatch) { await answerCallbackQuery(callback.id); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
+  // Стикер по номеру, найденному на фото или присланному цифрами, — без шагов мастера.
+  const numMatch = data.match(/^gen:num:(\d{11})$/);
+  if (numMatch) { await answerCallbackQuery(callback.id); await startWithCode(from, chatId, numMatch[1], messageId); return; }
   if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
   if (data === 'gen:cancel') {
     await answerCallbackQuery(callback.id); await clearSession(from.id);
@@ -2084,6 +2192,13 @@ async function handleCallback(callback) {
     await answerCallbackQuery(callback.id);
     draft.quantity = quantity; await requestConfirmation(from, chatId, draft, messageId); return;
   }
+  const pickMatch = data.match(/^gen:pick:(\d{10,11})$/);
+  if (pickMatch && session.state === 'await_code' && Array.isArray(draft.photoCodes) && draft.photoCodes.includes(pickMatch[1])) {
+    await answerCallbackQuery(callback.id);
+    draft.code = pickMatch[1]; delete draft.photoCodes;
+    await requestConfirmation(from, chatId, draft, messageId);
+    return;
+  }
   if (data === 'gen:confirm' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await confirmGeneration(callback, session); return; }
   await answerCallbackQuery(callback.id, 'Кнопка больше неактуальна');
 }
@@ -2135,6 +2250,9 @@ async function handleMessage(message) {
   // («пришлите телефон») перехватывал бы, например, количество стикеров или ШК из 11 цифр.
   const session = await getSession(from.id);
   const draft = session?.draft || {};
+  // Фото или скриншот с номером ШК — вместо ручного ввода.
+  const image = shkVision.imageOf(message);
+  if (image) return handlePhoto(from, chatId, message, image, session);
   if (session?.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
   if (session?.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
   if (session?.state === 'await_client_query') return runClientSearch(from, chatId, text);
@@ -2189,6 +2307,11 @@ async function handleMessage(message) {
     }
     return;
   }
+  // Голые цифры (скопировали ID клиента или ШК) — предлагаем действие, а не молча открываем меню.
+  const bareNumber = text.replace(/\s+/g, '');
+  if (/^\d{7,12}$/.test(bareNumber) && !['choose_kind', 'choose_mode', 'confirm', 'generating'].includes(session?.state)) {
+    return offerForNumber(from, chatId, bareNumber);
+  }
   if (!session) return showMainMenu(from, chatId);
   // Шаг мастера ждёт нажатия кнопки, а пришёл текст — подсказываем в том же экране.
   if (['choose_kind', 'choose_mode', 'confirm'].includes(session.state) && draft.msgId) {
@@ -2217,9 +2340,11 @@ async function handleTelegramUpdate(req, res) {
     if (update.callback_query) await handleCallback(update.callback_query);
     else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
   } catch (error) {
-    console.error('Telegram generator bot failed', error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
+    const incident = crypto.randomBytes(3).toString('hex');
+    console.error(`Telegram generator bot failed [${incident}]`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-    if (chatId) await sendMessage(chatId, 'Произошла внутренняя ошибка. Попробуйте позже.', { reply_markup: MENU_KEYBOARD }).catch(() => {});
+    if (chatId) await sendMessage(chatId, `Произошла внутренняя ошибка. Попробуйте позже.\nКод для поддержки: <code>${incident}</code>`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
   }
   return res.status(200).json({ ok: true });
 }
