@@ -48,3 +48,4 @@ __pycache__/
 /_work-admin-pvz/
 /supabase/.temp/
 /Ожидание ответов на форму.zip
+.legacy-conversion-sent.json
