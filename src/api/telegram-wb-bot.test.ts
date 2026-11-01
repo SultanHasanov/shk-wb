@@ -19,6 +19,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   reviewText: (review: Record<string, unknown>, position: number, total: number) => string;
   reviewAuthorIds: (review: Record<string, unknown>) => number[];
   findPickupEvents: (goods: Array<Record<string, unknown>>, userIds: number | number[]) => Array<Record<string, unknown>>;
+  formatReviewGoodsTime: (value: string) => string;
   wizardView: (state: string, draft: Record<string, unknown>) => { text: string; rows: Array<Array<Record<string, any>>> };
 };
 const generation = require('../../server/_sticker-generation.js') as {
