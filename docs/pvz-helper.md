@@ -534,8 +534,9 @@ HAR сайта my-pvz с моментом продления, чтобы уви�
   `src-tauri/src-tauri/target-release2` (CARGO_TARGET_DIR относительно src-tauri).
 - Проверено: `/api/app/update?current=1.8.2` → 1.8.3, `/dl/pvz-helper-1.8.3-setup.exe` → 200.
 
-## 1.9.0 (2026-11-01, код написан, НЕ выложено): «Сотрудники» — учёт зарплаты, «Стикеры» по прототипу, замки тарифов
-Прототип: https://claude.ai/artifact/XfDrTZQ813QPv3zfde2BuE. Версия в tauri.conf.json ещё 1.8.3 — поднять при выпуске.
+## 1.9.0 (2026-11-01, ВЫЛОЖЕНО: сайт 20261101-180919 (коммит b94f4c22), программа 1.9.0 фоновым обновлением): «Сотрудники» — учёт зарплаты, «Стикеры», замки тарифов
+Прототип: https://claude.ai/artifact/XfDrTZQ813QPv3zfde2BuE. latest.json: auto:true, mandatory:false; бэкап манифеста latest.json.bak-1793546227;
+SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b170224b8c30f2fa515f. Проверено: /api/app/plans — video только у pro; /api/app/update → 1.9.0; /dl/pvz-helper-1.9.0-setup.exe → 200.
 - **Из WB в «Сотрудниках» ничего не подгружается.** Телефон, SID, принятые ШК и удержания WB вводятся вручную
   (решение владельца). Вход в WB, wb_penalties/wb_acceptance/wb_managers/staff_find_sid из раздела убраны (команды в Rust
   остались, UI их не зовёт). Выдачи за день в шапке графика — из локальной базы WB на ПК, не из сети.
