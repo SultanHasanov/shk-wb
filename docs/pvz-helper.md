@@ -40,6 +40,9 @@
   услуга `ADDONS.archive` 590 ₽/6 мес, 990 ₽/12 мес, `minPlan: standard`; `effectiveFeatures(plan, addons, free)`.
 - **Тарифы с 31.10.2026 (под аналог WBCash Omni, −20%)**: в продаже два — `SALE_PLANS = ['standard','pro']`.
   Стандарт 239 ₽ (0 кодов, разделы как у Omni), Про 399 ₽ (10 кодов, 50 стикеров/мес, всё остальное).
+  **С 02.11.2026 «Про» включает «Загрузку с другого ПК» для своих пунктов** (`PLANS.pro.mirror = 2`, `mirrorLimit` считает тариф +
+  пакеты; `mirror` в PRO_FEATURES и FEATURE_TITLES; бесплатный режим загрузку не даёт). На «Стандарте» — по-прежнему пакет mirror_1/3.
+  ВЫЛОЖЕНО 02.11.2026 (релиз 20261102-163823-41fb26e). Повод: владелец с «Про» на 4 ПК не мог загрузить пункт домой.
   `TERMS 3:22 6:28 12:35`; `compare` = цена аналога → `publicPlans().plans[].comparePrices`, сайт и программа
   показывают её зачёркнутой. «Базовый» не продаётся (payments/бот проверяют `isSalePlan`), но остаётся в `PLANS`
   для старых подписок и выдачи из админки. **Старый Стандарт** (снимок `codes_limit > 0`) сохраняет
@@ -563,10 +566,31 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 в программе берёт цены из публичного `/api/app/plans` и показывает полную. TODO в программе: читать `clubDiscountPercent`
 из `/api/app/me` и для `pro` показывать `round(price * (100 - pct) / 100)` с пометкой «−20% участнику клуба».
 
-## Роли компьютеров: «мой» и «рабочий» (2026-11-02, ПРОТОТИП, код НЕ написан)
+## Роли компьютеров: владельца и сотрудника (2026-11-02, СЕРВЕР ВЫЛОЖЕН: миграция применена, релиз 20261102-163823-41fb26e; программа 1.10.0 НЕ выпущена)
 Прототип профиля (владелец + рабочий ПК + диалоги): https://claude.ai/artifact/GuAGnoZb5SwVin3dBknv6d.
 План: `~/.claude/plans/proud-toasting-gadget.md`.
 
+**Что сделано (02.11, сервер выложен, программа 1.10.0 собрана и НЕ выпущена):**
+- Миграция `supabase/migrations/20261107_app_device_role.sql` (`app_devices.role text check (owner|work)`, NULL = не назначена) применена 02.11 ~19:30 МСК.
+  Сайт выложен через GitHub Actions (push в main, run 41483089754, релиз 20261102-163823-41fb26e): ручной `deploy.sh` дважды
+  падал на scp — с этого ПК к серверу теряются SYN (2 из 3 соединений на 22 и 443 не устанавливаются, сервер при этом пуст),
+  другие хосты открываются мгновенно. Проверено: `/api/app/plans` у Про есть `mirror`, `/api/app/lease` → 400 DEVICE_REQUIRED,
+  `PATCH /api/app/devices/:id {role}` → 401 (маршрут есть).
+- Сервер: `_app-permissions.js` (`ROLES`, `WORK_DENIED` = шаблон «Сотрудник пункта», `roleOf/isWork`), `_app-account.js`
+  (`assignInitialRole`: новый ПК → work + WORK_DENIED, первый ПК пустого аккаунта → owner; `setDeviceRole`; `role` в
+  `requireDevice/listDevices/leaseRights`), `api/app.js`: код `WORK_PC` (403) на relay-peers/ask/get/ack, devices DELETE,
+  PATCH name чужого, password-change, logout-others, point DELETE, point-purge, pay; `me` отдаёт work-ПК только его самого;
+  `site-link` без автовхода; `PATCH {role, password?, denied?}` (кабинет без пароля; из программы owner — с паролем, если
+  меняет ПК сотрудника; work — только с ПК владельца и не себе); `PATCH {denied}` можно и с ПК владельца (не себе).
+  Тесты `src/api/app-access.test.ts` (+9). Кабинет: роль и кнопка смены в списке ПК на странице подписки.
+- Программа (`_local-only/pvz-tauri`, версия 1.10.0): `lease.rs` (`role()`, `is_work()`, `require_owner_pc()`, `role` в rights),
+  команды `device_set_role`, `device_set_access`; `relay_peers/relay_download/revoke_device/point_revoke/password_change/logout_others`
+  требуют ПК владельца; `relay::refresh_loop` молчит на work. Фронт: `lib/permissions.ts` (зеркало справочника),
+  `components/RoleDialogs.tsx` (владелец с паролем, сотрудник с шаблоном, «Что открыто сотруднику»), `components/LoadFromPc.tsx`
+  переписан по прототипу (группировка по пунктам, метки «Ваш»/чип доступа/«Чей это?», «Копия здесь» под ПК пункта, меню «···»),
+  `Account.tsx` → на work-ПК только `WorkPassport`; store: `pcRole`, `isWorkPc`. Старый сервер без `role` → все ПК «без роли».
+  Отладочная сборка `target-local/debug` собрана и запускалась. Выпуск 1.10.0: подписанная сборка + latest.json (см. «Как выпустить»);
+  позже `PVZ_APP_MIN_VERSION=1.10.0` (старые версии роль не понимают: work-ПК на 1.9 видит список ПК, но сервер уже откажет в загрузке).
 **Как сейчас (разведка 02.11):** понятия роли нет ни на сервере, ни в программе. Все ПК аккаунта равны; «владелец» =
 запрос без `X-Device-Id` (кабинет). Единственное различие — есть ли на ПК база WB (`points::local()`). Новый ПК
 получает `denied={}` (всё открыто): может качать базы всех пунктов (`relay-ask` ограничен только услугой `mirror`
@@ -594,3 +618,12 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 «Этот компьютер» (пункт, база WB, что закрыто, «Это мой компьютер», «Выйти»). Выпуск — по железному правилу:
 миграция → сайт из main → curl → программа; старые версии программы роль не понимают, поэтому после
 внедрения поднять `PVZ_APP_MIN_VERSION`.
+
+## Стикеры на NIIMBOT (2026-11-02, код в программе 1.10.0, НЕ выпущено)
+Вкладка «Принтер» раздела «Стикеры»: переключатель «Принтер Windows / NIIMBOT по Bluetooth» как в «Печати ячеек».
+`src-tauri/src/niimbot.rs` — копия модуля «Печати ячеек» 2.1.2 (btleplug 0.11 + futures, `winprint::Bitmap`),
+настройки `config.json → stickers`: `mode`, `niimbot_address`, `niimbot_name`, `density` (1–5). Команды
+`stickers_print_thermal(urls, settings, copies)` и `stickers_print_test(png, settings)` берут цель из настроек
+(`Target`: NIIMBOT печатает страницы по одной, Windows — одним заданием), `stickers_find_niimbot` — поиск ~6 с.
+Фронт `Stickers.tsx`: `hasPrinter/printerLabel`, поиск/выбор принтера, насыщенность, подсказка про ширину B21 48 мм.
+Вживую с принтером НЕ проверено (нет NIIMBOT под рукой) — протокол тот же, что в «Печати ячеек».
