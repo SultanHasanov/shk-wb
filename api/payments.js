@@ -15,6 +15,7 @@ const {
 } = require('../server/_payments');
 const { topupBonus, validTopup } = require('../server/_wallet');
 const { ADDONS, addonSnapshot, isSalePlan, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
+const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubUserDiscount } = require('../server/_club');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
@@ -372,6 +373,12 @@ module.exports = async function handler(req, res) {
                 guestGenerationMode,
               }
             : await pricing(stickerPacks);
+      // Тариф «Про» участнику «Клуба вопросов» — минус 20% поверх скидки за срок (server/_club.js:
+      // привязанный Telegram аккаунта + активная подписка на клуб). Снимок calculated.app не трогаем —
+      // из него SQL берёт лимиты и monthly_price, а не сумму. Кабинет считает ту же цену по account.clubDiscountPercent.
+      if (productKind === 'app_subscription' && appPlan === 'pro' && await clubUserDiscount(user.id)) {
+        calculated = { ...calculated, club_discount_percent: CLUB_DISCOUNT_PERCENT, total: applyClubDiscount(calculated.total) };
+      }
       if (cellKinds.includes(productKind) && promoCode) {
         const scope =
           productKind === 'cell_print_program'

@@ -63,6 +63,8 @@ async function notifyAdminOrder(order) {
     if (credited && credited !== paidRub) lines.push(`Зачислено ${rub(credited)} (с бонусом)`);
   }
   if (order.promo_code) lines.push(`Промокод: ${escapeHtml(order.promo_code)}`);
+  const clubPercent = Number(order.pricing_snapshot?.club_discount_percent || 0);
+  if (clubPercent > 0) lines.push(`Скидка клуба ${clubPercent}%`);
   lines.push(`Кто: ${await payerLine(order.user_id, order.email)}`);
   lines.push(`<i>Заказ ${String(order.id).slice(0, 8)}</i>`);
   await sendToAdmins(lines.join('\n'));

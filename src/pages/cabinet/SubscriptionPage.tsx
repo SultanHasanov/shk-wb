@@ -16,6 +16,13 @@ import s from './SubscriptionPage.module.css';
 
 const RANK: Record<AppPlanId, number> = { basic: 0, standard: 1, pro: 2 };
 
+/** Цена тарифа для этого аккаунта: участнику клуба «Про» дешевле на clubDiscountPercent (так же считает api/payments.js). */
+function planPriceFor(plan: AppPlan, months: number, account: AppAccount): { price: number; base: number; clubPercent: number } {
+  const base = plan.prices[String(months)];
+  const clubPercent = plan.id === 'pro' ? Number(account.clubDiscountPercent || 0) : 0;
+  return { price: clubPercent > 0 ? Math.round((base * (100 - clubPercent)) / 100) : base, base, clubPercent };
+}
+
 function useDate() {
   const locale = useLocale();
   return (iso: string) => new Date(iso).toLocaleDateString(intlLocale(locale), { day: 'numeric', month: 'long', year: 'numeric' });
@@ -38,7 +45,7 @@ function CheckoutModal({ checkout, account, availableKopecks, onClose }: { check
   const [useBalance, setUseBalance] = useState(false);
   const plan = checkout.plan;
   const addon = checkout.addon;
-  const total = (plan ?? addon)!.prices[String(checkout.months)];
+  const total = plan ? planPriceFor(plan, checkout.months, account).price : addon!.prices[String(checkout.months)];
   const totalKopecks = Math.round(total * 100);
   const appliedKopecks = useBalance ? Math.min(totalKopecks, availableKopecks) : 0;
   const payable = (totalKopecks - appliedKopecks) / 100;
@@ -357,7 +364,7 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
       </div>
       <div className={s.plans}>
         {plans.plans.map(plan => {
-          const price = plan.prices[String(months)];
+          const { price, base, clubPercent } = planPriceFor(plan, months, account);
           const compare = plan.comparePrices?.[String(months)] ?? 0;
           const isCurrent = current === plan.id;
           const action = !current ? t('Оформить', 'Рәсімдеу') : isCurrent ? t('Продлить', 'Ұзарту') : RANK[plan.id] > RANK[current] ? t('Перейти', 'Ауысу') : t('Перейти после окончания', 'Аяқталғаннан кейін ауысу');
@@ -373,6 +380,12 @@ function PlanCards({ plans, account, onChoose }: { plans: AppPlans; account: App
                 <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
                   {months > 1 ? t(`за ${monthsWord(months, t)} · ${formatTotal(Math.round(price / months))} в месяц`, `${monthsWord(months, t)} · айына ${formatTotal(Math.round(price / months))}`) : t('в месяц', 'айына')}
                 </div>
+                {clubPercent > 0 && (
+                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
+                    <s>{formatTotal(base)}</s> ·{' '}
+                    <strong style={{ color: 'var(--success)' }}>−{clubPercent}% {t('участнику клуба', 'клуб мүшесіне')}</strong>
+                  </div>
+                )}
                 {compare > price && (
                   <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>
                     <s>{formatTotal(compare)}</s> {t('у аналогов', 'аналогтарда')} ·{' '}

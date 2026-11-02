@@ -354,55 +354,11 @@ function clientCodeFreeFor(telegramId) {
   return Boolean(unlimitedName(telegramId)) || envIdList('CLIENT_CODE_FREE_TELEGRAM_IDS').includes(String(telegramId));
 }
 
-// ── Скидка 20% участникам «Клуба вопросов» (бот @zara34_help_bot, проект zara-bot) ──
-// Человек пришёл по кнопке из группы клуба (/start club_code | club_reviews) → club_ref_at в telegram_bot_subscribers.
-// Скидка — 30 дней после такого перехода и только при активной подписке на клуб. Подписку проверяем фоном
-// у zara-bot (GET ZARA_CLUB_CHECK_URL?tg=<id>, заголовок x-club-secret), человеку ничего подтверждать не нужно.
-// Только «Код клиента» и «Кто поставил оценку»; ШК и магазин — без скидки.
-const CLUB_DISCOUNT_PERCENT = 20;
-const CLUB_REF_MS = 30 * 24 * 60 * 60 * 1000;
-const CLUB_CACHE_MS = 10 * 60 * 1000;
-const clubCache = new Map(); // telegramId → { at, active }
-
-async function markClubRef(telegramId) {
-  clubCache.delete(String(telegramId));
-  // chat_id лички = id человека; запись обычно уже есть (touchSubscriber), upsert — на случай локального запуска
-  await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ telegram_user_id: Number(telegramId), chat_id: Number(telegramId), club_ref_at: new Date().toISOString() }),
-  });
-}
-
-/** Положена ли скидка клуба. Ошибка проверки — без скидки (и без кэша, чтобы повторить при следующем действии). */
-async function clubDiscount(telegramId) {
-  const url = process.env.ZARA_CLUB_CHECK_URL, secret = process.env.CLUB_CHECK_SECRET;
-  if (!url || !secret || !telegramId) return false;
-  const key = String(telegramId);
-  const cached = clubCache.get(key);
-  if (cached && Date.now() - cached.at < CLUB_CACHE_MS) return cached.active;
-  try {
-    const rows = await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${encodeURIComponent(key)}&select=club_ref_at&limit=1`);
-    const refAt = Date.parse(rows[0]?.club_ref_at || '');
-    let active = false;
-    if (refAt && Date.now() - refAt < CLUB_REF_MS) {
-      const response = await fetch(`${url}?tg=${encodeURIComponent(key)}`, { headers: { 'x-club-secret': secret }, signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw new Error(`club-check HTTP ${response.status}`);
-      active = (await response.json())?.active === true;
-    }
-    clubCache.set(key, { at: Date.now(), active });
-    return active;
-  } catch (error) {
-    console.warn('Скидка клуба: проверка не удалась', error?.message || error);
-    return false;
-  }
-}
-
-/** Цена с учётом скидки клуба: { price, club }. */
-async function clubPrice(telegramId, basePrice) {
-  const club = await clubDiscount(telegramId);
-  return { price: club ? Math.round(basePrice * (100 - CLUB_DISCOUNT_PERCENT) / 100) : basePrice, club };
-}
+// ── Скидка 20% участникам «Клуба вопросов» — server/_club.js ──
+// В боте: человек пришёл по кнопке из группы клуба (/start club_code | club_reviews) → club_ref_at, скидка 30 дней
+// после перехода и только при активной подписке. Только «Код клиента» и «Кто поставил оценку»; ШК и магазин — без скидки.
+// Тот же модуль даёт скидку на тариф «Про» программы при оплате на сайте (api/payments.js).
+const { clubDiscount, clubPrice, markClubRef } = require('./_club');
 
 const clientCodePrice = telegramId => clubPrice(telegramId, CLIENT_CODE_PRICE);
 const clientCodeEventKey = (userId, qrText) => `qr:${userId}:${qrText}`;

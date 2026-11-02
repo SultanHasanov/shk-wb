@@ -51,6 +51,21 @@ Telegram → `tg-relay-three.vercel.app/webhook` → сервер — это н�
   Миграция `20261025_bot_referrals.sql` ПРИМЕНЕНА. Тексты бота — короткие (просьба пользователя: «коротко и понятно»).
 - `20261024_bot_session_states.sql` (ПРИМЕНЕНА): в проверку состояний сессии добавлены `await_access_code` (ввод кода
   доступа падал с 400 ещё до этих правок) и `await_topup_amount`.
+
+## Скидка 20% участникам «Клуба вопросов» — `server/_club.js` (2026-11-02)
+Клуб — бот @zara34_help_bot (проект zara-bot). Подписку проверяем у него: `GET $ZARA_CLUB_CHECK_URL?tg=<telegram id>`
+с заголовком `x-club-secret: $CLUB_CHECK_SECRET` → `{active}`; кэш 10 мин, ошибка → без скидки. Оба секрета — в `/srv/shk-wb/.env`.
+- **Бот**: «Код клиента» (50 → 40 ₽) и «Кто поставил оценку» (25 → 20 ₽) — только пришедшим из группы клуба
+  (`/start club_code|club_reviews` → `telegram_bot_subscribers.club_ref_at`, 30 дней) — `clubDiscount(tg)`, `clubPrice`.
+  ШК и магазин без скидки. До 02.11 код жил в `_telegram-wb-bot.js`, поведение не менялось.
+- **Тариф «Про» Помощника** (с 02.11.2026): `api/payments.js` при `app_subscription` + `appPlan === 'pro'` вызывает
+  `clubUserDiscount(user.id)` — Telegram аккаунта из `user_telegram_identities`, переход из группы не нужен — и
+  уменьшает `total` на 20% поверх скидки за срок (`pricing_snapshot.club_discount_percent = 20`; `snapshot.app`
+  не трогается — из него SQL берёт лимиты). Работает и для оплаты из программы (`api/app.js` pay → тот же create).
+  Кабинет: `GET /api/app/me` → `clubDiscountPercent` (0 | 20), `SubscriptionPage` показывает «Про» со скидкой и
+  считает чекаут той же формулой (`planPriceFor`). Без привязки Telegram скидки нет — бот клуба подсказывает войти
+  на сайт через Telegram. Админу в уведомлении о заказе — строка «Скидка клуба 20%». Только «Про»: Стандарт, услуги,
+  пакеты — без скидки. Окно тарифов в программе цену со скидкой пока не показывает (TODO в pvz-helper.md).
 ## ШК с фото (2026-11-01, ВЫЛОЖЕНО релизом 20261101-231546, коммит 2b5eb7ec)
 - Анонс с фото разослан 01.11 всем подписчикам: доставлено 562, заблокировали бота 37, ошибок 0.
   Админская рассылка (`telegram-broadcast` в `server/_admin-cabinet.js`) умеет только текст — анонс с фото

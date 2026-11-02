@@ -61,6 +61,8 @@ export type AppAccount = {
   addons?: Array<{ id: AppAddonId; kind?: 'service' | 'pack'; title: string; endsAt: string | null; active: boolean; needsPlan: AppPlanId | null }>;
   /** безлимитный аккаунт: всё открыто бессрочно */
   unlimited?: boolean;
+  /** скидка участника «Клуба вопросов» на тариф «Про», % (0 — нет); сервер применяет её сам при оплате */
+  clubDiscountPercent?: number;
   user: { id: string; email: string | null; name: string | null; phone: string | null; telegram: { username: string | null } | null };
   effectivePlan: AppPlanId | null;
   subscription: {

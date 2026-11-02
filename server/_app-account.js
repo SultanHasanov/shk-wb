@@ -13,6 +13,7 @@ const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, m
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 const { crackFallbackEnabled } = require('./_app-flags');
+const { CLUB_DISCOUNT_PERCENT, clubUserDiscount } = require('./_club');
 const permissions = require('./_app-permissions');
 
 /**
@@ -321,7 +322,7 @@ function maskKey(key) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback, clubDiscount] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -333,6 +334,9 @@ async function accountSummary(user, currentHash) {
     appFreeWindow(),
     supabaseFetch(`app_points?user_id=eq.${uid}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,mirror_at,created_at&order=created_at.asc`).catch(() => []),
     crackFallbackEnabled().catch(() => false),
+    // Скидка участника «Клуба вопросов» на тариф «Про» (server/_club.js): кабинет показывает цену со скидкой,
+    // сервер применяет её в api/payments.js. Ошибка проверки → без скидки.
+    clubUserDiscount(user.id).catch(() => false),
   ]);
   const unlimited = isUnlimited(user.id);
   const all = free || unlimited;
@@ -356,6 +360,8 @@ async function accountSummary(user, currentHash) {
     unlimited,
     // Переключатели из админки (резервный подбор кода и т.п.).
     flags: { crackFallback: crackFallback === true },
+    // Скидка участника клуба на «Про», в процентах (0 — нет). Применяется только к тарифу pro.
+    clubDiscountPercent: clubDiscount ? CLUB_DISCOUNT_PERCENT : 0,
     ...(all ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
     features: withMirror(effectiveFeatures(plan, rawAddons, all, ent.codes_limit), mirrorLimit(plan, rawAddons, unlimited)),
