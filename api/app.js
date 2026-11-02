@@ -88,6 +88,9 @@ const DOC_WRITE_PERMS = Object.freeze({
 const SECRET_WRITE_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'act.video_settings' });
 const SECRET_READ_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'video' });
 const SITE_LINK_TARGETS = /^\/cabinet(\/[a-z-]+)?(\?[a-z0-9=&_-]{0,80})?$/i;
+// Компьютер сотрудника (app_devices.role = work): видит только себя, не загружает чужие базы,
+// не управляет аккаунтом и оплатами. Роль меняется с компьютера владельца или в кабинете.
+const WORK_PC = Object.freeze({ error: 'Это действие доступно только с компьютера владельца', code: 'WORK_PC' });
 
 module.exports = async function handler(req, res) {
   const action = String(req.query?.action || '');
@@ -132,7 +135,8 @@ module.exports = async function handler(req, res) {
     if (action === 'device' && req.method === 'DELETE') {
       const user = await requireUser(req, res);
       if (!user) return;
-      await account.requireAllowed(req, user.id, 'act.account');
+      const by = await account.requireAllowed(req, user.id, 'act.account');
+      if (by && permissions.isWork(by)) return res.status(403).json(WORK_PC);
       await account.revokeDevice(user.id, req.query.id);
       return res.status(204).end();
     }
@@ -141,11 +145,24 @@ module.exports = async function handler(req, res) {
       if (!user) return;
       if (!await enforceRateLimit(req, res, { scope: 'app-device-rename', limit: 30, windowSeconds: 600, key: user.id })) return;
       const b = body(req);
-      // кабинет: что закрыто на этом ПК (только с сайта — программа себе доступ не меняет)
+      // кто меняет: null — кабинет на сайте (владелец), иначе ПК программы. Для роли и доступа ПК обязателен,
+      // для переименования — как раньше, без строгой проверки (старые версии шлют его до регистрации ПК).
+      const strict = typeof b.role === 'string' || Array.isArray(b.denied);
+      const by = !req.headers['x-device-id'] ? null
+        : strict ? await account.requireDevice(req, user.id)
+        : await account.requireDevice(req, user.id).catch(() => null);
+      const self = Boolean(by && by.id === String(req.query.id || ''));
+      // роль ПК: «компьютер владельца» — с паролем (или с другого ПК владельца), «сотрудника» — с ПК владельца
+      if (typeof b.role === 'string') {
+        return res.status(200).json(await account.setDeviceRole(user, req.query.id, b.role, { by, password: b.password, denied: b.denied }));
+      }
+      // что закрыто на ПК: кабинет или компьютер владельца (не себе — иначе сотрудник открыл бы себе всё)
       if (Array.isArray(b.denied)) {
-        if (req.headers['x-device-id']) return res.status(403).json({ error: 'Доступ меняется только в кабинете на сайте', code: 'DENIED_BY_OWNER' });
+        if (by && (permissions.isWork(by) || self)) return res.status(403).json({ error: 'Доступ меняется в кабинете на сайте или с компьютера владельца', code: 'DENIED_BY_OWNER' });
         return res.status(200).json(await account.setDeviceAccess(user.id, req.query.id, b.denied));
       }
+      // компьютер сотрудника переименовывает только себя
+      if (by && permissions.isWork(by) && !self) return res.status(403).json(WORK_PC);
       return res.status(200).json(await account.renameDevice(user.id, req.query.id, b.name));
     }
 
@@ -293,9 +310,11 @@ module.exports = async function handler(req, res) {
     if (action === 'pay' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-pay', limit: 20, windowSeconds: 600, key: user.id })) return;
       // ПК ещё не подключён (окно «лимит компьютеров») — ограничений по нему нет
-      await account.requireAllowed(req, user.id, 'act.pay').catch(error => {
+      const payer = await account.requireAllowed(req, user.id, 'act.pay').catch(error => {
         if (error.code === 'DENIED_BY_OWNER') throw error;
+        return null;
       });
+      if (payer && permissions.isWork(payer)) return res.status(403).json(WORK_PC);
       const b = body(req);
       const product =
         b.kind === 'addon' ? { productKind: 'app_addon', appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
@@ -327,8 +346,11 @@ module.exports = async function handler(req, res) {
     // ПК держит inbox постоянно, а большая загрузка идёт сотней кусков ---
     if (action.startsWith('relay-')) {
       if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
-      // inbox — этот ПК отдаёт свои данные другим; закрыта только загрузка к себе
-      if (['relay-ask', 'relay-get', 'relay-ack'].includes(action) && permissions.isDenied(device, 'act.load_pc')) {
+      // inbox и put — этот ПК отдаёт свои данные другим; закрыта только загрузка к себе.
+      // Компьютер сотрудника не видит список ПК и не загружает чужие базы вовсе (роль).
+      const toMe = ['relay-ask', 'relay-get', 'relay-ack', 'relay-peers'].includes(action);
+      if (toMe && permissions.isWork(device)) return res.status(403).json(WORK_PC);
+      if (toMe && action !== 'relay-peers' && permissions.isDenied(device, 'act.load_pc')) {
         return res.status(403).json({ error: 'Владелец закрыл загрузку с другого ПК на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.load_pc' });
       }
       if (action === 'relay-inbox' && req.method === 'POST') return res.status(200).json(await relay.inbox(user.id, device, body(req)));
@@ -353,7 +375,10 @@ module.exports = async function handler(req, res) {
     if (!await enforceRateLimit(req, res, { scope: 'app-user', limit: 900, windowSeconds: 600, key: user.id })) return;
 
     if (action === 'me' && req.method === 'GET') {
-      return res.status(200).json(await account.accountSummary(user, account.deviceHashFrom(req)));
+      const summary = await account.accountSummary(user, account.deviceHashFrom(req));
+      // компьютер сотрудника видит из списка ПК только себя
+      if (permissions.isWork(device)) summary.devices = summary.devices.filter(d => d.current);
+      return res.status(200).json(summary);
     }
     if (action === 'consume' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-consume', limit: 30, windowSeconds: 60, key: user.id })) return;
@@ -395,11 +420,13 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'password-change' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-password-change', limit: 5, windowSeconds: 600, key: user.id })) return;
+      if (permissions.isWork(device)) return res.status(403).json(WORK_PC);
       if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       const b = body(req);
       return res.status(200).json(await account.changePassword(user, b.current, b.password));
     }
     if (action === 'logout-others' && req.method === 'POST') {
+      if (permissions.isWork(device)) return res.status(403).json(WORK_PC);
       if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       return res.status(200).json(await account.logoutOthers(user, device.id));
     }
@@ -416,12 +443,14 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(await sync.registerPoint(user.id, device.id, b.wbPointId, b.name));
     }
     if (action === 'point' && req.method === 'DELETE') {
+      if (permissions.isWork(device)) return res.status(403).json(WORK_PC);
       if (permissions.isDenied(device, 'act.account')) throw account.appError(403, 'DENIED_BY_OWNER', 'Владелец закрыл управление аккаунтом на этом компьютере', { key: 'act.account' });
       await sync.revokePoint(user.id, req.query.id);
       return res.status(204).end();
     }
     if (action === 'point-purge' && req.method === 'POST') {
-      // удалить облачные данные пункта — только с паролем (если он есть у аккаунта)
+      // удалить облачные данные пункта — только с ПК владельца и с паролем (если он есть у аккаунта)
+      if (permissions.isWork(device)) return res.status(403).json(WORK_PC);
       const b = body(req);
       if (user.email && !String(user.email).endsWith('@users.invalid')) {
         await account.passwordLogin(user.email, String(b.password || '')).catch(() => {
@@ -473,7 +502,7 @@ module.exports = async function handler(req, res) {
       if (!SITE_LINK_TARGETS.test(next)) return res.status(400).json({ error: 'Некорректная страница', code: 'VALIDATION_ERROR' });
       // ПК сотрудника (закрыто «Управлять аккаунтом»): ссылка без входа — иначе сотрудник попал бы в кабинет
       // владельца и открыл бы себе доступ сам. Сайт попросит пароль.
-      if (permissions.isDenied(device, 'act.account')) return res.status(200).json({ url: `${publicOrigin(req)}${next}`, signedIn: false });
+      if (permissions.isWork(device) || permissions.isDenied(device, 'act.account')) return res.status(200).json({ url: `${publicOrigin(req)}${next}`, signedIn: false });
       const tokenHash = await account.magicTokenHash(user.id);
       return res.status(200).json({ url: `${publicOrigin(req)}/app-login?th=${encodeURIComponent(tokenHash)}&next=${encodeURIComponent(next)}` });
     }

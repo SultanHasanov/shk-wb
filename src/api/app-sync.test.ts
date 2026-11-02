@@ -257,6 +257,10 @@ describe('зеркало — услуга «Пункт с любого ПК»', 
 
   it('лимит: пакеты со Стандарта, бесплатный режим зеркала не даёт', () => {
     expect(mirrorPlans.mirrorLimit('standard', {}, false)).toBe(0);
+    // «Про» загружает свои пункты (2) без пакетов, пакет добавляется сверху
+    expect(mirrorPlans.mirrorLimit('pro', {}, false)).toBe(2);
+    expect(mirrorPlans.mirrorLimit('pro', { mirror_1: future }, false)).toBe(3);
+    expect(mirrorPlans.effectiveFeatures('pro', {}, false)).toContain('mirror');
     expect(mirrorPlans.mirrorLimit('standard', { mirror_1: future, mirror_3: future }, false)).toBe(4);
     expect(mirrorPlans.mirrorLimit('basic', { mirror_1: future }, false)).toBe(0);
     expect(mirrorPlans.mirrorLimit(null, {}, true)).toBe(99);

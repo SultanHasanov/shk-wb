@@ -10,6 +10,7 @@ const permissions = require('../../server/_app-permissions.js') as { KEYS: Set<s
 
 const DEVICE = 'a'.repeat(64);
 const DEV_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_ID = '22222222-2222-4222-8222-222222222222';
 const t = (ru: string) => ru;
 
 function response() {
@@ -104,10 +105,24 @@ describe('доступ сотрудников: сервер', () => {
   });
 
   it('программа не может сама поменять себе доступ', async () => {
-    mockSupabase(() => undefined);
+    mockSupabase(url => {
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow([], { role: 'owner' })] };
+    });
     const res = response();
     await handler(request('device', { method: 'PATCH', body: { denied: [] }, query: { id: DEV_ID } }), res);
     expect(res.statusCode).toBe(403);
+  });
+
+  it('компьютер владельца меняет доступ другому ПК из программы', async () => {
+    let patched: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow([], { role: 'owner' })] };
+      if (url.includes(`app_devices?id=eq.${OTHER_ID}`) && init.method === 'PATCH') { patched = JSON.parse(String(init.body)); return { body: [{ id: OTHER_ID, denied: patched!.denied }] }; }
+    });
+    const res = response();
+    await handler(request('device', { method: 'PATCH', body: { denied: ['act.pay'] }, query: { id: OTHER_ID } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(patched).toMatchObject({ denied: ['act.pay'] });
   });
 
   it('QR-код клиента закрыт владельцем — 403 DENIED_BY_OWNER', async () => {
@@ -174,5 +189,139 @@ describe('доступ сотрудников: сервер', () => {
     expect(res.statusCode).toBe(200);
     expect((res.body as { docs: Record<string, unknown> }).docs).not.toHaveProperty('ivideon');
     expect((res.body as { docs: Record<string, unknown> }).docs).toHaveProperty('telegram');
+  });
+});
+
+describe('роли компьютеров: владелец и сотрудник', () => {
+  beforeEach(() => {
+    process.env.SUPABASE_URL = 'https://db.test';
+    process.env.SUPABASE_PUBLISHABLE_KEY = 'pub';
+    process.env.SUPABASE_SECRET_KEY = 'secret';
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  const work = () => deviceRow([], { role: 'work' });
+
+  it('аренда несёт роль ПК; роль не назначена — null', async () => {
+    mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [work()] }; });
+    expect((await account.leaseRights(request('lease', { method: 'POST' }))).role).toBe('work');
+    vi.unstubAllGlobals();
+    mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [deviceRow([])] }; });
+    expect((await account.leaseRights(request('lease', { method: 'POST' }))).role).toBeNull();
+  });
+
+  it('компьютер сотрудника не видит других ПК и не загружает базы', async () => {
+    mockSupabase(url => {
+      if (url.includes('app_devices?user_id=') && url.includes('device_hash=eq.')) return { body: [work()] };
+      if (url.includes('app_devices?user_id=')) return { body: [{ ...work(), device_hash: DEVICE }, { ...work(), id: OTHER_ID, device_hash: 'b'.repeat(64), role: 'owner' }] };
+      if (url.includes('user_profiles') || url.includes('user_telegram') || url.includes('license_keys') || url.includes('sticker_access_codes') || url.includes('app_points')) return { body: [] };
+    });
+    const peers = response();
+    await handler(request('relay-peers'), peers);
+    expect(peers.statusCode).toBe(403);
+    expect(peers.body).toMatchObject({ code: 'WORK_PC' });
+    const ask = response();
+    await handler(request('relay-ask', { method: 'POST', body: { wb: '123', source: OTHER_ID, kind: 'current' } }), ask);
+    expect(ask.statusCode).toBe(403);
+    const me = response();
+    await handler(request('me'), me);
+    expect(me.statusCode).toBe(200);
+    const devices = (me.body as { devices: { id: string; current: boolean }[] }).devices;
+    expect(devices).toHaveLength(1);
+    expect(devices[0].current).toBe(true);
+  });
+
+  it('компьютер сотрудника раздаёт свою базу (inbox открыт)', async () => {
+    mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [work()] }; });
+    const relay = require('../../server/_app-relay.js') as { inbox: (...a: unknown[]) => Promise<unknown> };
+    vi.spyOn(relay, 'inbox').mockResolvedValue({ jobs: [] });
+    const res = response();
+    await handler(request('relay-inbox', { method: 'POST', body: { points: [] } }), res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('с компьютера сотрудника нельзя отключать ПК, менять пароль, платить, отключать пункт и получать автовход', async () => {
+    mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [work()] }; });
+    const cases: [string, { method?: string; body?: unknown; query?: Record<string, string> }][] = [
+      ['device', { method: 'DELETE', query: { id: OTHER_ID } }],
+      ['password-change', { method: 'POST', body: { current: 'a', password: 'b' } }],
+      ['logout-others', { method: 'POST' }],
+      ['pay', { method: 'POST', body: { kind: 'wallet', amount: 500, accepted: true } }],
+      ['point', { method: 'DELETE', query: { id: OTHER_ID } }],
+    ];
+    for (const [action, init] of cases) {
+      const res = response();
+      await handler(request(action, init), res);
+      expect(res.statusCode, action).toBe(403);
+      expect(res.body, action).toMatchObject({ code: 'WORK_PC' });
+    }
+    const link = response();
+    await handler(request('site-link', { method: 'POST', body: { next: '/cabinet' } }), link);
+    expect((link.body as { url: string }).url).not.toContain('th=');
+  });
+
+  it('компьютер сотрудника переименовывает только себя', async () => {
+    mockSupabase((url, init) => {
+      if (url.includes('app_devices?user_id=')) return { body: [work()] };
+      if (url.includes(`app_devices?id=eq.${DEV_ID}`) && init.method === 'PATCH') return { body: [{ id: DEV_ID, name: 'Стойка' }] };
+    });
+    const other = response();
+    await handler(request('device', { method: 'PATCH', body: { name: 'X' }, query: { id: OTHER_ID } }), other);
+    expect(other.statusCode).toBe(403);
+    const self = response();
+    await handler(request('device', { method: 'PATCH', body: { name: 'Стойка' }, query: { id: DEV_ID } }), self);
+    expect(self.statusCode).toBe(200);
+  });
+
+  it('«это компьютер владельца» с ПК сотрудника — только с паролем аккаунта', async () => {
+    let patched: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes('app_devices?user_id=')) return { body: [work()] };
+      if (url.includes('token?grant_type=password')) {
+        const b = JSON.parse(String(init.body)) as { password: string };
+        return b.password === 'secret1' ? { body: { access_token: 't', user: { id: 'u1' } } } : { status: 400, body: { error: 'invalid' } };
+      }
+      if (url.includes(`app_devices?id=eq.${DEV_ID}`) && init.method === 'PATCH') { patched = JSON.parse(String(init.body)); return { body: [{ id: DEV_ID, role: 'owner', denied: [] }] }; }
+    });
+    const bad = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'owner', password: 'wrong' }, query: { id: DEV_ID } }), bad);
+    expect(bad.statusCode).toBe(401);
+    expect(patched).toBeNull();
+    const ok = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'owner', password: 'secret1' }, query: { id: DEV_ID } }), ok);
+    expect(ok.statusCode).toBe(200);
+    expect(patched).toMatchObject({ role: 'owner', denied: [] });
+  });
+
+  it('компьютер владельца делает другой ПК компьютером сотрудника с шаблоном, но не себя', async () => {
+    let patched: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow([], { role: 'owner' })] };
+      if (url.includes(`app_devices?id=eq.${OTHER_ID}`) && init.method === 'PATCH') { patched = JSON.parse(String(init.body)); return { body: [{ id: OTHER_ID, role: 'work', denied: patched!.denied }] }; }
+    });
+    const self = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'work' }, query: { id: DEV_ID } }), self);
+    expect(self.statusCode).toBe(400);
+    const res = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'work', denied: ['act.pay', 'hack'] }, query: { id: OTHER_ID } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(patched).toMatchObject({ role: 'work', denied: ['act.pay'] });
+    const none = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'work' }, query: { id: OTHER_ID } }), none);
+    expect(none.statusCode).toBe(200);
+    const preset = (require('../../server/_app-permissions.js') as { WORK_DENIED: readonly string[] }).WORK_DENIED;
+    expect([...((patched as unknown as Record<string, unknown>).denied as string[])].sort()).toEqual([...preset].sort());
+    expect(permissionPresets(t).find(p => p.id === 'staff')!.denied.slice().sort()).toEqual([...preset].sort());
+  });
+
+  it('кабинет назначает роль без пароля', async () => {
+    let patched: Record<string, unknown> | null = null;
+    mockSupabase((url, init) => {
+      if (url.includes(`app_devices?id=eq.${OTHER_ID}`) && init.method === 'PATCH') { patched = JSON.parse(String(init.body)); return { body: [{ id: OTHER_ID, role: 'owner', denied: [] }] }; }
+    });
+    const res = response();
+    await handler(request('device', { method: 'PATCH', body: { role: 'owner' }, headers: { 'x-device-id': undefined }, query: { id: OTHER_ID } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(patched).toMatchObject({ role: 'owner' });
   });
 });

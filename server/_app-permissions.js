@@ -48,4 +48,17 @@ function isDenied(device, key) {
   return Array.isArray(device?.denied) && device.denied.includes(key);
 }
 
-module.exports = { SECTIONS, ACTIONS, KEYS, cleanDenied, isDenied };
+// Что закрыто на новом компьютере сотрудника по умолчанию (шаблон «Сотрудник пункта» кабинета).
+const WORK_DENIED = Object.freeze(['act.payroll', 'act.staff_edit', 'act.video_settings', 'act.pay', 'act.account', 'act.load_pc', 'settings']);
+
+// Роль ПК (app_devices.role): 'owner' | 'work' | null (не назначена — как owner, см. миграцию 20261107).
+const ROLES = new Set(['owner', 'work']);
+function roleOf(device) {
+  return ROLES.has(device?.role) ? device.role : null;
+}
+// Компьютер сотрудника: только свой пункт, без списка ПК, загрузки чужих баз и управления аккаунтом.
+function isWork(device) {
+  return roleOf(device) === 'work';
+}
+
+module.exports = { SECTIONS, ACTIONS, KEYS, ROLES, WORK_DENIED, cleanDenied, isDenied, roleOf, isWork };

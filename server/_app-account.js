@@ -210,8 +210,66 @@ async function registerDeviceFree(userId, deviceHash, name, version) {
 async function registerDevice(userId, deviceHash, name, version) {
   const known = await deviceKnown(userId, deviceHash);
   const id = await registerDeviceLimited(userId, deviceHash, known ? '' : name, version);
-  if (!known) await notifyNewDevice(userId, name);
+  if (!known) {
+    await assignInitialRole(userId, id);
+    await notifyNewDevice(userId, name);
+  }
   return id;
+}
+
+// Новый ПК — компьютер сотрудника: закрыт по шаблону «Сотрудник пункта», видит только себя.
+// Исключение: первый компьютер пустого аккаунта — владельца (иначе владелец на единственном ПК
+// увидел бы урезанный профиль и не смог бы ничего настроить). Сбой здесь вход не ломает.
+async function assignInitialRole(userId, deviceId) {
+  if (!deviceId) return;
+  try {
+    const others = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&id=neq.${encodeURIComponent(deviceId)}&select=id&limit=1`);
+    const role = others.length ? 'work' : 'owner';
+    await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&role=is.null`, {
+      method: 'PATCH',
+      body: JSON.stringify(role === 'work'
+        ? { role, denied: [...permissions.WORK_DENIED], access_updated_at: new Date().toISOString() }
+        : { role }),
+    });
+  } catch { /* роль назначит владелец вручную */ }
+}
+
+/**
+ * Смена роли ПК. `by` — кто меняет: null (кабинет на сайте) или ПК программы (requireDevice).
+ * Из программы: «компьютер владельца» — только с паролем аккаунта (или с другого ПК владельца);
+ * «компьютер сотрудника» — только с ПК владельца и не себе самому.
+ */
+async function setDeviceRole(user, deviceId, role, { by = null, password, denied } = {}) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
+  if (!permissions.ROLES.has(role)) throw appError(400, 'VALIDATION_ERROR', 'Роль компьютера: owner или work');
+  if (by) {
+    if (permissions.isWork(by) && role === 'work') throw appError(403, 'WORK_PC', 'Это действие доступно только с компьютера владельца');
+    if (role === 'work' && by.id === deviceId) throw appError(400, 'VALIDATION_ERROR', 'Свой компьютер делают компьютером сотрудника с другого ПК владельца или в кабинете');
+    if (role === 'owner' && permissions.isWork(by)) {
+      if (technicalEmail(user.email)) throw appError(400, 'NO_PASSWORD', 'У аккаунта нет пароля. Назначьте роль в кабинете на сайте.');
+      await passwordLogin(user.email, String(password || '')).catch(() => {
+        throw appError(401, 'BAD_PASSWORD', 'Пароль не подошёл. Это пароль от аккаунта на сайте shk-wb.ru, не от Wildberries.');
+      });
+    }
+  }
+  const fields = { role };
+  if (role === 'owner') {
+    fields.denied = [];
+    fields.access_updated_at = new Date().toISOString();
+  } else if (Array.isArray(denied)) {
+    fields.denied = permissions.cleanDenied(denied);
+    fields.access_updated_at = new Date().toISOString();
+  } else {
+    fields.denied = [...permissions.WORK_DENIED];
+    fields.access_updated_at = new Date().toISOString();
+  }
+  const rows = await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(user.id)}&revoked_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(fields),
+  });
+  if (!rows.length) throw appError(404, 'NOT_FOUND', 'Устройство не найдено');
+  return { id: rows[0].id, role: rows[0].role, denied: rows[0].denied || [] };
 }
 
 async function registerDeviceLimited(userId, deviceHash, name, version) {
@@ -234,7 +292,7 @@ async function registerDeviceLimited(userId, deviceHash, name, version) {
 async function requireDevice(req, userId) {
   const hash = deviceHashFrom(req);
   if (!hash) throw appError(400, 'DEVICE_REQUIRED', 'Обновите программу');
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at,denied,point_wb&limit=1`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at,denied,point_wb,role&limit=1`);
   if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
   const device = rows[0];
   if (Date.now() - new Date(device.last_seen_at).getTime() > 10 * 60 * 1000) {
@@ -247,7 +305,7 @@ async function requireDevice(req, userId) {
 }
 
 async function listDevices(userId, currentHash) {
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at,denied,point_wb,access_updated_at&order=last_seen_at.desc`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at,denied,point_wb,access_updated_at,role&order=last_seen_at.desc`);
   return rows.map(row => ({
     id: row.id,
     name: row.name,
@@ -258,6 +316,8 @@ async function listDevices(userId, currentHash) {
     denied: Array.isArray(row.denied) ? row.denied : [],
     pointWb: row.point_wb || null,
     accessUpdatedAt: row.access_updated_at || null,
+    // owner | work | null (роль не назначена — как owner)
+    role: permissions.roleOf(row),
   }));
 }
 
@@ -428,7 +488,7 @@ async function leaseRights(req) {
     device = await requireDevice(req, user.id);
   } catch (error) {
     if (error.code === 'DEVICE_REVOKED' || error.code === 'DEVICE_REQUIRED') {
-      return { user: user.id, plan: null, features: [], archive_until: null, free: false, denied: [] };
+      return { user: user.id, plan: null, features: [], archive_until: null, free: false, denied: [], role: null };
     }
     throw error;
   }
@@ -439,7 +499,8 @@ async function leaseRights(req) {
   // закрытое владельцем на этом ПК: разделы вычитаются из тарифа, весь список — программе
   const denied = permissions.cleanDenied(device.denied);
   const open = features.filter(f => !denied.includes(f));
-  return { user: user.id, plan: all ? 'pro' : plan, features: open, archive_until: archiveUntil, free: all, denied };
+  // роль ПК — подписана вместе с правами: компьютер сотрудника не покажет чужие ПК и не загрузит их базы
+  return { user: user.id, plan: all ? 'pro' : plan, features: open, archive_until: archiveUntil, free: all, denied, role: permissions.roleOf(device) };
 }
 
 // Пункт, чья база WB стоит на ПК (программа шлёт в /lease), — для группировки ПК в кабинете.
@@ -768,6 +829,7 @@ module.exports = {
   changePassword,
   requireAllowed,
   setDeviceAccess,
+  setDeviceRole,
   entitlementsFor,
   isUnlimited,
   logoutOthers,

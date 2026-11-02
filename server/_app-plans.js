@@ -15,8 +15,10 @@ const BASIC_FEATURES = Object.freeze(['code']);
 // Код клиента в Стандарт не входит (кодов в месяц 0), поэтому в списке разделов его нет.
 // Раздел при этом открыт на любом тарифе — коды берутся из пакетов, см. effectiveFeatures.
 const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
+// С 02.11.2026 «Про» включает «Загрузку с другого ПК» для своих пунктов (PLANS.pro.mirror):
+// владелец с 4 ПК ждал, что домашний компьютер увидит пункт. На «Стандарте» услуга по-прежнему пакетом.
 const PRO_FEATURES = Object.freeze([
-  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video',
+  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video', 'mirror',
 ]);
 // Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
 // узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
@@ -56,7 +58,9 @@ const PLANS = Object.freeze({
     stickers: 50, // месячный пакет генераций (app_sticker_quota_code), сверх — с баланса
     devices: 4,
     points: 2,
-    summary: 'Всё из Стандарта, коды клиента, стикеры, досье, отзывы и сотрудники',
+    // сколько пунктов можно загружать на другие ПК без пакетов mirror_* (= points)
+    mirror: 2,
+    summary: 'Всё из Стандарта, коды клиента, стикеры, досье, отзывы, сотрудники и загрузка пункта на другие ПК',
     features: PRO_FEATURES,
   }),
 });
@@ -81,6 +85,7 @@ const FEATURE_TITLES = Object.freeze({
   stickers: 'Печать стикеров товаров и коробок',
   staff: 'Сотрудники: график, зарплата, аванс, удержания WB',
   video: 'Видео по ШК: архив камер Ivideon на момент приёмки',
+  mirror: 'Загрузка с другого ПК: данные пункта на домашнем компьютере',
   archive: 'Архив клиентов в облаке: на любом ПК и по всем пунктам',
 });
 
@@ -174,7 +179,7 @@ function addonSnapshot(addon, months) {
 function effectiveFeatures(plan, addons, free, codesLimit = 0) {
   // зеркало в бесплатный режим не входит — только купленное (место в облаке)
   const mirror = mirrorLimit(plan, addons, false) > 0 ? ['mirror'] : [];
-  if (free) return [...new Set([...PRO_FEATURES, ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
+  if (free) return [...new Set([...PRO_FEATURES.filter(f => f !== 'mirror'), ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
   // 'code' открыт на любом тарифе: подбор всё равно списывается из месячного лимита или пакетов.
   const base = isPlan(plan) ? [...PLANS[plan].features, ...BASIC_FEATURES] : [];
   if (plan === 'standard' && Number(codesLimit) > 0) base.push(...LEGACY_STANDARD_EXTRA);
@@ -206,7 +211,8 @@ function accountLimits(plan, addons, subDeviceLimit, unlimited) {
 // Бесплатный режим не даёт зеркала; безлимит — все пункты.
 function mirrorLimit(plan, addons, unlimited) {
   if (unlimited) return 99;
-  let n = 0;
+  // «Про» — свои пункты без доплаты; пакеты mirror_* добавляются сверху (например, с пакетом «+1 пункт»)
+  let n = isPlan(plan) ? Number(PLANS[plan].mirror || 0) : 0;
   for (const [id, info] of Object.entries(addons || {})) {
     const a = ADDONS[id];
     if (a?.mirror && addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) n += a.mirror;

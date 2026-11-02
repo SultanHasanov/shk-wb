@@ -51,6 +51,8 @@ export type AppDevice = {
   /** пункт, чья база WB стоит на этом ПК */
   pointWb?: string | null;
   accessUpdatedAt?: string | null;
+  /** owner — компьютер владельца, work — сотрудника, null — роль не назначена (ведёт себя как владельца) */
+  role?: 'owner' | 'work' | null;
 };
 export type AppAccount = {
   freeMode?: boolean;
@@ -120,6 +122,16 @@ export function useSetDeviceAccess() {
   return useMutation({
     mutationFn: ({ id, denied }: { id: string; denied: string[] }) =>
       api<{ id: string; denied: string[] }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ denied }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
+  });
+}
+
+/** Роль компьютера: владельца (всё видит и загружает) или сотрудника (только свой пункт). Из кабинета без пароля. */
+export function useSetDeviceRole() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: 'owner' | 'work' }) =>
+      api<{ id: string; role: string; denied: string[] }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
     onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
   });
 }

@@ -6,7 +6,7 @@ import { Alert, Badge, Button, Card, Checkbox, EmptyState, Modal, Progress, Segm
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { api } from '../../api/client';
 import { useCabinet } from '../../api/cabinet';
-import { type AppAccount, type AppAddon, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRenameAppDevice, useRevokeAppDevice, useRevokeAppPoint } from '../../api/app';
+import { type AppAccount, type AppAddon, type AppDevice, type AppPlan, type AppPlanId, type AppPlans, daysLeft, useAppAccount, useAppPlans, useRenameAppDevice, useRevokeAppDevice, useRevokeAppPoint, useSetDeviceRole } from '../../api/app';
 import { PROGRAM_DOWNLOAD_URL } from '../../lib/downloads';
 import { useMoney } from '../../lib/currency';
 import { formatTotal as formatRub } from '../../lib/pricing';
@@ -202,6 +202,21 @@ function Devices({ account }: { account: AppAccount }) {
   const toast = useToast();
   const revoke = useRevokeAppDevice();
   const rename = useRenameAppDevice();
+  const setRole = useSetDeviceRole();
+  const roleLabel = (d: AppDevice) => d.role === 'owner'
+    ? t('компьютер владельца', 'иесінің компьютері')
+    : d.role === 'work' ? t('компьютер сотрудника', 'қызметкер компьютері') : t('роль не назначена', 'рөл тағайындалмаған');
+  const changeRole = (d: AppDevice) => {
+    const next = d.role === 'work' ? 'owner' : 'work';
+    const text = next === 'owner'
+      ? t(`«${d.name}» станет компьютером владельца: увидит все компьютеры и пункты, сможет загружать копии баз и управлять аккаунтом.`, `«${d.name}» иесінің компьютері болады.`)
+      : t(`«${d.name}» станет компьютером сотрудника: увидит только себя, не сможет загружать чужие базы и управлять аккаунтом. Разделы закроются по шаблону «Сотрудник пункта».`, `«${d.name}» қызметкер компьютері болады.`);
+    if (!window.confirm(text)) return;
+    setRole.mutate({ id: d.id, role: next }, {
+      onSuccess: () => toast(t('Роль сохранена', 'Рөл сақталды'), 'success'),
+      onError: e => toast(e instanceof Error ? e.message : String(e), 'error'),
+    });
+  };
   const askName = (id: string, current: string) => {
     const name = window.prompt(t('Название компьютера (например, адрес пункта или «Домашний ноутбук»)', 'Компьютер атауы'), current);
     if (name == null || !name.trim() || name.trim() === current) return;
@@ -220,9 +235,12 @@ function Devices({ account }: { account: AppAccount }) {
               <div key={device.id} className={s.device}>
                 <div>
                   <strong>{device.name}</strong>
-                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{t('Был в сети', 'Желіде болды')} {new Date(device.lastSeenAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{device.appVersion ? ` · v${device.appVersion}` : ''}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{roleLabel(device)} · {t('Был в сети', 'Желіде болды')} {new Date(device.lastSeenAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{device.appVersion ? ` · v${device.appVersion}` : ''}</div>
                 </div>
                 <div className="row" style={{ gap: 4 }}>
+                  <Button variant="ghost" size="sm" loading={setRole.isPending && setRole.variables?.id === device.id} onClick={() => changeRole(device)}>
+                    {device.role === 'work' ? t('Сделать владельца', 'Иесі ету') : t('Сделать сотрудника', 'Қызметкер ету')}
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => askName(device.id, device.name)}><Pencil size={15} />{t('Переименовать', 'Атын өзгерту')}</Button>
                   <Button variant="ghost" size="sm" loading={revoke.isPending && revoke.variables === device.id} onClick={() => revoke.mutate(device.id, { onSuccess: () => toast(t('Компьютер отключён', 'Компьютер ажыратылды'), 'success') })}><Unlink size={15} />{t('Отключить', 'Ажырату')}</Button>
                 </div>
