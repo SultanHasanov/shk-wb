@@ -44,8 +44,11 @@ Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram
 Сам процесс бота живёт на немецком сервере рядом с релеем: та же кодовая база, `selfhost/server.cjs` в роли
 `BOT_ROLE=bot` (`selfhost/bot-role.cjs`), порт 3001, unit `selfhost/shk-wb-bot.service` (на сервере он называется
 `shk-wb`), каталоги `/srv/shk-wb/{releases,current,state}`, `.env` по `selfhost/env.bot.example` (без `TELEGRAM_API_BASE`:
-Telegram и Supabase — напрямую, Supabase там в 1 мс). Узел отдаёт только `/api/telegram/webhook`, `/api/stickers/image|pdf`
-(картинки для Telegram, `STICKER_MEDIA_BASE=https://tg.shk-wb.ru:88/media`) и `/api/internal/bot` (RPC). Caddy :88
+Telegram и Supabase — напрямую, Supabase там в 1 мс). Узел отдаёт только `/api/telegram/webhook`, `/api/stickers/image|pdf` и `/api/internal/bot` (RPC).
+**Картинки и PDF для Telegram** — `STICKER_MEDIA_BASE=https://ouxsvlfaszsaykzpnkwh.supabase.co/functions/v1/tg-relay/media`
+(Supabase забирает их с shk-wb.ru): через `tg.shk-wb.ru:88/media` Telegram файлы НЕ скачивает — на нестандартном
+порту отвечает «Bad Request: wrong type of the web page content» (03.11.2026, сломались «Скачать PDF» и QR кода
+клиента; сам Caddy при этом отдавал PNG правильно). Маршрут `/media` в Caddy оставлен, но не используется. Caddy :88
 (`selfhost/caddy/Caddyfile.tg-relay`): `/webhook` и `/media/*` → 127.0.0.1:3001, `/rpc` → узел только с IP VPS,
 `/api/*` и `/file` — по-прежнему релей для исходящих вызовов сайта.
 Сайт на VPS зовёт бота через `server/_bot-rpc.js` (`BOT_RPC_URL=https://tg.shk-wb.ru:88/rpc`, `BOT_RPC_SECRET`):
