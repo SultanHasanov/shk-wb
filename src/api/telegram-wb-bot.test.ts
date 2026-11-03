@@ -132,12 +132,13 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.mainMenuKeyboard(true).inline_keyboard.flat().some(button => button.callback_data === 'menu:reviews')).toBe(true);
   });
 
-  it('пополняет баланс через оплату в Mini App и не предлагает суммы меньше нехватки', () => {
-    const urls = bot.topupRows(0).flat().map(button => button.web_app.url);
-    expect(urls).toHaveLength(4);
-    expect(urls[0]).toMatch(/\/bot-checkout\?kind=topup&amount=100$/);
+  it('кнопки пополнения создают оплату в боте (без Mini App) и не предлагают суммы меньше нехватки', () => {
+    const buttons = bot.topupRows(0).flat();
+    expect(buttons).toHaveLength(4);
+    expect(buttons[0].callback_data).toBe('tp:100');
+    expect(buttons.every(button => !button.web_app)).toBe(true);
     // Не хватает 400 ₽: 100 и 300 не помогут, 500 (+25 бонус) и 1000 — да.
-    expect(bot.topupRows(400).flat().map(button => button.web_app.url.split('amount=')[1])).toEqual(['500', '1000']);
+    expect(bot.topupRows(400).flat().map(button => button.callback_data)).toEqual(['tp:500', 'tp:1000']);
   });
 
   it('пишет конец бесплатного периода как «до следующего дня»', () => {

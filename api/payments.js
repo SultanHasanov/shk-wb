@@ -122,7 +122,9 @@ module.exports = async function handler(req, res) {
         }))
       )
         return;
-      const user = await optionalUser(req);
+      // req.internalUser ставит только код в этом же процессе (бот создаёт пополнение за пользователя,
+      // server/_bot-checkout.js); у HTTP-запроса такого поля быть не может.
+      const user = req.internalUser || await optionalUser(req);
       await maybeBindReferral(req, user);
       const requestedKind = String(req.body?.productKind || '');
       const cellKinds = ['cell_print_program', 'cell_print_license', 'cell_print_bundle'];

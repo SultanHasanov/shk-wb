@@ -58,6 +58,17 @@ Actions узел пока не выкладывает). Проверка: на �
 `/media/*` → `https://shk-wb.ru` (бэкап `Caddyfile.tg-relay.bak-*`), `systemctl restart caddy`; на VPS убрать
 `BOT_RPC_URL` и `BOT_NODE_URL`, `systemctl restart shk-wb`. Код бота на VPS остаётся, URL вебхука не меняется.
 
+## Оплата из бота без Mini App (03.11.2026)
+Кнопки пополнения (`tp:<сумма>[:<then>]`, `topupRows`/`topupAndBuyRow`) и ввод своей суммы больше не открывают
+Mini App `/bot-checkout` (он входил в кабинет, слал «Вход выполнен» и только потом открывал ЮKassa — путало людей).
+`startTopupPayment` → `server/_bot-checkout.js` создаёт заказ через общий обработчик `api/payments.js`
+(action=create) синтетическим запросом с `req.internalUser` (ставится только в процессе, у HTTP-запроса поля нет) и
+показывает в том же сообщении кнопку-ссылку `url` на страницу ЮKassa с подписью про оферту (`accepted: true`).
+`then` и экран покупки уходят в `walletThen`/`walletMessage` как раньше, зачисление и автопокупка — по вебхуку
+ЮKassa → `afterWalletTopup` (через RPC на узел). Возврат после оплаты — `/payment-result?from=telegram`.
+Кабинет не привязан — по-прежнему `sendLoginPrompt` (вход через Mini App или виджет на сайте). Страница
+`/bot-checkout` остаётся для старых сообщений с кнопками `web_app`.
+
 ## Сообщения админу о здоровье бота (03.11.2026)
 Два уровня, получатели — `adminIds()` из `server/_admin-alerts.js` (ADMIN_PAYMENT_TELEGRAM_IDS, по умолчанию владелец).
 1. **Внутри сервера** — `server/_bot-health.js`, стартует из `selfhost/server.cjs`, проверка раз в минуту:

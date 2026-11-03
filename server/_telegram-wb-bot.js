@@ -774,9 +774,12 @@ async function sendLoginPrompt(from, chatId, text) {
   await saveSession(from, chatId, 'choose_kind', { authPromptMessageId: message.message_id });
 }
 
+// Кнопки пополнения ведут не в Mini App, а на tp:<сумма>[:<then>]: бот сам создаёт заказ ЮKassa и присылает
+// ссылку на оплату (server/_bot-checkout.js). Экран покупки, который после оплаты станет «Готово», — это
+// сообщение с кнопкой, его id известен в момент нажатия, в callback_data его не кладём.
 function topupButton(amount) {
   const bonus = wallet.topupBonus(amount);
-  return { text: `${amount} ₽${bonus ? ` (+${bonus} ₽)` : ''}`, web_app: { url: publicUrl(`/bot-checkout?kind=topup&amount=${amount}`) } };
+  return { text: `${amount} ₽${bonus ? ` (+${bonus} ₽)` : ''}`, callback_data: `tp:${amount}` };
 }
 
 /** Кнопки пополнения (сразу на оплату). missing — сколько не хватает: меньшие суммы не предлагаем. */
@@ -793,11 +796,40 @@ function topupRows(missing = 0) {
  * then — что сделать после оплаты пополнения (afterWalletTopup): 'gen' | 'rv:<фильтр>:<стр>:<№>' | 'shop:<части>';
  * messageId — экран покупки, который после оплаты станет «Готово ✅».
  */
-function topupAndBuyRow(missingRub, then, messageId) {
+function topupAndBuyRow(missingRub, then) {
   const amount = Math.max(wallet.MIN_TOPUP, Math.ceil(Number(missingRub) - 1e-9));
-  const params = new URLSearchParams({ kind: 'topup', amount: String(amount), then });
-  if (messageId) params.set('m', String(messageId));
-  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, web_app: { url: publicUrl(`/bot-checkout?${params}`) } }];
+  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, callback_data: `tp:${amount}:${then}` }];
+}
+
+const OFFER_LINE = `Нажимая «Перейти к оплате», вы принимаете <a href="${publicUrl('/offer')}">оферту</a>.`;
+
+/**
+ * Нажата кнопка пополнения: создать заказ ЮKassa и показать ссылку на оплату в том же сообщении.
+ * then — что купить после зачисления (afterWalletTopup), screenId — экран, который после оплаты станет «Готово».
+ */
+async function startTopupPayment(from, chatId, amount, then, screenId) {
+  const userId = await findUser(from.id);
+  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const bonus = wallet.topupBonus(amount);
+  let payment;
+  try {
+    payment = await require('./_bot-checkout').createTopupPayment({ userId, amount, then, messageId: then ? screenId : null });
+  } catch (error) {
+    console.warn('Telegram topup payment failed', error.message);
+    await showScreen(chatId, screenId, `⚠️ ${escapeHtml(error.message)}`, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать снова', callback_data: 'topup:home' }], MENU_ROW]) });
+    return;
+  }
+  const text = [
+    `<b>💳 Пополнение на ${wallet.formatRub(amount)}</b>`,
+    ...(bonus ? [`Зачислим ${wallet.formatRub(amount + bonus)} с бонусом.`] : []),
+    ...(then ? ['После оплаты покупка пройдёт сама, ничего нажимать не нужно.'] : ['Деньги появятся на балансе сразу после оплаты.']),
+    '',
+    OFFER_LINE,
+  ].join('\n');
+  await showScreen(chatId, screenId, text, { reply_markup: choiceKeyboard([
+    [{ text: `💳 Перейти к оплате ${wallet.formatRub(amount)}`, url: payment.confirmationUrl }],
+    [{ text: '⬅️ Назад', callback_data: then ? 'menu:home' : 'topup:home' }],
+  ]) });
 }
 
 function profileKeyboard({ technical = false } = {}) {
@@ -1697,11 +1729,8 @@ async function acceptTopupAmount(from, chatId, session, message, text) {
   const msgId = session.draft?.msgId;
   if (!wallet.validTopup(amount)) return askTopupAmount(from, chatId, msgId, `«${escapeHtml(String(text).slice(0, 20))}» — нужна сумма от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`);
   await clearSession(from.id);
-  const bonus = wallet.topupBonus(amount);
-  await showScreen(chatId, msgId, `<b>Пополнение на ${wallet.formatRub(amount)}</b>${bonus ? `\nЗачислим ${wallet.formatRub(amount + bonus)} с бонусом` : ''}`, { reply_markup: choiceKeyboard([
-    [{ text: `💳 Оплатить ${wallet.formatRub(amount)}`, web_app: { url: publicUrl(`/bot-checkout?kind=topup&amount=${amount}`) } }],
-    [{ text: '⬅️ Назад', callback_data: 'topup:home' }],
-  ]) });
+  // Сумма введена — сразу заказ и ссылка на оплату, без лишнего нажатия.
+  await startTopupPayment(from, chatId, Math.round(amount * 100) / 100, '', msgId);
 }
 
 const CP_DAYS = [7, 30, 90, 180, 365];
@@ -2177,6 +2206,15 @@ async function handleCallback(callback) {
   if (data === 'rvbuy:list') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewPaywall(from, chatId, undefined, messageId); return; }
   // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
   if (data === 'topup:home' || data === 'code:buy') { answerCallbackQuery(callback.id).catch(() => {}); await showTopup(from, chatId, messageId); return; }
+  // tp:<сумма>[:<then>] — пополнить (и купить): заказ ЮKassa создаётся здесь, ссылка на оплату — в том же сообщении.
+  const topupMatch = data.match(/^tp:(\d{1,6})(?::(.+))?$/);
+  if (topupMatch) {
+    const amount = Number(topupMatch[1]);
+    if (!wallet.validTopup(amount)) { await answerCallbackQuery(callback.id, 'Сумма больше не актуальна'); return; }
+    answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {});
+    await startTopupPayment(from, chatId, amount, topupMatch[2] || '', messageId);
+    return;
+  }
   if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
   if (data === 'topup:custom') { answerCallbackQuery(callback.id).catch(() => {}); await askTopupAmount(from, chatId, messageId); return; }
   const shopPay = data.match(/^shop:pay:(\d+):(.+)$/);
