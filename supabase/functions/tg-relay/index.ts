@@ -43,10 +43,13 @@ async function relayMethod(req: Request, method: string) {
   });
 }
 
+// Две формы: старая GET /media?url=https://shk-wb.ru/api/stickers/... и новая GET /media/api/stickers/...?...
+// (как у релея на Caddy, tg.shk-wb.ru:88 — сервер с 03.11.2026 шлёт только её).
 async function relayMedia(url: URL) {
   let target: URL;
   try {
-    target = new URL(url.searchParams.get('url') || '');
+    const pathForm = /\/media(\/api\/.*)$/.exec(url.pathname)?.[1];
+    target = pathForm ? new URL(`https://shk-wb.ru${pathForm}${url.search}`) : new URL(url.searchParams.get('url') || '');
   } catch {
     return json(400, { error: 'Bad url' });
   }
@@ -111,7 +114,7 @@ Deno.serve(async req => {
   const method = /\/api\/([A-Za-z]{2,64})$/.exec(url.pathname)?.[1];
   if (method && req.method === 'POST') return relayMethod(req, method);
   if (/\/file$/.test(url.pathname) && req.method === 'GET') return relayFile(req, url);
-  if (/\/media$/.test(url.pathname) && req.method === 'GET') return relayMedia(url);
+  if (/\/media(\/|$)/.test(url.pathname) && req.method === 'GET') return relayMedia(url);
   if (/\/webhook$/.test(url.pathname) && req.method === 'POST') return relayWebhook(req);
   return json(404, { error: 'Not found' });
 });

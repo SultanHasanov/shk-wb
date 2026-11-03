@@ -77,6 +77,29 @@ describe('fetch с таймаутом и повтором', () => {
   });
 });
 
+describe('картинки стикеров через релей', () => {
+  const { telegramRequest } = require('../../server/_telegram-api.js') as {
+    telegramRequest: (method: string, body: Record<string, unknown>) => Promise<unknown>;
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.TELEGRAM_API_BASE;
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('подменяет URL картинки на путь /media/<путь> у релея, чужие URL не трогает', async () => {
+    process.env.TELEGRAM_API_BASE = 'https://tg.shk-wb.ru:88';
+    process.env.TELEGRAM_BOT_TOKEN = '1:' + 'a'.repeat(30);
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true, result: {} })));
+    vi.stubGlobal('fetch', fetchMock);
+    await telegramRequest('sendPhoto', { chat_id: 1, photo: 'https://shk-wb.ru/api/stickers/image?code=1&sig=abc' });
+    await telegramRequest('sendPhoto', { chat_id: 1, photo: 'https://example.com/pic.png' });
+    expect(fetchMock.mock.calls[0][0]).toBe('https://tg.shk-wb.ru:88/api/sendPhoto');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).photo).toBe('https://tg.shk-wb.ru:88/media/api/stickers/image?code=1&sig=abc');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).photo).toBe('https://example.com/pic.png');
+  });
+});
+
 describe('кеш связки telegram → user', () => {
   beforeEach(() => userCache.clearTelegramUserCache());
 

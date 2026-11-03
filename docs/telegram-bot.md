@@ -20,6 +20,24 @@ Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram
 тоже не проходит). Переключение: `setWebhook` через релей с `secret_token` = `TELEGRAM_WEBHOOK_SECRET` из `.env`, см.
 `selfhost/tg-set-webhook.sh`. Откат — вернуть старый TELEGRAM_API_BASE.
 
+## Релей на немецком сервере tg.shk-wb.ru:88 (с 03.11.2026) — ОСНОВНОЙ
+Сервер aeza в Германии: `root@109.120.140.116`, ключ тот же `~/.ssh/shk-wb_ed25519`, Debian 13, 1 CPU / 2 GB.
+Там уже живёт VPN-релей на Caddy (сайт `{$TPROXY_HOSTNAME}` = tg.shk-wb.ru на 80/443, панель на 8443, `mtproto-proxy`
+на 2398, бэкенды 127.0.0.1:8080/8081/8090) — **не трогать**. Релей бота — отдельный блок `/etc/caddy/Caddyfile.tg-relay`
+(подключён `import` в конце `/etc/caddy/Caddyfile`), порт **88** (Telegram допускает вебхуки на 80/88/443/8443),
+сертификат общий с :443. Протокол тот же, что у Supabase-релея: `POST /api/<метод>` + Bearer-токен (пропускает
+только ботов 8804824717 и 8894809412, остальным 403), `GET /file?path=`, `GET /media/api/stickers/{image,pdf}?…`,
+`POST /webhook` → `https://shk-wb.ru/api/telegram/webhook` (секрет сверяет сервер). У Caddy `admin off` и нет
+`ExecReload`: после правки `caddy validate --config /etc/caddy/Caddyfile` (нужны переменные из `systemctl show caddy
+-p Environment`) и `systemctl restart caddy` — VPN-релей прервётся на секунду.
+Замеры с Германии: api.telegram.org 50 мс на запрос, Supabase 1 мс пинг, VPS РФ 36 мс пинг; с VPS РФ `getMe` через
+:88 ~0,2 с по новому соединению (через Supabase edge было ~0,35 с плюс холодные старты).
+Включение: `TELEGRAM_API_BASE=https://tg.shk-wb.ru:88` в `/srv/shk-wb/.env` + `systemctl restart shk-wb`,
+затем `bash /srv/shk-wb/tg-set-webhook.sh https://tg.shk-wb.ru:88/webhook`. Supabase-релей остаётся задеплоенным
+как запасной: откат — вернуть `TELEGRAM_API_BASE=https://ouxsvlfaszsaykzpnkwh.supabase.co/functions/v1/tg-relay`,
+рестарт, `tg-set-webhook.sh` без аргумента. Картинки стикеров сервер теперь шлёт как `<релей>/media/api/stickers/…`
+(путь, не `?url=`), Supabase-функция понимает обе формы.
+
 ## Горячий путь и скорость отклика (03.11.2026)
 До ускорения нажатие кнопки стоило 1,5–2,5 с: 5–10 сетевых запросов строго по очереди (Supabase ~30 мс по тёплому
 соединению и ~200 мс по новому, каждый вызов Telegram через релей ~350 мс), «часики» снимались третьим запросом,

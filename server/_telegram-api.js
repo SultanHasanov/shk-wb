@@ -70,7 +70,8 @@ function proxyMediaUrl(value, relayBase) {
   }
   if (url.protocol !== 'https:' || url.hostname !== 'shk-wb.ru') return value;
   if (!['/api/stickers/image', '/api/stickers/pdf'].includes(url.pathname)) return value;
-  return `${relayBase}/media?url=${encodeURIComponent(url.toString())}`;
+  // Путём, а не ?url=: релей на Caddy (tg.shk-wb.ru:88) умеет только так; Supabase-релей понимает обе формы.
+  return `${relayBase}/media${url.pathname}${url.search}`;
 }
 
 function proxyTelegramMedia(method, body, relayBase) {
