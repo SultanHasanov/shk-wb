@@ -31,7 +31,9 @@ Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram
 `ExecReload`: после правки `caddy validate --config /etc/caddy/Caddyfile` (нужны переменные из `systemctl show caddy
 -p Environment`) и `systemctl restart caddy` — VPN-релей прервётся на секунду.
 Замеры с Германии: api.telegram.org 50 мс на запрос, Supabase 1 мс пинг, VPS РФ 36 мс пинг; с VPS РФ `getMe` через
-:88 ~0,2 с по новому соединению (через Supabase edge было ~0,35 с плюс холодные старты).
+:88 ~0,17 с (через Supabase edge было ~0,35 с плюс холодные старты). Итог 03.11 на прогретом процессе:
+`bot message /menu` 92–142 мс и `bot callback menu:home` 235–294 мс (до релея 464 / 900 мс), Telegram получает
+200 за ~0,3 с. Первые запросы после `systemctl restart shk-wb` холодные (новые TLS), это норма.
 Включение: `TELEGRAM_API_BASE=https://tg.shk-wb.ru:88` в `/srv/shk-wb/.env` + `systemctl restart shk-wb`,
 затем `bash /srv/shk-wb/tg-set-webhook.sh https://tg.shk-wb.ru:88/webhook`. Supabase-релей остаётся задеплоенным
 как запасной: откат — вернуть `TELEGRAM_API_BASE=https://ouxsvlfaszsaykzpnkwh.supabase.co/functions/v1/tg-relay`,
