@@ -40,6 +40,22 @@ Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram
 рестарт, `tg-set-webhook.sh` без аргумента. Картинки стикеров сервер теперь шлёт как `<релей>/media/api/stickers/…`
 (путь, не `?url=`), Supabase-функция понимает обе формы.
 
+## Сообщения админу о здоровье бота (03.11.2026)
+Два уровня, получатели — `adminIds()` из `server/_admin-alerts.js` (ADMIN_PAYMENT_TELEGRAM_IDS, по умолчанию владелец).
+1. **Внутри сервера** — `server/_bot-health.js`, стартует из `selfhost/server.cjs`, проверка раз в минуту:
+   апдейты за 10 минут (≥3 с ошибкой или ≥3 медленных дольше `BOT_HEALTH_SLOW_MS`=3 с при доле ≥30%) → «Бот отвечает
+   с перебоями»; `getMe` через релей дольше 5 с или с ошибкой два раза подряд → «Релей Telegram не отвечает»;
+   `getWebhookInfo` с очередью ≥20 или свежей `last_error_date` (3 мин) → «Telegram не может доставить апдейты».
+   Повтор не чаще раза в 30 минут, «снова в порядке» после двух хороших проверок, состояние в
+   `/srv/shk-wb/state/bot-health.json`. Если сломан рабочий релей, сообщение уходит через запасной
+   `TELEGRAM_API_FALLBACK_BASE` (Supabase) — переменная есть в `.env`.
+2. **Снаружи, на немецком сервере** — `selfhost/tg-watchdog/` (скрипт + systemd service/timer): раз в минуту
+   `GET https://shk-wb.ru/api/telegram/webhook`, два провала подряд → «Сервер бота не отвечает» напрямую через
+   api.telegram.org, повтор раз в 30 минут, после двух удачных проверок — «снова отвечает». Это единственный канал,
+   когда лёг сам процесс или VPS. Установка: скрипт в `/usr/local/bin/tg-watchdog.sh`, юниты в `/etc/systemd/system/`,
+   `/etc/tg-watchdog.env` (chmod 600: `TG_BOT_TOKEN`, `TG_ADMIN_IDS`, `TARGET_URL`), `systemctl enable --now tg-watchdog.timer`.
+   Лог: `journalctl -t tg-watchdog`.
+
 ## Горячий путь и скорость отклика (03.11.2026)
 До ускорения нажатие кнопки стоило 1,5–2,5 с: 5–10 сетевых запросов строго по очереди (Supabase ~30 мс по тёплому
 соединению и ~200 мс по новому, каждый вызов Telegram через релей ~350 мс), «часики» снимались третьим запросом,

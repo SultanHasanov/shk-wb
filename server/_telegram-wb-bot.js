@@ -14,6 +14,7 @@ const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { isTechnicalTelegramUser } = require('./_telegram-account');
 const userCache = require('./_telegram-user-cache');
+const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 const { newStickerSvg, stickerSvg } = require('./_stickers');
@@ -2439,11 +2440,15 @@ async function processUpdate(update) {
   try {
     if (update.callback_query) await handleCallback(update.callback_query);
     else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
-    console.log(`bot ${updateLabel(update)} ${Date.now() - startedAt} ms`);
+    const ms = Date.now() - startedAt;
+    console.log(`bot ${updateLabel(update)} ${ms} ms`);
+    botHealth.recordUpdate({ label: updateLabel(update), ms });
   } catch (error) {
     // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
     const incident = crypto.randomBytes(3).toString('hex');
-    console.error(`Telegram generator bot failed [${incident}] ${updateLabel(update)} ${Date.now() - startedAt} ms`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    const ms = Date.now() - startedAt;
+    console.error(`Telegram generator bot failed [${incident}] ${updateLabel(update)} ${ms} ms`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    botHealth.recordUpdate({ label: updateLabel(update), ms, failed: true, incident });
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
     if (chatId) await sendMessage(chatId, `Произошла внутренняя ошибка. Попробуйте позже.\nКод для поддержки: <code>${incident}</code>`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
   }

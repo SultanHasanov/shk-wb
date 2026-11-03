@@ -1,0 +1,7 @@
+[Unit]
+Description=Сторож бота @shkwb_bot: проверка вебхука shk-wb.ru, сообщение админу при падении
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tg-watchdog.sh

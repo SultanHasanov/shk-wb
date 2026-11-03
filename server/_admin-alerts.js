@@ -92,4 +92,4 @@ async function notifyAdminNewUser({ from, source, inviterUserId }) {
   await sendToAdmins(lines.join('\n'));
 }
 
-module.exports = { notifyAdminNewUser, notifyAdminOrder, notifyAdminSpend, sendToAdmins };
+module.exports = { adminIds, notifyAdminNewUser, notifyAdminOrder, notifyAdminSpend, sendToAdmins };

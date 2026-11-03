@@ -211,3 +211,5 @@ app.listen(port, '127.0.0.1', () => console.log(`shk-wb listening on 127.0.0.1:$
 
 // Мало места на диске (архив/зеркало Помощника в своём Postgres) — сообщение админу в Telegram.
 require('../server/_disk-alert').startDiskAlert();
+// Бот тормозит, релей или вебхук Telegram не работают — сообщение админу в Telegram (через запасной релей, если нужно).
+require('../server/_bot-health').startBotHealth();

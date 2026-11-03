@@ -10,9 +10,13 @@ function botToken() {
 // sendMessage/sendPhoto/sendDocument/sendMediaGroup не повторяем — второе сообщение хуже, чем его отсутствие.
 const RETRY_SAFE_METHODS = new Set(['answerCallbackQuery', 'editMessageText', 'editMessageReplyMarkup', 'editMessageCaption', 'deleteMessage', 'sendChatAction', 'getFile', 'getMe', 'getWebhookInfo', 'setMyCommands']);
 
-async function telegramRequest(method, body) {
+/**
+ * options.apiBase — релей вместо TELEGRAM_API_BASE (запасной канал для алертов о здоровье бота);
+ * options.timeoutMs / options.retries — переопределить сетевые настройки (мониторинг хочет быстрый ответ без повторов).
+ */
+async function telegramRequest(method, body, options = {}) {
   const token = botToken();
-  const relayBase = String(process.env.TELEGRAM_API_BASE || '').trim().replace(/\/$/, '');
+  const relayBase = String(options.apiBase ?? process.env.TELEGRAM_API_BASE ?? '').trim().replace(/\/$/, '');
   const proxiedBody = proxyTelegramMedia(method, body, relayBase);
   const url = relayBase
     ? `${relayBase}/api/${method}`
@@ -24,7 +28,7 @@ async function telegramRequest(method, body) {
       ...(relayBase ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(proxiedBody),
-  }, { retries: RETRY_SAFE_METHODS.has(method) ? 1 : 0, label: `telegram ${method}` });
+  }, { retries: options.retries ?? (RETRY_SAFE_METHODS.has(method) ? 1 : 0), timeoutMs: options.timeoutMs, label: `telegram ${method}` });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok !== true) {
     const error = new Error(data.description || `Telegram API error (${response.status})`);
