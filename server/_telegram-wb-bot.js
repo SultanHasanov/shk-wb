@@ -13,6 +13,7 @@ const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { isTechnicalTelegramUser } = require('./_telegram-account');
+const userCache = require('./_telegram-user-cache');
 const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 const { newStickerSvg, stickerSvg } = require('./_stickers');
@@ -82,37 +83,90 @@ function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Повторы апдейтов (Telegram шлёт заново после таймаута, релей — после своего) отсекаем сначала памятью,
+// потом базой: база остаётся защитой после рестарта процесса.
+const SEEN_UPDATES_MAX = 2000;
+const seenUpdates = new Set();
+
+function rememberUpdate(updateId) {
+  const key = Number(updateId);
+  if (seenUpdates.has(key)) return false;
+  if (seenUpdates.size >= SEEN_UPDATES_MAX) seenUpdates.delete(seenUpdates.values().next().value);
+  seenUpdates.add(key);
+  return true;
+}
+
 async function claimUpdate(updateId) {
   if (process.env.TELEGRAM_LOCAL_POLLING === '1') return true;
-  const rows = await supabaseFetch('telegram_bot_updates?on_conflict=update_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' }, body: JSON.stringify({ update_id: Number(updateId) }) });
+  if (!rememberUpdate(updateId)) return false;
+  let rows;
+  try {
+    rows = await supabaseFetch('telegram_bot_updates?on_conflict=update_id', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' }, body: JSON.stringify({ update_id: Number(updateId) }) });
+  } catch (error) {
+    // База не ответила — апдейт не наш, повтор от Telegram должен пройти заново.
+    seenUpdates.delete(Number(updateId));
+    throw error;
+  }
   return Array.isArray(rows) && rows.length > 0;
 }
 
 async function findUser(telegramId) {
+  const cached = userCache.cachedUser(telegramId);
+  if (cached) return cached.userId;
   const rows = await supabaseFetch(`user_telegram_identities?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=user_id&limit=1`);
-  return rows[0]?.user_id || null;
+  return userCache.remember(telegramId, rows[0]?.user_id || null);
 }
 
-async function getSession(telegramId) {
-  const rows = await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
-  const session = rows[0] || null;
+// Сессия мастера в памяти процесса: один процесс, все писатели — здесь же (afterWalletTopup тоже идёт
+// через saveSession/clearSession). В базу пишем сквозь кеш, читаем из базы только при промахе.
+const sessionCache = new Map();
+
+function sessionExpired(session, now = Date.now()) {
+  if (!session) return true;
   // Подтверждение покупки живёт дольше: человек уходит пополнять баланс, а после оплаты покупка проходит сама.
-  const ttl = session?.state === 'confirm' ? CONFIRM_TTL_MS : SESSION_TTL_MS;
-  if (session && Date.now() - new Date(session.updated_at).getTime() > ttl) { await clearSession(telegramId); return null; }
+  const ttl = session.state === 'confirm' ? CONFIRM_TTL_MS : SESSION_TTL_MS;
+  return now - new Date(session.updated_at).getTime() > ttl;
+}
+
+function cacheSession(telegramId, session) {
+  if (sessionCache.size > 5000) sessionCache.clear();
+  sessionCache.set(Number(telegramId), { session, cachedAt: Date.now() });
   return session;
 }
 
+async function getSession(telegramId) {
+  const key = Number(telegramId);
+  const cached = sessionCache.get(key);
+  let session;
+  if (cached) {
+    session = cached.session;
+  } else {
+    const rows = await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
+    session = cacheSession(telegramId, rows[0] || null);
+  }
+  if (session && sessionExpired(session)) { await clearSession(telegramId); return null; }
+  // Копия: обработчики правят draft на месте, а в кеш попадает только то, что дошло до saveSession.
+  return session ? structuredClone(session) : null;
+}
+
 async function saveSession(from, chatId, state, draft = {}) {
+  const row = { telegram_user_id: Number(from.id), chat_id: Number(chatId), user_id: draft.userId || null, state, draft, updated_at: new Date().toISOString() };
   const rows = await supabaseFetch('telegram_generator_sessions?on_conflict=telegram_user_id', {
     method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify({ telegram_user_id: Number(from.id), chat_id: Number(chatId), user_id: draft.userId || null, state, draft, updated_at: new Date().toISOString() }),
+    body: JSON.stringify(row),
   });
-  return rows[0];
+  return cacheSession(from.id, rows[0] || row);
 }
 
 async function clearSession(telegramId) {
+  cacheSession(telegramId, null);
   await supabaseFetch(`telegram_generator_sessions?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
 }
+
+// Подключение WB читается на каждую кнопку меню (отмена незаконченного входа) — минуту держим в памяти.
+// Писатели (saveWbConnection, deleteWbConnection) живут здесь же и сбрасывают запись.
+const WB_CONNECTION_CACHE_MS = 60 * 1000;
+const wbConnectionCache = new Map();
 
 async function getWbConnection(telegramId) {
   if (process.env.WB_CONNECTION_STORE === 'memory' || process.env.WB_CONNECTION_STORE === 'file') {
@@ -120,12 +174,18 @@ async function getWbConnection(telegramId) {
     const row = localWbConnections.get(Number(telegramId));
     return row ? { ...row, session: wbPvz.decryptSession(row.encrypted_session) } : null;
   }
+  const key = Number(telegramId);
+  const cached = wbConnectionCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.row ? structuredClone(cached.row) : null;
   const rows = await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
   const row = rows[0] || null;
-  if (!row) return null;
-  try { row.session = wbPvz.decryptSession(row.encrypted_session); }
-  catch { row.session = null; }
-  return row;
+  if (row) {
+    try { row.session = wbPvz.decryptSession(row.encrypted_session); }
+    catch { row.session = null; }
+  }
+  if (wbConnectionCache.size > 5000) wbConnectionCache.clear();
+  wbConnectionCache.set(key, { row, expiresAt: Date.now() + WB_CONNECTION_CACHE_MS });
+  return row ? structuredClone(row) : null;
 }
 
 async function saveWbConnection(from, chatId, state, session, extra = {}) {
@@ -141,6 +201,7 @@ async function saveWbConnection(from, chatId, state, session, extra = {}) {
     persistLocalConnections();
     return row;
   }
+  wbConnectionCache.delete(Number(from.id));
   const rows = await supabaseFetch('telegram_wb_connections?on_conflict=telegram_user_id', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
@@ -151,6 +212,7 @@ async function saveWbConnection(from, chatId, state, session, extra = {}) {
       updated_at: new Date().toISOString(),
     }),
   });
+  wbConnectionCache.delete(Number(from.id));
   return rows[0];
 }
 
@@ -161,7 +223,9 @@ async function deleteWbConnection(telegramId) {
     persistLocalConnections();
     return;
   }
+  wbConnectionCache.delete(Number(telegramId));
   await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}`, { method: 'DELETE' });
+  wbConnectionCache.delete(Number(telegramId));
 }
 
 // Новый подписчик: activated_at ставит база при первой вставке (в теле upsert его нет, поэтому он не
@@ -655,8 +719,21 @@ function wizardView(state, draft) {
 async function renderWizard(from, chatId, state, draft, messageId) {
   const view = wizardView(state, draft);
   delete draft.error;
-  draft.msgId = await showScreen(chatId, messageId || draft.msgId, view.text, { reply_markup: choiceKeyboard(view.rows) });
-  await saveSession(from, chatId, state, draft);
+  const expectedId = messageId || draft.msgId || null;
+  const options = { reply_markup: choiceKeyboard(view.rows) };
+  if (!expectedId) {
+    draft.msgId = await showScreen(chatId, null, view.text, options);
+    await saveSession(from, chatId, state, draft);
+    return;
+  }
+  // Экран правится в известном сообщении — его id в черновике уже есть, поэтому Telegram и Supabase
+  // идут параллельно. Если сообщение не удалось отредактировать и ушло новое, сохраняем ещё раз с новым id.
+  draft.msgId = expectedId;
+  const [shownId] = await Promise.all([showScreen(chatId, expectedId, view.text, options), saveSession(from, chatId, state, draft)]);
+  if (shownId && shownId !== expectedId) {
+    draft.msgId = shownId;
+    await saveSession(from, chatId, state, draft);
+  }
 }
 
 /** Шаг назад: куда возвращаться из каждого состояния. */
@@ -811,19 +888,26 @@ async function requestConfirmation(from, chatId, draft, messageId) {
   delete draft.accessCode;
   delete draft.packageRemaining;
   const packageMode = draft.mode === 'range' ? 'batch' : 'custom';
-  const packageCode = await selectAccessCode(draft.userId, units, packageMode);
-  if (packageCode) {
-    const status = await getAccessStatus(packageCode);
-    draft.accessCode = packageCode;
-    draft.packageRemaining = Math.max(0, Number(status?.remaining || 0) - units);
+  // Код доступа (и его остаток), скидка и баланс не зависят друг от друга — читаем параллельно.
+  const [packageInfo, discounts, balanceKopecks] = await Promise.all([
+    selectAccessCode(draft.userId, units, packageMode).then(async packageCode => {
+      if (!packageCode) return null;
+      const status = await getAccessStatus(packageCode);
+      return { packageCode, remaining: Math.max(0, Number(status?.remaining || 0) - units) };
+    }),
+    supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(draft.userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []),
+    wallet.getBalanceKopecks(draft.userId),
+  ]);
+  if (packageInfo) {
+    draft.accessCode = packageInfo.packageCode;
+    draft.packageRemaining = packageInfo.remaining;
   }
-  const discounts = await supabaseFetch(`sticker_generation_discounts?user_id=eq.${encodeURIComponent(draft.userId)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []);
   const discounted = discounts.length > 0;
   draft.discountAvailable = discounted;
   // Цены в копейках — те же, что в SQL reserve_sticker_generation (менять вместе).
   const prices = discounted ? GENERATION_DISCOUNT_PRICES : GENERATION_PRICES;
   draft.walletCost = (draft.mode === 'range' ? prices.batch : prices.custom) / 100;
-  draft.balanceKopecks = await wallet.getBalanceKopecks(draft.userId);
+  draft.balanceKopecks = balanceKopecks;
   await renderWizard(from, chatId, 'confirm', draft, messageId);
 }
 
@@ -2059,10 +2143,15 @@ async function cancelWbLogin(from, chatId) {
 
 /** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
 async function handleMenu(from, chatId, item, messageId) {
-  // Ушли из мастера кнопкой меню — его черновик больше не нужен.
-  if (item !== 'stickers') await clearSession(from.id).catch(() => {});
-  // Ушли из незаконченного входа в WB — следующее сообщение больше не считается телефоном или SMS-кодом.
-  if (item !== 'reviews') await cancelWbLogin(from, chatId).catch(() => {});
+  // Три независимых запроса — параллельно: черновик мастера, незаконченный вход в WB и связка с кабинетом
+  // (последняя греет кеш для экрана, который откроется ниже).
+  await Promise.all([
+    // Ушли из мастера кнопкой меню — его черновик больше не нужен.
+    item !== 'stickers' ? clearSession(from.id).catch(() => {}) : null,
+    // Ушли из незаконченного входа в WB — следующее сообщение больше не считается телефоном или SMS-кодом.
+    item !== 'reviews' ? cancelWbLogin(from, chatId).catch(() => {}) : null,
+    findUser(from.id).catch(() => null),
+  ]);
   if (item === 'stickers') return startGeneration(from, chatId, messageId);
   if (item === 'code') return showClientCode(chatId, messageId, from);
   if (item === 'reviews') return showReviewFilters(from, chatId, messageId);
@@ -2079,23 +2168,24 @@ async function handleMenu(from, chatId, item, messageId) {
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
   if (!chatId) return;
-  await touchSubscriber(from, chatId);
+  // «Последний визит» — в фоне: ответ человеку его не ждёт.
+  touchSubscriber(from, chatId).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   const data = String(callback.data || '');
   const messageId = callback.message?.message_id;
-  if (data.startsWith('menu:')) { await answerCallbackQuery(callback.id); await handleMenu(from, chatId, data.slice('menu:'.length), messageId); return; }
-  if (data === 'rvbuy:list') { await answerCallbackQuery(callback.id); await showReviewPaywall(from, chatId, undefined, messageId); return; }
+  if (data.startsWith('menu:')) { answerCallbackQuery(callback.id).catch(() => {}); await handleMenu(from, chatId, data.slice('menu:'.length), messageId); return; }
+  if (data === 'rvbuy:list') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewPaywall(from, chatId, undefined, messageId); return; }
   // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
-  if (data === 'topup:home' || data === 'code:buy') { await answerCallbackQuery(callback.id); await showTopup(from, chatId, messageId); return; }
-  if (data === 'ref:towallet') { await answerCallbackQuery(callback.id); await referralToWallet(from, chatId, messageId); return; }
-  if (data === 'topup:custom') { await answerCallbackQuery(callback.id); await askTopupAmount(from, chatId, messageId); return; }
+  if (data === 'topup:home' || data === 'code:buy') { answerCallbackQuery(callback.id).catch(() => {}); await showTopup(from, chatId, messageId); return; }
+  if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
+  if (data === 'topup:custom') { answerCallbackQuery(callback.id).catch(() => {}); await askTopupAmount(from, chatId, messageId); return; }
   const shopPay = data.match(/^shop:pay:(\d+):(.+)$/);
-  if (shopPay) { await answerCallbackQuery(callback.id); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
-  if (data.startsWith('shop:')) { await answerCallbackQuery(callback.id); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
-  if (data === 'rv:start' || data === 'rv:filters') { await answerCallbackQuery(callback.id); await showReviewFilters(from, chatId, messageId); return; }
-  if (data === 'rv:disconnect') { await answerCallbackQuery(callback.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
-  if (data === 'rv:cancel') { await answerCallbackQuery(callback.id); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
+  if (shopPay) { answerCallbackQuery(callback.id).catch(() => {}); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
+  if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
+  if (data === 'rv:start' || data === 'rv:filters') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId, messageId); return; }
+  if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
+  if (data === 'rv:cancel') { answerCallbackQuery(callback.id).catch(() => {}); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
   if (data === 'rv:points') {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
     if (!connection?.session?.token) return showReviewFilters(from, chatId);
     await beginPointSelection(from, chatId, connection);
@@ -2103,7 +2193,7 @@ async function handleCallback(callback) {
   }
   const pointMatch = data.match(/^rv:point:(\d+)$/);
   if (pointMatch) {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
     if (!connection?.session?.token) return showReviewFilters(from, chatId);
     const session = await wbPvz.selectPoint(connection.session, Number(pointMatch[1]));
@@ -2112,34 +2202,34 @@ async function handleCallback(callback) {
     return;
   }
   const filterMatch = data.match(/^rv:filter:(all|[1-5])$/);
-  if (filterMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
+  if (filterMatch) { answerCallbackQuery(callback.id).catch(() => {}); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
   const reviewPageMatch = data.match(/^rv:page:(all|[1-5]):(\d+)$/);
-  if (reviewPageMatch) { await answerCallbackQuery(callback.id); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
+  if (reviewPageMatch) { answerCallbackQuery(callback.id).catch(() => {}); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
   const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)(?::([0-9a-f]{8}))?$/);
-  if (authorPositionMatch) { await answerCallbackQuery(callback.id); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4]); return; }
+  if (authorPositionMatch) { answerCallbackQuery(callback.id).catch(() => {}); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4]); return; }
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
-  if (authorMatch) { await answerCallbackQuery(callback.id); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
-  if (data === 'gen:start') { await answerCallbackQuery(callback.id); await startGeneration(from, chatId); return; }
+  if (authorMatch) { answerCallbackQuery(callback.id).catch(() => {}); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
+  if (data === 'gen:start') { answerCallbackQuery(callback.id).catch(() => {}); await startGeneration(from, chatId); return; }
   // Стикер по номеру, найденному на фото или присланному цифрами, — без шагов мастера.
   const numMatch = data.match(/^gen:num:(\d{11})$/);
-  if (numMatch) { await answerCallbackQuery(callback.id); await startWithCode(from, chatId, numMatch[1], messageId); return; }
-  if (data === 'orders:list') { await answerCallbackQuery(callback.id); await showIndividualOrders(from, chatId); return; }
+  if (numMatch) { answerCallbackQuery(callback.id).catch(() => {}); await startWithCode(from, chatId, numMatch[1], messageId); return; }
+  if (data === 'orders:list') { answerCallbackQuery(callback.id).catch(() => {}); await showIndividualOrders(from, chatId); return; }
   if (data === 'gen:cancel') {
-    await answerCallbackQuery(callback.id); await clearSession(from.id);
+    answerCallbackQuery(callback.id).catch(() => {}); await clearSession(from.id);
     await showScreen(chatId, messageId, 'Генерация отменена.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
-  if (data === 'code:find') { await answerCallbackQuery(callback.id); await startClientSearch(from, chatId, messageId); return; }
+  if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }
   const codeQr = data.match(/^code:qr:(\d{1,12})$/);
-  if (codeQr) { await answerCallbackQuery(callback.id); await handleClientCode(from, chatId, codeQr[1]); return; }
+  if (codeQr) { answerCallbackQuery(callback.id).catch(() => {}); await handleClientCode(from, chatId, codeQr[1]); return; }
   if (data === 'code:enter') {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     const current = await getSession(from.id);
     // Из подтверждения генерации сохраняем черновик (после кода — сразу к подтверждению), из профиля начинаем с чистого.
     await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.mode ? current.draft : {});
     return;
   }
-  if (data === 'account:continue') { await answerCallbackQuery(callback.id); await showMainMenu(from, chatId); return; }
+  if (data === 'account:continue') { answerCallbackQuery(callback.id).catch(() => {}); await showMainMenu(from, chatId); return; }
   const formatMatch = data.match(/^gen:format:(old|new):([^:]+:\d+)$/);
   if (formatMatch) {
     await answerCallbackQuery(callback.id, 'Готовлю файлы…');
@@ -2153,7 +2243,7 @@ async function handleCallback(callback) {
     return;
   }
   const pageMatch = data.match(/^gen:page:(old|new):([^:]+:\d+):(\d+)$/);
-  if (pageMatch) { await answerCallbackQuery(callback.id); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
+  if (pageMatch) { answerCallbackQuery(callback.id).catch(() => {}); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
   const session = await getSession(from.id);
   if (!session) {
     await answerCallbackQuery(callback.id, 'Сессия истекла');
@@ -2166,18 +2256,18 @@ async function handleCallback(callback) {
     await answerCallbackQuery(callback.id, 'Этот шаг устарел — используйте последнее сообщение');
     return;
   }
-  if (data === 'gen:back') { await answerCallbackQuery(callback.id); await wizardBack(from, chatId, session, messageId); return; }
-  if (data === 'gen:return-mode') { await answerCallbackQuery(callback.id); await renderWizard(from, chatId, 'choose_mode', draft, messageId); return; }
+  if (data === 'gen:back') { answerCallbackQuery(callback.id).catch(() => {}); await wizardBack(from, chatId, session, messageId); return; }
+  if (data === 'gen:return-mode') { answerCallbackQuery(callback.id).catch(() => {}); await renderWizard(from, chatId, 'choose_mode', draft, messageId); return; }
   // «🔄 Я пополнил» — перечитать баланс и коды и показать подтверждение заново.
-  if (data === 'gen:recheck' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await requestConfirmation(from, chatId, draft, messageId); return; }
+  if (data === 'gen:recheck' && session.state === 'confirm') { answerCallbackQuery(callback.id).catch(() => {}); await requestConfirmation(from, chatId, draft, messageId); return; }
   if (data.startsWith('gen:kind:') && session.state === 'choose_kind') {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     draft.category = data.endsWith(':box') ? 'box' : 'product';
     await renderWizard(from, chatId, 'choose_mode', draft, messageId);
     return;
   }
   if (data.startsWith('gen:mode:') && session.state === 'choose_mode') {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     draft.mode = data.endsWith(':custom') ? 'custom' : 'range';
     if (draft.category === 'box') draft.prefix = 'TRBX';
     if (draft.mode === 'range') {
@@ -2192,27 +2282,29 @@ async function handleCallback(callback) {
     const quantity = Number(data.slice('gen:qty:'.length));
     // gen:qty:manual — кнопка «Ввести другое количество» из старых сообщений.
     if (quantity !== BATCH_QUANTITY) { await answerCallbackQuery(callback.id, 'Пачка содержит ровно 50 кодов'); return; }
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     draft.quantity = quantity; await requestConfirmation(from, chatId, draft, messageId); return;
   }
   const pickMatch = data.match(/^gen:pick:(\d{10,11})$/);
   if (pickMatch && session.state === 'await_code' && Array.isArray(draft.photoCodes) && draft.photoCodes.includes(pickMatch[1])) {
-    await answerCallbackQuery(callback.id);
+    answerCallbackQuery(callback.id).catch(() => {});
     draft.code = pickMatch[1]; delete draft.photoCodes;
     await requestConfirmation(from, chatId, draft, messageId);
     return;
   }
-  if (data === 'gen:confirm' && session.state === 'confirm') { await answerCallbackQuery(callback.id); await confirmGeneration(callback, session); return; }
+  if (data === 'gen:confirm' && session.state === 'confirm') { answerCallbackQuery(callback.id).catch(() => {}); await confirmGeneration(callback, session); return; }
   await answerCallbackQuery(callback.id, 'Кнопка больше неактуальна');
 }
 
 async function handleMessage(message) {
   const from = message.from, chatId = message.chat.id, text = String(message.text || '').trim();
   if (message.chat.type !== 'private') return sendMessage(chatId, 'Используйте личный чат с ботом.');
-  await touchSubscriber(from, chatId, text);
+  // «Последний визит» и уведомление о новичке — в фоне: ответ человеку их не ждёт.
+  touchSubscriber(from, chatId, text).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
   if (startMatch) {
-    await clearSession(from.id);
+    // Сброс черновика и связка с кабинетом (греет кеш для меню) — параллельно.
+    await Promise.all([clearSession(from.id), findUser(from.id).catch(() => null)]);
     // t.me/<бот>?start=r_<КОД> — переход по приглашению.
     const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
     const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;
@@ -2334,22 +2426,48 @@ function validWebhookSecret(req) {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }
 
+function updateLabel(update) {
+  if (update.callback_query) return `callback ${String(update.callback_query.data || '').slice(0, 40)}`;
+  const message = update.message || {};
+  if (message.photo) return 'message photo';
+  const text = String(message.text || '');
+  return `message ${text.startsWith('/') ? text.split(/\s/)[0] : text ? 'text' : 'other'}`;
+}
+
+async function processUpdate(update) {
+  const startedAt = Date.now();
+  try {
+    if (update.callback_query) await handleCallback(update.callback_query);
+    else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
+    console.log(`bot ${updateLabel(update)} ${Date.now() - startedAt} ms`);
+  } catch (error) {
+    // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
+    const incident = crypto.randomBytes(3).toString('hex');
+    console.error(`Telegram generator bot failed [${incident}] ${updateLabel(update)} ${Date.now() - startedAt} ms`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+    if (chatId) await sendMessage(chatId, `Произошла внутренняя ошибка. Попробуйте позже.\nКод для поддержки: <code>${incident}</code>`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
+  }
+}
+
+/**
+ * Вебхук. Telegram получает 200 сразу после того, как апдейт закреплён за нами (dedupe), а обработка идёт
+ * в фоне: релей и Telegram не ждут Supabase и WB, повторов и дублей не бывает. Локальный polling
+ * (scripts/run-telegram-bot-local.cjs) передаёт req.waitForCompletion и ждёт обработку целиком.
+ */
 async function handleTelegramUpdate(req, res) {
   if (!validWebhookSecret(req)) return res.status(401).json({ ok: false });
   const update = req.body || {};
   if (!Number.isSafeInteger(Number(update.update_id))) return res.status(400).json({ ok: false });
   try {
     if (!await claimUpdate(update.update_id)) return res.status(200).json({ ok: true, duplicate: true });
-    if (update.callback_query) await handleCallback(update.callback_query);
-    else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
   } catch (error) {
-    // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
-    const incident = crypto.randomBytes(3).toString('hex');
-    console.error(`Telegram generator bot failed [${incident}]`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
-    const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-    if (chatId) await sendMessage(chatId, `Произошла внутренняя ошибка. Попробуйте позже.\nКод для поддержки: <code>${incident}</code>`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
+    // Не смогли закрепить апдейт (Supabase недоступен) — 502: Telegram пришлёт его ещё раз.
+    console.error('Telegram update claim failed', error.message);
+    return res.status(502).json({ ok: false });
   }
+  const work = processUpdate(update);
+  if (req.waitForCompletion) await work;
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, clientCodeEventKey, findClientsByQuery, freeUntilText, mainMenuKeyboard, profileKeyboard, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

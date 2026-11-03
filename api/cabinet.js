@@ -3,6 +3,7 @@ const { sendApiError, supabaseFetch } = require('../server/_supabase');
 
 const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
 const { sendMessage } = require('../server/_telegram-api');
+const { forgetSiteUser } = require('../server/_telegram-user-cache');
 const {
   deleteAuthUser,
   getAuthUser,
@@ -1029,6 +1030,7 @@ module.exports = async function handler(req, res) {
       await supabaseFetch(`user_telegram_identities?user_id=eq.${q(user.id)}`, {
         method: 'DELETE',
       });
+      forgetSiteUser(user.id);
       return res.status(204).end();
     }
     if (a === 'device' && req.method === 'DELETE') {

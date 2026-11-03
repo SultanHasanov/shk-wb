@@ -1,8 +1,14 @@
+const { fetchWithRetry } = require('./_fetch-retry');
+
 function botToken() {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
   return token;
 }
+
+// Методы, которые безопасно повторить после обрыва сети: при дубле ничего не задваивается.
+// sendMessage/sendPhoto/sendDocument/sendMediaGroup не повторяем — второе сообщение хуже, чем его отсутствие.
+const RETRY_SAFE_METHODS = new Set(['answerCallbackQuery', 'editMessageText', 'editMessageReplyMarkup', 'editMessageCaption', 'deleteMessage', 'sendChatAction', 'getFile', 'getMe', 'getWebhookInfo', 'setMyCommands']);
 
 async function telegramRequest(method, body) {
   const token = botToken();
@@ -11,14 +17,14 @@ async function telegramRequest(method, body) {
   const url = relayBase
     ? `${relayBase}/api/${method}`
     : `https://api.telegram.org/bot${token}/${method}`;
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(relayBase ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(proxiedBody),
-  });
+  }, { retries: RETRY_SAFE_METHODS.has(method) ? 1 : 0, label: `telegram ${method}` });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok !== true) {
     const error = new Error(data.description || `Telegram API error (${response.status})`);

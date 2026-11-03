@@ -1,6 +1,7 @@
 const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
 const { bindTelegramReferral, handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
 const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
+const { forgetTelegramUser } = require('../server/_telegram-user-cache');
 const { referralCookie } = require('../server/_user-auth');
 const crypto = require('crypto');
 const RATE_WINDOW_MS = 60 * 1000;
@@ -76,7 +77,7 @@ async function findIdentity(telegramId) {
 }
 
 async function saveIdentity(userId, telegram) {
-  return request('/rest/v1/user_telegram_identities?on_conflict=telegram_user_id', {
+  const rows = await request('/rest/v1/user_telegram_identities?on_conflict=telegram_user_id', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
     body: JSON.stringify({
@@ -89,6 +90,9 @@ async function saveIdentity(userId, telegram) {
       updated_at: new Date().toISOString(),
     }),
   });
+  // Бот держит связку telegram → user_id в памяти; после привязки он должен увидеть её сразу.
+  forgetTelegramUser(telegram.id);
+  return rows;
 }
 
 async function relinkIdentity(userId, telegram) {

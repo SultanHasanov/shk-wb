@@ -4,6 +4,8 @@
 //   POST <base>/api/<метод>   Authorization: Bearer <токен бота>, тело JSON или multipart → api.telegram.org
 //   GET  <base>/media?url=…   картинки и PDF стикеров shk-wb.ru для sendPhoto/sendDocument
 //   GET  <base>/file?path=…   файл из сообщения (фото с ШК), Bearer-токен бота
+//   POST <base>/webhook       входящие обновления Telegram → shk-wb.ru/api/telegram/webhook (с 03.11.2026,
+//                             когда Vercel перестал доставать до VPS); секрет вебхука проверяет сам сервер
 // Деплой: npx supabase functions deploy tg-relay --no-verify-jwt (Telegram забирает media без JWT).
 // Секрет ALLOWED_BOT_IDS — id ботов через запятую (часть токена до «:»), чужие токены не пропускаем.
 
@@ -75,11 +77,41 @@ async function relayFile(req: Request, url: URL) {
   return new Response(response.body, { status: response.status, headers });
 }
 
+// Входящие обновления: Telegram → сюда → сервер. Заголовок X-Telegram-Bot-Api-Secret-Token пробрасываем как есть,
+// сервер сверяет его с TELEGRAM_WEBHOOK_SECRET; без заголовка не пересылаем, чтобы не быть открытым прокси.
+async function relayWebhook(req: Request) {
+  const secret = req.headers.get('x-telegram-bot-api-secret-token') || '';
+  if (!secret) return json(401, { ok: false, description: 'Secret token required' });
+  const body = await req.text();
+  if (!body || body.length > 1_000_000) return json(400, { ok: false, description: 'Bad body' });
+  // Часть edge-узлов Supabase до VPS не достаёт вовсе (соединение висит, до nginx не доходит) — поэтому короткий
+  // таймаут и две попытки, а дальше быстрый 502: Telegram сам перепошлёт обновление, скорее всего уже с другого узла.
+  let lastError = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch('https://shk-wb.ru/api/telegram/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': secret },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      return new Response(await response.text(), {
+        status: response.status,
+        headers: { 'Content-Type': response.headers.get('content-type') || 'application/json' },
+      });
+    } catch (error) {
+      lastError = String(error);
+    }
+  }
+  return json(502, { ok: false, description: `Upstream failed: ${lastError}` });
+}
+
 Deno.serve(async req => {
   const url = new URL(req.url);
   const method = /\/api\/([A-Za-z]{2,64})$/.exec(url.pathname)?.[1];
   if (method && req.method === 'POST') return relayMethod(req, method);
   if (/\/file$/.test(url.pathname) && req.method === 'GET') return relayFile(req, url);
   if (/\/media$/.test(url.pathname) && req.method === 'GET') return relayMedia(url);
+  if (/\/webhook$/.test(url.pathname) && req.method === 'POST') return relayWebhook(req);
   return json(404, { error: 'Not found' });
 });

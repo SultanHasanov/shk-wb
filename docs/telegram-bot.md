@@ -14,8 +14,32 @@
 Function `supabase/functions/tg-relay` (тот же протокол: `POST /api/<метод>` + Bearer токен, `GET /media?url=` для стикеров).
 `TELEGRAM_API_BASE=https://ouxsvlfaszsaykzpnkwh.supabase.co/functions/v1/tg-relay` в `/srv/shk-wb/.env` (бэкап
 `.env.bak-1792482978`). Пропускает только ботов из секрета `ALLOWED_BOT_IDS` (8804824717 боевой, 8894809412 тестовый).
-Деплой: `npx supabase functions deploy tg-relay --no-verify-jwt --use-api`. ВХОДЯЩИЕ (webhook) по-прежнему идут
-Telegram → `tg-relay-three.vercel.app/webhook` → сервер — это направление работает. Откат — вернуть старый TELEGRAM_API_BASE.
+Деплой: `npx supabase functions deploy tg-relay --no-verify-jwt --use-api --yes` (CLI 3.x требует `supabase/config.toml` с `project_id`, без `--yes` в неинтерактивном режиме отказывается). ВХОДЯЩИЕ (webhook) с 03.11.2026 тоже через
+Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram/webhook` (Vercel в 12:44 МСК перестал доставать
+до VPS → 504, бот молчал; напрямую на VPS вебхук ставить нельзя — с VPS адреса Telegram не отвечают, и обратный хэндшейк
+тоже не проходит). Переключение: `setWebhook` через релей с `secret_token` = `TELEGRAM_WEBHOOK_SECRET` из `.env`, см.
+`selfhost/tg-set-webhook.sh`. Откат — вернуть старый TELEGRAM_API_BASE.
+
+## Горячий путь и скорость отклика (03.11.2026)
+До ускорения нажатие кнопки стоило 1,5–2,5 с: 5–10 сетевых запросов строго по очереди (Supabase ~30 мс по тёплому
+соединению и ~200 мс по новому, каждый вызов Telegram через релей ~350 мс), «часики» снимались третьим запросом,
+а 200 Telegram получал только после полной обработки. Что сделано и чего не ломать:
+- `handleTelegramUpdate` отвечает 200 сразу после `claimUpdate`, обработка (`processUpdate`) идёт в фоне; локальный
+  polling передаёт `req.waitForCompletion` и ждёт. Не смогли закрепить апдейт (Supabase лёг) — 502, Telegram повторит.
+  Повторы отсекает память (`seenUpdates`, 2000 id) и уже потом таблица `telegram_bot_updates`.
+- `answerCallbackQuery` без текста уходит первым и не ждётся; с текстом (тост) — по-прежнему `await`.
+- `touchSubscriber` (last_seen + уведомление о новичке) — в фоне. Независимые чтения — `Promise.all`
+  (`handleMenu`, `/start`, `requestConfirmation`, `renderWizard` правит экран и пишет сессию параллельно).
+- Кеши в памяти процесса (сервер один, писатели там же): сессия мастера (`sessionCache`, сквозная запись, `getSession`
+  отдаёт копию), telegram → user_id (`server/_telegram-user-cache.js`, 10 мин, «нет связки» — 60 с; `api/auth.js` и
+  `api/cabinet.js` сбрасывают при привязке/отвязке), подключение WB (60 с), «технический аккаунт» (10 мин).
+  Баланс, коды доступа, скидки, entitlements НЕ кешируются.
+- Сеть: `server/_fetch-retry.js` — таймаут 10 с и один повтор только на сетевую ошибку до ответа. Supabase повторяет
+  GET/DELETE/upsert (`on_conflict` + `Prefer: resolution=`), обычный insert и RPC — нет. Telegram повторяет только
+  `RETRY_SAFE_METHODS` (answerCallbackQuery, editMessageText, …); `sendMessage`/`sendPhoto`/`sendDocument` не
+  повторяются — дубль сообщения хуже его отсутствия. В `selfhost/server.cjs` стоит `undici` Agent с keep-alive 60 с.
+- Лог на каждый апдейт: `bot callback menu:home 180 ms` / `bot message /start 240 ms` — по нему смотрят скорость.
+  Связь VPS ↔ Cloudflare (Supabase и релей) по нескольку раз в час рвётся на 15–50 с — в логе это `fetch retry (...)`.
 В `.env.local` лежит токен ТЕСТОВОГО бота (не боевого).
 
 ## Telegram-бот: меню, баланс, магазин (2026-10-20, ВЫЛОЖЕНО коммитом 158d3c2f + 3d94d9bd)

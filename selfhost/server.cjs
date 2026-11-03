@@ -5,6 +5,11 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const { Agent, setGlobalDispatcher } = require('undici');
+
+// Встроенный fetch Node закрывает простаивающие соединения через 4 с: каждое действие в боте начиналось
+// с нового TLS к Cloudflare (+170 мс на первый запрос). Держим соединения к Supabase и релею дольше.
+setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, keepAliveMaxTimeout: 300_000, connections: 32 }));
 
 const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');

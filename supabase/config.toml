@@ -1,0 +1,4 @@
+project_id = "ouxsvlfaszsaykzpnkwh"
+
+[functions.tg-relay]
+verify_jwt = false

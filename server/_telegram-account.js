@@ -1,4 +1,5 @@
 const { supabaseFetch, supabaseFetchWithMeta } = require('./_supabase');
+const { fetchWithRetry } = require('./_fetch-retry');
 
 function hasValuableAccountRows(rows) {
   return Boolean(
@@ -55,16 +56,26 @@ async function accountMergePreview(userId) {
   };
 }
 
+// Ответ Supabase Auth кешируем: профиль в боте спрашивает это на каждое открытие, а почта у технического
+// аккаунта меняется только когда человек добавляет свою (после этого 10 минут кнопка ещё может предлагать почту).
+const TECHNICAL_TTL_MS = 10 * 60 * 1000;
+const technicalUsers = new Map();
+
 async function isTechnicalTelegramUser(userId) {
+  const cached = technicalUsers.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) throw new Error('Supabase environment variables are not configured');
-  const response = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+  const response = await fetchWithRetry(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
     headers: { apikey: key, Authorization: `Bearer ${key}` },
-  });
+  }, { retries: 1, label: 'supabase auth' });
   if (!response.ok) throw new Error(`Unable to inspect Telegram account (${response.status})`);
   const user = await response.json();
-  return /^telegram-[0-9]+@users[.]invalid$/i.test(String(user.email || ''));
+  const value = /^telegram-[0-9]+@users[.]invalid$/i.test(String(user.email || ''));
+  if (technicalUsers.size > 5000) technicalUsers.clear();
+  technicalUsers.set(userId, { value, expiresAt: Date.now() + TECHNICAL_TTL_MS });
+  return value;
 }
 
 module.exports = { accountHasValuableData, accountMergePreview, hasValuableAccountRows, isTechnicalTelegramUser };
