@@ -15,6 +15,9 @@ React + `api/` + `server/` + `selfhost/`. Один процесс обслужи
 - Правка одного серверного файла без полной выкладки: `scp` в `/srv/shk-wb/current/server/`, `chown shkwb`, `systemctl restart shk-wb`.
 - Миграции: `npx supabase db query --linked -f <файл>` (история миграций в Supabase не ведётся).
 - Переменные окружения — `/srv/shk-wb/.env` (бэкап перед правкой: `cp .env .env.bak-$(date +%s)`).
+- **Второй сервер — узел Telegram-бота в Германии** (`root@109.120.140.116`, тот же ключ): та же кодовая база в роли
+  `BOT_ROLE=bot`, выкладывается отдельно `ROLE=bot … bash selfhost/deploy.sh root@109.120.140.116`, Actions его не
+  трогает. Подробности — `docs/telegram-bot.md`.
 
 ### nginx: два файла, не путать
 `deploy.sh` nginx НЕ трогает, поэтому конфиг выкладывается отдельно.

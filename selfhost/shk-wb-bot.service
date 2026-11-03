@@ -1,0 +1,21 @@
+[Unit]
+Description=shk-wb bot node (Telegram-бот @shkwb_bot, узел в Германии)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=shkwb
+WorkingDirectory=/srv/shk-wb/current
+EnvironmentFile=/srv/shk-wb/.env
+# Та же кодовая база, что и сайт, но роль bot: только вебхук, картинки стикеров и внутренний RPC.
+Environment=NODE_ENV=production PORT=3001 BOT_ROLE=bot
+# 2 ГБ памяти, рядом VPN-релей: кучу Node ограничиваем 768 МБ (распознавание фото через tesseract/sharp).
+ExecStart=/usr/bin/node --max-old-space-size=768 selfhost/server.cjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

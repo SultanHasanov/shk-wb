@@ -40,6 +40,24 @@ Supabase: Telegram → `<TELEGRAM_API_BASE>/webhook` → `shk-wb.ru/api/telegram
 рестарт, `tg-set-webhook.sh` без аргумента. Картинки стикеров сервер теперь шлёт как `<релей>/media/api/stickers/…`
 (путь, не `?url=`), Supabase-функция понимает обе формы.
 
+## Узел бота в Германии (с 03.11.2026) — где обрабатываются апдейты
+Сам процесс бота живёт на немецком сервере рядом с релеем: та же кодовая база, `selfhost/server.cjs` в роли
+`BOT_ROLE=bot` (`selfhost/bot-role.cjs`), порт 3001, unit `selfhost/shk-wb-bot.service` (на сервере он называется
+`shk-wb`), каталоги `/srv/shk-wb/{releases,current,state}`, `.env` по `selfhost/env.bot.example` (без `TELEGRAM_API_BASE`:
+Telegram и Supabase — напрямую, Supabase там в 1 мс). Узел отдаёт только `/api/telegram/webhook`, `/api/stickers/image|pdf`
+(картинки для Telegram, `STICKER_MEDIA_BASE=https://tg.shk-wb.ru:88/media`) и `/api/internal/bot` (RPC). Caddy :88
+(`selfhost/caddy/Caddyfile.tg-relay`): `/webhook` и `/media/*` → 127.0.0.1:3001, `/rpc` → узел только с IP VPS,
+`/api/*` и `/file` — по-прежнему релей для исходящих вызовов сайта.
+Сайт на VPS зовёт бота через `server/_bot-rpc.js` (`BOT_RPC_URL=https://tg.shk-wb.ru:88/rpc`, `BOT_RPC_SECRET`):
+`afterWalletTopup` (оплата «пополнить и купить»), `notifyMiniAppAuthorized`, `bindTelegramReferral` (вход через Telegram).
+Узел не ответил — вызов выполняется локально, как раньше. За узлом следит `_bot-health` сайта (`BOT_NODE_URL`).
+**Выкладка:** меняется бот — выкладывать ОБА сервера: сайт как обычно, узел —
+`ROLE=bot SSH_OPTS="-i ~/.ssh/shk-wb_ed25519" bash selfhost/deploy.sh root@109.120.140.116` (без сборки фронта; GitHub
+Actions узел пока не выкладывает). Проверка: на узле `curl 127.0.0.1:3001/api/telegram/webhook` → 200, `/api/cabinet` → 404.
+**Откат на обработку на VPS:** в `/etc/caddy/Caddyfile.tg-relay` вернуть `/webhook` → `https://shk-wb.ru` и
+`/media/*` → `https://shk-wb.ru` (бэкап `Caddyfile.tg-relay.bak-*`), `systemctl restart caddy`; на VPS убрать
+`BOT_RPC_URL` и `BOT_NODE_URL`, `systemctl restart shk-wb`. Код бота на VPS остаётся, URL вебхука не меняется.
+
 ## Сообщения админу о здоровье бота (03.11.2026)
 Два уровня, получатели — `adminIds()` из `server/_admin-alerts.js` (ADMIN_PAYMENT_TELEGRAM_IDS, по умолчанию владелец).
 1. **Внутри сервера** — `server/_bot-health.js`, стартует из `selfhost/server.cjs`, проверка раз в минуту:

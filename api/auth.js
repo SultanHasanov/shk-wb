@@ -1,5 +1,9 @@
 const { validateTelegram, validateTelegramWebApp } = require('../server/_telegram-auth.cjs');
-const { bindTelegramReferral, handleTelegramUpdate, notifyMiniAppAuthorized } = require('../server/_telegram-wb-bot');
+const { handleTelegramUpdate } = require('../server/_telegram-wb-bot');
+// Уведомления и привязка реферала выполняются на узле бота (BOT_RPC_URL) или локально — см. server/_bot-rpc.js.
+const { callBot } = require('../server/_bot-rpc');
+const notifyMiniAppAuthorized = telegramId => callBot('notifyMiniAppAuthorized', telegramId);
+const bindTelegramReferral = (telegramId, userId) => callBot('bindTelegramReferral', telegramId, userId);
 const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
 const { forgetTelegramUser } = require('../server/_telegram-user-cache');
 const { referralCookie } = require('../server/_user-auth');

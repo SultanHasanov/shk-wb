@@ -11,7 +11,9 @@ STATE_DIR=${STATE_DIR:-/var/lib/tg-watchdog}
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 : "${TG_BOT_TOKEN:?}" "${TG_ADMIN_IDS:?}"
-TARGET_URL=${TARGET_URL:-https://shk-wb.ru/api/telegram/webhook}
+# С узлом бота на этом же сервере цель — его вебхук через Caddy (tg.shk-wb.ru:88/webhook → 127.0.0.1:3001),
+# пока бот обрабатывался на VPS — https://shk-wb.ru/api/telegram/webhook.
+TARGET_URL=${TARGET_URL:-https://tg.shk-wb.ru:88/webhook}
 TIMEOUT_S=${TIMEOUT_S:-10}
 REPEAT_S=$((30 * 60))
 mkdir -p "$STATE_DIR"
@@ -44,7 +46,7 @@ if [ "$fails" -ge 2 ]; then
   if [ ! -f "$DOWN_FILE" ] || [ $((now - sent_at)) -ge "$REPEAT_S" ]; then
     send "🔴 <b>Сервер бота не отвечает</b>
 $TARGET_URL → HTTP $code (${elapsed} с), $fails проверки подряд.
-Бот @shkwb_bot сейчас не работает: проверьте VPS (ssh root@212.193.59.72, systemctl status shk-wb, nginx)."
+Бот @shkwb_bot сейчас не работает: узел в Германии — ssh root@109.120.140.116, systemctl status shk-wb caddy; если бот обрабатывается на VPS — root@212.193.59.72, systemctl status shk-wb nginx."
     touch "$DOWN_FILE"; echo "$now" > "$SENT_FILE"
   fi
 elif [ -f "$DOWN_FILE" ] && [ "$oks" -ge 2 ]; then

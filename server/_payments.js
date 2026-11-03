@@ -138,8 +138,8 @@ async function notifyCompleted(order){
     // Пополняли ради покупки («Пополнить на X ₽ и купить») — проводим её сразу, без повторных нажатий.
     if(order.pricing_snapshot?.wallet?.then){
       const notice=await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}. Оплачиваю покупку…`).catch(()=>null);
-      // Лениво: бот сам подключает этот модуль (через _wallet.js), прямой require дал бы цикл.
-      const started=await require('./_telegram-wb-bot').afterWalletTopup(order,notice?.message_id||null).catch(error=>{console.error('Auto purchase after top-up failed',error.message);return false;});
+      // Через RPC на узел бота (или локально, если узла нет); модуль подключается лениво — прямой require дал бы цикл.
+      const started=await require('./_bot-rpc').callBot('afterWalletTopup',order,notice?.message_id||null).catch(error=>{console.error('Auto purchase after top-up failed',error.message);return false;});
       if(!started)await sendMessage(telegramId,'Не получилось провести покупку автоматически — откройте её снова, оплата пройдёт с баланса.',{reply_markup:{inline_keyboard:[[{text:'☰ Меню',callback_data:'menu:home'}]]}}).catch(()=>{});
       return;
     }

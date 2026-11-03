@@ -29,10 +29,15 @@ chown -R shkwb:shkwb "$dir"
 ln -sfn "$dir" /srv/shk-wb/current
 systemctl restart shk-wb
 
+# Узел бота (BOT_ROLE=bot в unit) слушает 3001 и не отдаёт «/» — проверяем вебхук; сайт — главную.
+port="$(systemctl show shk-wb -p Environment --value | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -1)"
+port="${port:-3000}"
+health_path="${HEALTH_PATH:-/}"
+if systemctl show shk-wb -p Environment --value | tr ' ' '\n' | grep -q '^BOT_ROLE=bot$'; then health_path="${HEALTH_PATH:-/api/telegram/webhook}"; fi
 healthy=false
 for _ in $(seq 1 15); do
   sleep 1
-  if curl -fsS -o /dev/null -H 'Host: shk-wb.ru' http://127.0.0.1:3000/; then healthy=true; break; fi
+  if curl -fsS -o /dev/null -H 'Host: shk-wb.ru' "http://127.0.0.1:$port$health_path"; then healthy=true; break; fi
 done
 
 if [ "$healthy" != true ]; then

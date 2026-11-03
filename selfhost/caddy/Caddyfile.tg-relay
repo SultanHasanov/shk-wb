@@ -1,0 +1,80 @@
+# Немецкий сервер (aeza, tg.shk-wb.ru), файл /etc/caddy/Caddyfile.tg-relay, подключён `import` в конце
+# /etc/caddy/Caddyfile (там же VPN-релей на 80/443/8443 — не трогать). Порт 88 — один из четырёх, что Telegram
+# допускает для вебхуков; сертификат общий с :443. Перечитать: caddy validate (с переменными из
+# `systemctl show caddy -p Environment`) и systemctl restart caddy (у Caddy admin off).
+#
+# Маршруты:
+#   POST /webhook              → узел бота на этом же сервере (127.0.0.1:3001, selfhost/server.cjs в роли bot)
+#   GET  /media/api/stickers/* → узел бота (картинки и PDF стикеров для Telegram)
+#   POST /rpc                  → узел бота, внутренний RPC только с IP сайта (VPS 212.193.59.72)
+#   POST /api/<метод>, GET /file?path=  → api.telegram.org (релей для исходящих вызовов сайта с VPS, где Telegram недоступен)
+tg.shk-wb.ru:88 {
+	# Только боевой (8804824717) и тестовый (8894809412) боты — чужие токены не проксируем.
+	@bot header_regexp tok Authorization ^Bearer\s+(8804824717|8894809412):([A-Za-z0-9_-]{20,})$
+	@site remote_ip 212.193.59.72
+
+	# Входящие апдейты: Telegram → узел бота. Секрет вебхука проверяет сам узел.
+	handle /webhook {
+		rewrite * /api/telegram/webhook
+		reverse_proxy 127.0.0.1:3001 {
+			transport http {
+				dial_timeout 2s
+				response_header_timeout 15s
+			}
+		}
+	}
+
+	# Внутренний RPC с сайта (afterWalletTopup, notifyMiniAppAuthorized, bindTelegramReferral).
+	handle /rpc {
+		handle @site {
+			rewrite * /api/internal/bot
+			reverse_proxy 127.0.0.1:3001
+		}
+		handle {
+			respond 403
+		}
+	}
+
+	# Картинки и PDF стикеров: Telegram забирает их с узла бота (до VPS в РФ он не достаёт).
+	handle_path /media/* {
+		@allowed path /api/stickers/image /api/stickers/pdf
+		handle @allowed {
+			reverse_proxy 127.0.0.1:3001
+		}
+		handle {
+			respond 403
+		}
+	}
+
+	# Исходящие вызовы сайта с VPS: POST /api/<метод> → api.telegram.org/bot<токен>/<метод>
+	handle_path /api/* {
+		handle @bot {
+			rewrite * /bot{re.tok.1}:{re.tok.2}{path}
+			reverse_proxy https://api.telegram.org {
+				header_up Host api.telegram.org
+				header_up -Authorization
+			}
+		}
+		handle {
+			respond 403
+		}
+	}
+
+	# Файл из сообщения (фото с ШК) для сайта: GET /file?path=<file_path из getFile>
+	handle /file {
+		handle @bot {
+			rewrite * /file/bot{re.tok.1}:{re.tok.2}/{query.path}
+			reverse_proxy https://api.telegram.org {
+				header_up Host api.telegram.org
+				header_up -Authorization
+			}
+		}
+		handle {
+			respond 403
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

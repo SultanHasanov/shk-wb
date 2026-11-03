@@ -150,10 +150,39 @@ async function checkWebhook() {
   await report('webhook', problem, `✅ Telegram снова доставляет апдейты, очередь ${pending}.`);
 }
 
+// Сайт (роль site) следит за узлом бота в Германии: GET BOT_NODE_URL (tg.shk-wb.ru:88/webhook через Caddy
+// в локальный процесс). Два провала подряд — сообщение; :88 лежит вместе с узлом, так что доставка пойдёт
+// через TELEGRAM_API_FALLBACK_BASE (deliver перебирает оба).
+const nodeFailures = { count: 0, lastError: '' };
+
+async function checkBotNode() {
+  const url = String(process.env.BOT_NODE_URL || '').trim();
+  if (!url) return;
+  const startedAt = Date.now();
+  let error = '';
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) });
+    if (!response.ok) error = `HTTP ${response.status}`;
+  } catch (err) {
+    error = err.message;
+  }
+  if (error) { nodeFailures.count += 1; nodeFailures.lastError = error; } else nodeFailures.count = 0;
+  const problem = nodeFailures.count >= 2
+    ? `🔴 <b>Узел бота в Германии не отвечает</b>\n${url}\n${nodeFailures.count} проверки подряд: ${nodeFailures.lastError} (${sec(Date.now() - startedAt)} с).\n` +
+      `Бот не обрабатывает сообщения. Проверить: ssh root@109.120.140.116, systemctl status shk-wb caddy. Откат на обработку на VPS — docs/telegram-bot.md.`
+    : null;
+  await report('bot-node', problem, `✅ Узел бота в Германии снова отвечает (${url}).`);
+}
+
 async function check() {
-  await checkUpdates().catch(error => console.error('bot health (updates):', error.message));
+  const botNode = process.env.BOT_ROLE === 'bot';
+  // Апдейты и вебхук проверяет тот, кто их обрабатывает (узел бота, а без него — сайт);
+  // релей — оба (сайт шлёт через него сообщения); за узлом бота следит сайт.
+  const processesUpdates = botNode || !String(process.env.BOT_NODE_URL || '').trim();
+  if (processesUpdates) await checkUpdates().catch(error => console.error('bot health (updates):', error.message));
   await checkRelay().catch(error => console.error('bot health (relay):', error.message));
-  await checkWebhook().catch(error => console.error('bot health (webhook):', error.message));
+  if (processesUpdates) await checkWebhook().catch(error => console.error('bot health (webhook):', error.message));
+  if (!botNode) await checkBotNode().catch(error => console.error('bot health (bot node):', error.message));
 }
 
 function startBotHealth() {

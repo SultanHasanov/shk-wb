@@ -20,9 +20,15 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ] && [ "${ALLOW_NON_MAIN:-}" != 
   exit 1
 fi
 
-# Браузер ходит в Supabase через прокси nginx на нашем домене (см. nginx.conf).
-# Переменная окружения перекрывает значение из .env.local.
-VITE_SUPABASE_URL=https://shk-wb.ru/supabase npm run build
+# Узел бота (ROLE=bot, сервер в Германии) статику не отдаёт — фронт не собираем, dist в архив идёт как есть.
+#   ROLE=bot SSH_OPTS="-i ~/.ssh/shk-wb_ed25519" bash selfhost/deploy.sh root@109.120.140.116
+if [ "${ROLE:-site}" = "bot" ]; then
+  mkdir -p dist
+else
+  # Браузер ходит в Supabase через прокси nginx на нашем домене (см. nginx.conf).
+  # Переменная окружения перекрывает значение из .env.local.
+  VITE_SUPABASE_URL=https://shk-wb.ru/supabase npm run build
+fi
 
 release="$(date +%Y%m%d-%H%M%S)"
 archive="$(mktemp -d)/shk-wb-$release.tar.gz"

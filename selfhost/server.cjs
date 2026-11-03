@@ -79,12 +79,17 @@ const redirects = (config.redirects || []).map((rule) => ({ ...rule, re: compile
 const headers = (config.headers || []).map((rule) => ({ ...rule, re: compile(rule.source) }));
 const rewrites = (config.rewrites || []).map((rule) => ({ ...rule, re: compile(rule.source) }));
 
+// Роль процесса: сайт целиком или только узел бота (см. bot-role.cjs).
+const botRole = require('./bot-role.cjs');
+const isBotNode = botRole.role() === 'bot';
+
 // Функции грузятся один раз, как тёплый инстанс на Vercel.
 const handlers = new Map();
-function apiHandler(pathname) {
+function apiHandler(pathname, query) {
   if (!pathname.startsWith('/api/')) return null;
   const relative = pathname.slice(5);
   if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/i.test(relative) || relative.split('/').some((part) => part.startsWith('_'))) return null;
+  if (!botRole.allowsApi(relative, query || {})) return null;
   const file = path.join(apiDir, `${relative}.js`);
   if (!handlers.has(file)) handlers.set(file, fs.existsSync(file) ? require(file) : null);
   return handlers.get(file);
@@ -97,6 +102,7 @@ function apiHandler(pathname) {
 const VERIFICATION_FILE = /^\/(google[0-9a-f]{8,}|yandex_[0-9a-f]{8,})\.html$/;
 
 function staticFile(pathname) {
+  if (isBotNode) return null;
   let decoded;
   try {
     decoded = decodeURIComponent(pathname);
@@ -142,7 +148,7 @@ app.use((req, res, next) => {
   for (const rule of headers) if (conditionsMet(rule, req) && rule.re.test(pathname)) for (const { key, value } of rule.headers) res.setHeader(key, value);
 
   // Как на Vercel: сначала файловая система (статика и функции), потом rewrites.
-  if (!staticFile(pathname) && !apiHandler(pathname)) {
+  if (!staticFile(pathname) && !apiHandler(pathname, Object.fromEntries(url.searchParams))) {
     for (const rule of rewrites) {
       if (!conditionsMet(rule, req)) continue;
       const match = rule.re.exec(pathname);
@@ -174,7 +180,7 @@ app.use((error, req, res, next) => {
 });
 
 app.use(async (req, res, next) => {
-  const handler = apiHandler(req.resolvedPath);
+  const handler = apiHandler(req.resolvedPath, req.query);
   if (!handler) return next();
   try {
     await handler(req, res);
@@ -207,9 +213,9 @@ app.use((req, res) => {
   res.status(404).type('text/plain').send('404: NOT_FOUND');
 });
 
-app.listen(port, '127.0.0.1', () => console.log(`shk-wb listening on 127.0.0.1:${port}`));
+app.listen(port, '127.0.0.1', () => console.log(`shk-wb (${botRole.role()}) listening on 127.0.0.1:${port}`));
 
-// Мало места на диске (архив/зеркало Помощника в своём Postgres) — сообщение админу в Telegram.
-require('../server/_disk-alert').startDiskAlert();
+// Мало места на диске (архив/зеркало Помощника в своём Postgres) — сообщение админу в Telegram. Только на сайте.
+if (!isBotNode) require('../server/_disk-alert').startDiskAlert();
 // Бот тормозит, релей или вебхук Telegram не работают — сообщение админу в Telegram (через запасной релей, если нужно).
 require('../server/_bot-health').startBotHealth();

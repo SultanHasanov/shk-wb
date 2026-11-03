@@ -64,8 +64,15 @@ async function telegramUpload(method, field, chatId, media, options, fallbackNam
   return data.result;
 }
 
+/**
+ * Откуда Telegram забирает картинки и PDF стикеров: до VPS в РФ он не достаёт, поэтому ссылки на
+ * shk-wb.ru/api/stickers/* подменяются на STICKER_MEDIA_BASE (узел бота в Германии отдаёт их сам через
+ * tg.shk-wb.ru:88/media) или, если он не задан, на <релей>/media. Путём, а не ?url=: релей на Caddy умеет
+ * только так; Supabase-релей понимает обе формы.
+ */
 function proxyMediaUrl(value, relayBase) {
-  if (!relayBase || typeof value !== 'string') return value;
+  const mediaBase = String(process.env.STICKER_MEDIA_BASE || '').trim().replace(/\/$/, '') || (relayBase ? `${relayBase}/media` : '');
+  if (!mediaBase || typeof value !== 'string') return value;
   let url;
   try {
     url = new URL(value);
@@ -74,8 +81,7 @@ function proxyMediaUrl(value, relayBase) {
   }
   if (url.protocol !== 'https:' || url.hostname !== 'shk-wb.ru') return value;
   if (!['/api/stickers/image', '/api/stickers/pdf'].includes(url.pathname)) return value;
-  // Путём, а не ?url=: релей на Caddy (tg.shk-wb.ru:88) умеет только так; Supabase-релей понимает обе формы.
-  return `${relayBase}/media${url.pathname}${url.search}`;
+  return `${mediaBase}${url.pathname}${url.search}`;
 }
 
 function proxyTelegramMedia(method, body, relayBase) {
