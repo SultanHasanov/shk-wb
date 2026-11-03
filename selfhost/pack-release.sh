@@ -20,6 +20,8 @@ excludes=()
 for file in api/_private/*.exe; do
   [ -f "$file" ] || continue
   name="$(basename "$file")"
+  # Узлу бота (ROLE=bot, Германия) установщики программ не нужны — кнопки «Скачать» там нет.
+  if [ "${ROLE:-site}" = "bot" ]; then excludes+=("--exclude=$file"); echo "Установщик $name узлу бота не нужен — не отправляем"; continue; fi
   sum="$(sha256sum "$file" | cut -d' ' -f1)"
   if printf '%s\n' "$remote" | grep -qxF "$sum  $name"; then
     excludes+=("--exclude=$file")
