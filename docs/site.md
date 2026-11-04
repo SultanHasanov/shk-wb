@@ -134,3 +134,8 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
    по желанию `OAUTH_STATE_SECRET` (иначе state подписывается `STICKER_CLIENT_SECRET`); `systemctl restart shk-wb`.
 4. Проверка: `curl -s https://shk-wb.ru/api/auth/oauth/providers` → оба провайдера; вход на `/login` кнопкой.
 Тесты: `src/api/oauth-login.test.ts`.
+
+**Привязка к текущему кабинету (Профиль → «Способы входа», `src/auth/OAuthLinks.tsx`):** `GET /api/auth/oauth/<p>/start?mode=link`
+с Bearer отвечает `{ url }`, в state уезжает id кабинета; callback сохраняет связку и возвращает на
+`/cabinet/profile?oauth=linked` (чужая связка → `?oauth=error&reason=taken`). Профиль отдаёт `oauth: [{provider, email, displayName}]`,
+отвязка — `DELETE /api/cabinet/oauth?provider=` (последний способ входа у кабинета без почты не удаляется, `LAST_LOGIN_METHOD`).

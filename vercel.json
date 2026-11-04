@@ -33,6 +33,7 @@
     { "source": "/api/cabinet/referrals/withdraw", "destination": "/api/cabinet?action=withdraw" },
     { "source": "/api/cabinet/devices/:id", "destination": "/api/cabinet?action=device&id=:id" },
     { "source": "/api/cabinet/telegram", "destination": "/api/cabinet?action=telegram" },
+    { "source": "/api/cabinet/oauth", "destination": "/api/cabinet?action=oauth" },
     { "source": "/api/cabinet/account", "destination": "/api/cabinet?action=account" },
     { "source": "/api/trial", "destination": "/api/app?action=trial" },
     { "source": "/api/app/devices/:id", "destination": "/api/app?action=device&id=:id" },

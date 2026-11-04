@@ -4,6 +4,7 @@ const { sendApiError, supabaseFetch } = require('../server/_supabase');
 const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
 const { sendMessage } = require('../server/_telegram-api');
 const { forgetSiteUser } = require('../server/_telegram-user-cache');
+const { identitiesForUser, unlinkIdentity } = require('../server/_oauth-login');
 const {
   deleteAuthUser,
   getAuthUser,
@@ -137,12 +138,13 @@ async function maybeBindReferral(req, user) {
 }
 
 async function getProfile(user) {
-  const [profiles, preferences, telegram] = await Promise.all([
+  const [profiles, preferences, telegram, oauth] = await Promise.all([
     supabaseFetch(`user_profiles?user_id=eq.${q(user.id)}&select=*&limit=1`),
     supabaseFetch(`user_preferences?user_id=eq.${q(user.id)}&select=*&limit=1`),
     supabaseFetch(
       `user_telegram_identities?user_id=eq.${q(user.id)}&select=username,first_name,last_name,photo_url&limit=1`,
     ),
+    identitiesForUser(user.id).catch(() => []),
   ]);
   const p = profiles[0] || {},
     pref = preferences[0] || {};
@@ -157,6 +159,8 @@ async function getProfile(user) {
     registeredAt: user.created_at,
     lastSignInAt: user.last_sign_in_at || null,
     telegram: telegram[0] || null,
+    // Привязанные Яндекс ID / Mail.ru (server/_oauth-login.js)
+    oauth: oauth.map(row => ({ provider: row.provider, email: row.email || null, displayName: row.display_name || null })),
     preferences: mapPreferences(pref),
   };
 }
@@ -1031,6 +1035,22 @@ module.exports = async function handler(req, res) {
         method: 'DELETE',
       });
       forgetSiteUser(user.id);
+      return res.status(204).end();
+    }
+    if (a === 'oauth' && req.method === 'DELETE') {
+      const provider = String(req.query.provider || '');
+      if (!['yandex', 'mailru'].includes(provider))
+        return res.status(400).json({ error: 'Неизвестный способ входа', code: 'VALIDATION_ERROR' });
+      // Последний способ входа удалять нельзя: у кабинета без почты должен остаться Telegram или второй провайдер.
+      if (user.email?.endsWith('@users.invalid')) {
+        const [tg, others] = await Promise.all([
+          supabaseFetch(`user_telegram_identities?user_id=eq.${q(user.id)}&select=user_id&limit=1`),
+          identitiesForUser(user.id),
+        ]);
+        if (!tg.length && others.filter(row => row.provider !== provider).length === 0)
+          return res.status(409).json({ error: 'Сначала добавьте почту и пароль', code: 'LAST_LOGIN_METHOD' });
+      }
+      await unlinkIdentity(user.id, provider);
       return res.status(204).end();
     }
     if (a === 'device' && req.method === 'DELETE') {

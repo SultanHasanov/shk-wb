@@ -176,6 +176,51 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     expect(calls.some(c => /rpc\/auth_user_id_by_email/.test(c.url))).toBe(false);
   });
 
+  it('привязка: start?mode=link с Bearer отдаёт url и кладёт id кабинета в state; без Bearer — 401', async () => {
+    routes = [[/auth\/v1\/user$/, () => ({ body: { id: 'user-me', email: 'me@site.ru' } })]];
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'start', provider: 'yandex', mode: 'link' }, headers: { authorization: 'Bearer tok' } }, res);
+    expect(res.statusCode).toBe(200);
+    const url = new URL((res.body as { url: string }).url);
+    const state = oauth.readState(url.searchParams.get('state'));
+    expect(state).toMatchObject({ p: 'yandex', u: 'user-me', n: '/cabinet/profile' });
+    expect(cookieOf(res)).toBe(state!.r);
+
+    const anon = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'start', provider: 'yandex', mode: 'link' }, headers: {} }, anon);
+    expect(anon.statusCode).toBe(401);
+  });
+
+  it('привязка: callback сохраняет связку на кабинет из state без поиска по почте и возвращает в профиль', async () => {
+    routes = [
+      [/oauth\.yandex\.ru\/token/, () => ({ body: { access_token: 't' } })],
+      [/login\.yandex\.ru\/info/, () => ({ body: { id: '42', default_email: 'other@yandex.ru' } })],
+      [/user_oauth_identities\?provider=eq\.yandex/, () => ({ body: [] })],
+      [/user_oauth_identities\?on_conflict/, call => {
+        expect(JSON.parse(String(call.init.body))).toMatchObject({ provider: 'yandex', provider_user_id: '42', user_id: 'user-me' });
+        return { body: null };
+      }],
+    ];
+    const state = oauth.makeState({ provider: 'yandex', next: '/cabinet/profile', nonce: 'n5', linkUserId: 'user-me' });
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', code: 'x', state }, headers: { cookie: 'shk_oauth=n5' } }, res);
+    expect(res.headers.Location).toBe('/cabinet/profile?oauth=linked&provider=yandex');
+    expect(calls.some(c => /rpc\/auth_user_id_by_email|generate_link|admin\/users/.test(c.url))).toBe(false);
+  });
+
+  it('привязка: id провайдера уже у другого кабинета — reason=taken, связка не перезаписывается', async () => {
+    routes = [
+      [/oauth\.yandex\.ru\/token/, () => ({ body: { access_token: 't' } })],
+      [/login\.yandex\.ru\/info/, () => ({ body: { id: '42', default_email: 'other@yandex.ru' } })],
+      [/user_oauth_identities\?provider=eq\.yandex/, () => ({ body: [{ user_id: 'user-someone' }] })],
+    ];
+    const state = oauth.makeState({ provider: 'yandex', next: '/cabinet/profile', nonce: 'n6', linkUserId: 'user-me' });
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', code: 'x', state }, headers: { cookie: 'shk_oauth=n6' } }, res);
+    expect(res.headers.Location).toBe('/cabinet/profile?oauth=error&reason=taken');
+    expect(calls.some(c => /on_conflict/.test(c.url))).toBe(false);
+  });
+
   it('callback: провайдер не отдал почту — reason=no_email; отказ пользователя — reason=denied', async () => {
     routes = [
       [/oauth\.yandex\.ru\/token/, () => ({ body: { access_token: 't' } })],

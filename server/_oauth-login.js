@@ -7,12 +7,17 @@
 //   GET /api/auth/oauth/:provider/start     → 302 к провайдеру; state подписан, nonce в cookie shk_oauth
 //   GET /api/auth/oauth/:provider/callback  → обмен code → профиль → аккаунт → 302 /auth/oauth?token_hash=…
 //
+// Привязка к текущему кабинету (Профиль → «Способы входа»): start с ?mode=link и Bearer-токеном отвечает
+// JSON { url } (fetch не умеет 302 на чужой домен), в state уезжает id пользователя; callback тогда не ищет
+// аккаунт по почте, а просто сохраняет связку и возвращает на /cabinet/profile?oauth=linked.
+// Чужая связка (этот Яндекс уже у другого кабинета) → /cabinet/profile?oauth=error&reason=taken.
+//
 // Аккаунт ищется по связке (provider, id) в user_oauth_identities, затем по почте провайдера
 // (rpc auth_user_id_by_email), иначе создаётся с настоящей почтой (email_confirm: провайдер её подтвердил).
 // Google намеренно не подключён.
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
-const { authConfig } = require('./_user-auth');
+const { authConfig, optionalUser } = require('./_user-auth');
 
 const STATE_TTL_SEC = 10 * 60;
 const COOKIE = 'shk_oauth';
@@ -91,8 +96,10 @@ function sign(raw) {
   return crypto.createHmac('sha256', stateSecret()).update(raw).digest('base64url');
 }
 
-function makeState({ provider, next, nonce }) {
-  const raw = Buffer.from(JSON.stringify({ p: provider, n: next, t: Math.floor(Date.now() / 1000), r: nonce })).toString('base64url');
+function makeState({ provider, next, nonce, linkUserId = null }) {
+  const payload = { p: provider, n: next, t: Math.floor(Date.now() / 1000), r: nonce };
+  if (linkUserId) payload.u = linkUserId;
+  const raw = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${raw}.${sign(raw)}`;
 }
 
@@ -195,6 +202,10 @@ async function saveIdentity(provider, profile, userId) {
   });
 }
 
+async function unlinkIdentity(userId, provider) {
+  await supabaseFetch(`user_oauth_identities?user_id=eq.${encodeURIComponent(userId)}&provider=eq.${encodeURIComponent(provider)}`, { method: 'DELETE' });
+}
+
 async function userIdByEmail(email) {
   if (!email) return null;
   const id = await supabaseFetch('rpc/auth_user_id_by_email', { method: 'POST', body: JSON.stringify({ p_email: email }) });
@@ -260,13 +271,20 @@ function handleProviders(req, res) {
   res.status(200).json({ providers: configuredProviders().map(id => ({ id, title: PROVIDERS[id].title })) });
 }
 
-function handleStart(req, res, provider) {
+async function handleStart(req, res, provider) {
   const spec = PROVIDERS[provider];
   const creds = spec && credentials(provider);
   if (!creds) return res.status(404).json({ error: 'Этот способ входа не подключён', code: 'PROVIDER_NOT_CONFIGURED' });
-  const next = safeNext(req.query?.next);
+  const link = String(req.query?.mode || '') === 'link';
+  let linkUserId = null;
+  if (link) {
+    const user = await optionalUser(req);
+    if (!user) return res.status(401).json({ error: 'Требуется авторизация', code: 'AUTH_REQUIRED' });
+    linkUserId = user.id;
+  }
+  const next = link ? '/cabinet/profile' : safeNext(req.query?.next);
   const nonce = crypto.randomBytes(16).toString('base64url');
-  const state = makeState({ provider, next, nonce });
+  const state = makeState({ provider, next, nonce, linkUserId });
   const url = new URL(spec.authorize);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', creds.clientId);
@@ -274,7 +292,23 @@ function handleStart(req, res, provider) {
   url.searchParams.set('scope', spec.scope);
   url.searchParams.set('state', state);
   if (provider === 'yandex') url.searchParams.set('force_confirm', 'yes');
+  if (link) {
+    res.setHeader('Set-Cookie', cookieHeader(nonce, STATE_TTL_SEC));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ url: url.toString() });
+  }
   redirect(res, url.toString(), cookieHeader(nonce, STATE_TTL_SEC));
+}
+
+/** Режим привязки: связку получает кабинет из state, аккаунт по почте не ищется и не создаётся. */
+async function linkToAccount(provider, profile, userId) {
+  const existing = await findIdentity(provider, profile.id);
+  if (existing && existing !== userId) {
+    const error = new Error('TAKEN');
+    error.code = 'TAKEN';
+    throw error;
+  }
+  await saveIdentity(provider, profile, userId);
 }
 
 async function handleCallback(req, res, provider) {
@@ -290,6 +324,10 @@ async function handleCallback(req, res, provider) {
   try {
     const accessToken = await exchangeCode(provider, code);
     const profile = await PROVIDERS[provider].profile(accessToken);
+    if (state.u) {
+      await linkToAccount(provider, profile, String(state.u));
+      return redirect(res, `/cabinet/profile?oauth=linked&provider=${provider}`, clear);
+    }
     const account = await resolveAccount(provider, profile);
     const tokenHash = await magicLinkTokenHash(account.email);
     const target = new URL('/auth/oauth', origin());
@@ -299,6 +337,11 @@ async function handleCallback(req, res, provider) {
     if (account.created) target.searchParams.set('new', '1');
     return redirect(res, target.pathname + target.search, clear);
   } catch (error) {
+    if (state.u) {
+      const reason = error.code === 'TAKEN' ? 'taken' : 'failed';
+      if (reason === 'failed') console.error(`[oauth:${provider}] link failed`, error.message);
+      return redirect(res, `/cabinet/profile?oauth=error&reason=${reason}`, clear);
+    }
     if (error.code === 'NO_EMAIL') return failRedirect(res, 'no_email', clear);
     console.error(`[oauth:${provider}] login failed`, error.message);
     return failRedirect(res, 'failed', clear);
@@ -316,5 +359,5 @@ async function handleOAuth(req, res) {
 }
 
 module.exports = {
-  PROVIDERS, configuredProviders, handleOAuth, identitiesForUser, makeState, readState, redirectUri, resolveAccount, safeNext,
+  PROVIDERS, configuredProviders, handleOAuth, identitiesForUser, makeState, readState, redirectUri, resolveAccount, safeNext, unlinkIdentity,
 };
