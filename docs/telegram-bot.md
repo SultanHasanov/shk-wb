@@ -183,7 +183,7 @@ Mini App `/bot-checkout` (он входил в кабинет, слал «Вхо
 - Тестовый бот @wb_newtest_bot: `TELEGRAM_BOT_TOKEN=<токен> PUBLIC_APP_URL=https://shk-wb.ru node scripts/run-telegram-bot-local.cjs`
   (боевой Supabase). Вход через Mini App в тестовом боте не работает (initData подписан боевым ботом).
 
-## Код клиента с подтверждением владельца (2026-11-04, НЕ выложено) — см. docs/pvz-helper.md
+## Код клиента с подтверждением владельца (2026-11-04, серверы выложены 04.11.2026, флаг выключен) — см. docs/pvz-helper.md
 Запросы QR с компьютеров «Помощника» приходят владельцу сообщением с кнопками `cq:ok|no|wallet:<uuid>` (модуль
 `server/_code-approvals.js`, таблица `app_code_approvals`): сайт создаёт запрос и шлёт сообщение через релей, узел бота
 обрабатывает кнопки и списывает через `app_code_once(p_request = id запроса)` — идемпотентно. `/start link_<token>` привязывает
