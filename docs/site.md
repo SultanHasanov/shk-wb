@@ -131,7 +131,7 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
    доступы «Доступ к адресу электронной почты», «Доступ к логину, имени и фамилии, полу», «Доступ к портрету пользователя».
    Mail.ru — поверх VK ID (прямой OAuth Mail с 1 июля 2025 закрыт для новых приложений, «bad client»): приложение в
    https://id.vk.com/about/business (Web, базовый домен shk-wb.ru, Redirect `https://shk-wb.ru/api/auth/oauth/vkid/callback`,
-   доступ email, «Дополнительные способы входа → Mail»). Провайдер `vkid`: id.vk.ru/authorize с provider=mail_ru и PKCE
+   доступ email, «Дополнительные способы входа → Mail, ОК»). Провайдер `vkid` — одна кнопка «VK ID»: id.vk.ru/authorize (общий экран VK, ОК, Mail; `?via=mail_ru|ok_ru` в start задаёт provider) с PKCE
    (verifier в cookie shk_oauth как nonce.verifier), обмен на id.vk.ru/oauth2/auth с service_token и device_id, профиль oauth2/user_info.
    Миграция `20261110_oauth_vkid.sql` (provider in yandex|mailru|vkid).
 3. В `/srv/shk-wb/.env` (бэкап `.env.bak-*`): `YANDEX_OAUTH_CLIENT_ID/SECRET`, `VKID_APP_ID`, `VKID_SERVICE_TOKEN` (сервисный ключ доступа),

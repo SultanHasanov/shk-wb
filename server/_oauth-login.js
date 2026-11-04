@@ -1,4 +1,4 @@
-// Вход на сайт через Яндекс ID (OAuth 2.0) и через Mail.ru поверх VK ID (OAuth 2.1 с PKCE, provider=mail_ru).
+// Вход на сайт через Яндекс ID (OAuth 2.0) и через VK ID (OAuth 2.1 с PKCE; на экране VK ID — VK, ОК, Mail, QR).
 //
 // Схема та же, что у входа через Telegram (api/auth.js): сервер находит или создаёт пользователя
 // Supabase, выписывает magic-link token_hash, а браузер обменивает его на сессию (auth.verifyOtp).
@@ -46,16 +46,17 @@ const PROVIDERS = {
     },
   },
   // Mail.ru: прямой OAuth Mail с 1 июля 2025 «только для продуктовых запросов» (новые приложения из o2.mail.ru/app
-  // отвечают «bad client»), поэтому вход через почту Mail идёт поверх VK ID: id.vk.ru/authorize с provider=mail_ru,
+  // отвечают «bad client»), поэтому Mail, ОК и VK идут одной кнопкой через VK ID: id.vk.ru/authorize (общий экран;
+  // ?via=mail_ru|ok_ru в start принудительно открывает конкретный способ),
   // PKCE (code_verifier в cookie рядом с nonce), обмен на id.vk.ru/oauth2/auth с service_token, профиль — oauth2/user_info.
   vkid: {
-    title: 'Mail.ru',
+    title: 'VK ID',
     authorize: 'https://id.vk.ru/authorize',
     token: 'https://id.vk.ru/oauth2/auth',
     scope: 'email',
     env: ['VKID_APP_ID', 'VKID_SERVICE_TOKEN'],
     pkce: true,
-    authorizeParams: { provider: 'mail_ru' },
+    viaProviders: ['mail_ru', 'ok_ru'],
     async exchange({ code, deviceId, verifier, state }) {
       const { clientId, clientSecret } = credentials('vkid');
       const body = new URLSearchParams({
@@ -329,7 +330,8 @@ async function handleStart(req, res, provider) {
   url.searchParams.set('scope', spec.scope);
   url.searchParams.set('state', state);
   if (provider === 'yandex') url.searchParams.set('force_confirm', 'yes');
-  for (const [key, value] of Object.entries(spec.authorizeParams || {})) url.searchParams.set(key, value);
+  const via = String(req.query?.via || '');
+  if (spec.viaProviders?.includes(via)) url.searchParams.set('provider', via);
   let cookieValue = nonce;
   if (spec.pkce) {
     const { verifier, challenge } = pkcePair();

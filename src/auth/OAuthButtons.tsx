@@ -32,6 +32,17 @@ export function MailMark({ size = 24 }: { size?: number }) {
   );
 }
 
+export function VkMark({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="12" fill="#0077ff" />
+      <path d="M12.8 16.6c-4.9 0-7.7-3.4-7.8-9h2.5c.1 4.1 1.9 5.9 3.3 6.2V7.6h2.3v3.5c1.4-.2 2.9-1.8 3.4-3.5H19c-.4 2.2-2 3.8-3.1 4.5 1.1.5 3 1.9 3.6 4.5h-2.6c-.5-1.7-1.9-3-3.8-3.2v3.2h-.3z" fill="#fff" />
+    </svg>
+  );
+}
+
 export function ProviderMark({ id, size }: { id: OAuthProviderId; size?: number }) {
-  return id === 'yandex' ? <YandexMark size={size} /> : <MailMark size={size} />;
+  if (id === 'yandex') return <YandexMark size={size} />;
+  if (id === 'vkid') return <VkMark size={size} />;
+  return <MailMark size={size} />;
 }

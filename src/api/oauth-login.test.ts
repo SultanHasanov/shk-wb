@@ -227,7 +227,7 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     expect(calls.some(c => /on_conflict/.test(c.url))).toBe(false);
   });
 
-  it('vkid: start идёт на id.vk.ru с provider=mail_ru, PKCE и state без точки, verifier в cookie', async () => {
+  it('vkid: start идёт на id.vk.ru без provider (общий экран), ?via=mail_ru его задаёт; PKCE, state без точки, verifier в cookie', async () => {
     vi.stubEnv('VKID_APP_ID', '5100');
     vi.stubEnv('VKID_SERVICE_TOKEN', 'svc');
     const res = response();
@@ -236,7 +236,7 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     const url = new URL(res.headers.Location);
     expect(url.origin + url.pathname).toBe('https://id.vk.ru/authorize');
     expect(url.searchParams.get('client_id')).toBe('5100');
-    expect(url.searchParams.get('provider')).toBe('mail_ru');
+    expect(url.searchParams.get('provider')).toBeNull();
     expect(url.searchParams.get('scope')).toBe('email');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('redirect_uri')).toBe('https://shk-wb.ru/api/auth/oauth/vkid/callback');
@@ -245,6 +245,9 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     const [nonce, verifier] = cookieOf(res).split('.');
     expect(oauth.readState(state)!.r).toBe(nonce);
     expect(verifier.length).toBeGreaterThanOrEqual(43);
+    const viaRes = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'start', provider: 'vkid', via: 'mail_ru' }, headers: {} }, viaRes);
+    expect(new URL(viaRes.headers.Location).searchParams.get('provider')).toBe('mail_ru');
   });
 
   it('vkid: callback обменивает code с device_id, verifier и service_token, берёт почту из user_info', async () => {
