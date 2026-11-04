@@ -49,7 +49,13 @@ function cookieOf(res: Res) {
 }
 
 describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)', () => {
-  let oauth: typeof import('../../server/_oauth-login.js');
+  type State = { p: string; n: string; t: number; r: string; u?: string };
+  type OAuthModule = {
+    readState: (value: string | null) => State | null;
+    makeState: (input: { provider: string; next: string; nonce: string; linkUserId?: string | null }) => string;
+    safeNext: (value: string) => string;
+  };
+  let oauth: OAuthModule;
   let handler: (req: unknown, res: Res) => Promise<unknown>;
 
   beforeEach(() => {
@@ -60,8 +66,8 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     routes = [];
     installFetch();
     vi.resetModules();
-    oauth = require('../../server/_oauth-login.js');
-    handler = require('../../api/auth.js');
+    oauth = require('../../server/_oauth-login.js') as OAuthModule;
+    handler = require('../../api/auth.js') as typeof handler;
   });
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
