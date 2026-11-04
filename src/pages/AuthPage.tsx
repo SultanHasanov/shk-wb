@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { TelegramLogin } from '../auth/TelegramLogin';
+import { OAuthButtons } from '../auth/OAuthButtons';
 import { useStores } from '../stores/root-store';
 import { useDocumentMeta } from '../lib/seo';
 import { type T, useLocalePath, useT } from '../i18n';
@@ -45,6 +46,16 @@ function schemasFor(t: T) {
   };
 }
 
+function oauthErrorText(t: T, reason: string) {
+  switch (reason) {
+    case 'denied': return t('Вход отменён на стороне сервиса. Попробуйте ещё раз или войдите по почте.', 'Кіру сервис жағында тоқтатылды. Қайта көріңіз немесе пошта арқылы кіріңіз.');
+    case 'no_email': return t('Сервис не передал адрес почты. Разрешите доступ к почте или войдите по почте с паролем.', 'Сервис пошта мекенжайын бермеді. Поштаға рұқсат беріңіз немесе пошта мен құпиясөзбен кіріңіз.');
+    case 'state': return t('Ссылка входа устарела. Нажмите кнопку входа ещё раз.', 'Кіру сілтемесі ескірген. Кіру түймесін қайта басыңыз.');
+    case 'provider': return t('Этот способ входа сейчас недоступен. Войдите по почте или через Telegram.', 'Бұл кіру тәсілі қазір қолжетімсіз. Пошта немесе Telegram арқылы кіріңіз.');
+    default: return t('Не удалось войти через внешний сервис. Попробуйте ещё раз.', 'Сыртқы сервис арқылы кіру мүмкін болмады. Қайта көріңіз.');
+  }
+}
+
 export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
   const { auth } = useStores();
   const navigate = useNavigate();
@@ -52,7 +63,9 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
   const toast = useToast();
   const t = useT();
   const lp = useLocalePath();
-  const [formError, setFormError] = useState('');
+  // Сервер возвращает с провайдера OAuth на /login?oauth=error&reason=… (server/_oauth-login.js).
+  const oauthReason = new URLSearchParams(location.search).get('oauth') === 'error' ? new URLSearchParams(location.search).get('reason') || 'failed' : '';
+  const [formError, setFormError] = useState(() => oauthReason ? oauthErrorText(t, oauthReason) : '');
   const [confirmationEmail, setConfirmationEmail] = useState('');
   const [resetEmail, setResetEmail] = useState('');
   const [isResending, setIsResending] = useState(false);
@@ -204,6 +217,6 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
         ? <><Link className="accent" to="/register">{t('Создать аккаунт', 'Аккаунт жасау')}</Link><Link className="accent" to="/forgot-password">{t('Забыли пароль?', 'Құпиясөзді ұмыттыңыз ба?')}</Link></>
         : <Link className="accent" to="/login">{t('← Вернуться ко входу', '← Кіруге оралу')}</Link>}
     </div>
-    {mode !== 'forgot' && <><div className="muted" style={{ textAlign: 'center', fontSize: 'var(--fs-13)' }}>{t('или войдите через Telegram', 'немесе Telegram арқылы кіріңіз')}</div><TelegramLogin onError={setFormError} /></>}
+    {mode !== 'forgot' && <><div className="muted" style={{ textAlign: 'center', fontSize: 'var(--fs-13)' }}>{t('или войдите через Telegram', 'немесе Telegram арқылы кіріңіз')}</div><TelegramLogin onError={setFormError} /><OAuthButtons next={from} /></>}
   </div></Card>;
 }

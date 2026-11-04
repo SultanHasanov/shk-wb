@@ -9,6 +9,7 @@ Disallow: /cabinet
 Disallow: /payment-result
 Disallow: /bot-checkout
 Disallow: /app-login
+Disallow: /auth/
 # Метки переходов не создают новых страниц — склеиваем их в Яндексе.
 Clean-param: utm_source&utm_medium&utm_campaign&utm_term&utm_content&yclid&ref&from&gclid
 
@@ -30,5 +31,6 @@ Disallow: /cabinet
 Disallow: /payment-result
 Disallow: /bot-checkout
 Disallow: /app-login
+Disallow: /auth/
 
 Sitemap: https://shk-wb.ru/sitemap.xml

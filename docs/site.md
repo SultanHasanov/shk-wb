@@ -110,3 +110,27 @@ rpc `app_db_size` (миграция `20261030_db_size.sql`, применена).
 Патчи программ (`docs/program-link/`) НЕ выпускать — сервер обратно совместим.
 
 Чего НЕ хватает в текущей среде для автоматического выката: чистого `main` (решение владельца по его незакоммиченной работе), `.env.local` (для локальной сборки) и залинкованной боевой Supabase для п.2 — без миграций код п.1 поднимать нельзя (новые таблицы/функции).
+
+## Вход через Яндекс ID и Mail.ru (2026-11-04, код написан; миграция и ключи — см. ниже)
+
+OAuth 2.0 по той же схеме, что вход через Telegram: `server/_oauth-login.js` находит или создаёт пользователя Supabase
+и выписывает magic-link `token_hash`, браузер обменивает его на сессию на `/auth/oauth` (`OAuthCompletePage`).
+Маршруты (`vercel.json` → `api/auth?action=oauth`): `GET /api/auth/oauth/providers` (что настроено),
+`GET /api/auth/oauth/{yandex|mailru}/start?next=` (302 к провайдеру, подписанный state + nonce в cookie `shk_oauth`),
+`GET /api/auth/oauth/{yandex|mailru}/callback` (code → профиль → аккаунт → 302 `/auth/oauth?token_hash=…`).
+Ошибки возвращаются на `/login?oauth=error&reason=denied|no_email|state|provider|failed`.
+
+Аккаунт: сначала связка `(provider, provider_user_id)` в `user_oauth_identities`, затем совпадение по почте провайдера
+(`rpc auth_user_id_by_email`, security definer, только service_role), иначе новый пользователь с настоящей почтой и
+`email_confirm: true` (провайдер её подтвердил). Google намеренно не подключён. Кнопки `OAuthButtons` на `/login` и `/register`
+показываются только для провайдеров с ключами в `.env`.
+
+Что нужно для включения:
+1. `npx supabase db query --linked --yes -f supabase/migrations/20261109_oauth_identities.sql`.
+2. Яндекс: https://oauth.yandex.ru/client/new — Redirect URI `https://shk-wb.ru/api/auth/oauth/yandex/callback`,
+   доступы «Доступ к адресу электронной почты», «Доступ к логину, имени и фамилии, полу», «Доступ к портрету пользователя».
+   Mail.ru: https://o2.mail.ru/app — Redirect URI `https://shk-wb.ru/api/auth/oauth/mailru/callback`, scope `userinfo`.
+3. В `/srv/shk-wb/.env` (бэкап `.env.bak-*`): `YANDEX_OAUTH_CLIENT_ID/SECRET`, `MAILRU_OAUTH_CLIENT_ID/SECRET`,
+   по желанию `OAUTH_STATE_SECRET` (иначе state подписывается `STICKER_CLIENT_SECRET`); `systemctl restart shk-wb`.
+4. Проверка: `curl -s https://shk-wb.ru/api/auth/oauth/providers` → оба провайдера; вход на `/login` кнопкой.
+Тесты: `src/api/oauth-login.test.ts`.

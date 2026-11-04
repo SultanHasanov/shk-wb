@@ -20,6 +20,7 @@ import { ReferralCapturePage } from '../pages/ReferralCapturePage';
 import { BotCheckoutPage } from '../pages/BotCheckoutPage';
 import { TelegramAccountPage } from '../pages/TelegramAccountPage';
 import { AppLoginPage } from '../pages/AppLoginPage';
+import { OAuthCompletePage } from '../pages/OAuthCompletePage';
 import { ScrollToHash } from './ScrollToHash';
 import { useMetrikaPageviews } from '../lib/metrika';
 import { useLocaleEffects } from '../i18n';
@@ -94,6 +95,7 @@ export function App() {
           <Route path="bot-checkout" element={<BotCheckoutPage />} />
           <Route path="telegram-account" element={<TelegramAccountPage />} />
           <Route path="app-login" element={<AppLoginPage />} />
+          <Route path="auth/oauth" element={<OAuthCompletePage />} />
         </Route>
 
         {/* Кабинет — сайдбар, только для вошедших */}

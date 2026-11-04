@@ -7,6 +7,7 @@ const bindTelegramReferral = (telegramId, userId) => callBot('bindTelegramReferr
 const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
 const { forgetTelegramUser } = require('../server/_telegram-user-cache');
 const { referralCookie } = require('../server/_user-auth');
+const { handleOAuth } = require('../server/_oauth-login');
 const crypto = require('crypto');
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT = 20;
@@ -168,6 +169,8 @@ async function magicLink(email) {
 }
 
 module.exports = async function handler(req, res) {
+  // Вход через Яндекс ID / Mail.ru: редиректы OAuth, см. server/_oauth-login.js.
+  if (req.query?.action === 'oauth') return handleOAuth(req, res);
   if (req.query?.action === 'bot') {
     if (req.method === 'GET') return res.status(200).json({ ok: true, service: 'telegram-wb-bot' });
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
