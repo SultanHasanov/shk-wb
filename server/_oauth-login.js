@@ -1,9 +1,9 @@
-// Вход на сайт через Яндекс ID и Mail.ru (OAuth 2.0, authorization code).
+// Вход на сайт через Яндекс ID (OAuth 2.0, authorization code).
 //
 // Схема та же, что у входа через Telegram (api/auth.js): сервер находит или создаёт пользователя
 // Supabase, выписывает magic-link token_hash, а браузер обменивает его на сессию (auth.verifyOtp).
 //
-//   GET /api/auth/oauth/providers           → { providers: ['yandex', 'mailru'] } — что настроено в .env
+//   GET /api/auth/oauth/providers           → { providers: ['yandex'] } — что настроено в .env
 //   GET /api/auth/oauth/:provider/start     → 302 к провайдеру; state подписан, nonce в cookie shk_oauth
 //   GET /api/auth/oauth/:provider/callback  → обмен code → профиль → аккаунт → 302 /auth/oauth?token_hash=…
 //
@@ -45,24 +45,8 @@ const PROVIDERS = {
       };
     },
   },
-  mailru: {
-    title: 'Mail.ru',
-    authorize: 'https://oauth.mail.ru/login',
-    token: 'https://oauth.mail.ru/token',
-    scope: 'userinfo',
-    env: ['MAILRU_OAUTH_CLIENT_ID', 'MAILRU_OAUTH_CLIENT_SECRET'],
-    async profile(accessToken) {
-      const response = await fetch(`https://oauth.mail.ru/userinfo?access_token=${encodeURIComponent(accessToken)}`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.id || data.error) throw new Error(`Mail.ru profile failed (${response.status}) ${data.error || ''}`.trim());
-      return {
-        id: String(data.id),
-        email: String(data.email || '').trim().toLowerCase() || null,
-        name: String(data.name || [data.first_name, data.last_name].filter(Boolean).join(' ') || data.nickname || '').trim(),
-        avatar: data.image || null,
-      };
-    },
-  },
+  // Mail.ru убран 04.11.2026: с 1 июля 2025 прямой OAuth Mail работает «только для продуктовых запросов»,
+  // новые приложения из o2.mail.ru/app отвечают «bad client». Путь на будущее — VK ID с «Авторизацией через Mail».
 };
 
 function origin() {

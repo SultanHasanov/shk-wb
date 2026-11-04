@@ -15,7 +15,7 @@
     { "source": "/api/telegram/webhook", "destination": "/api/auth?action=bot" },
     { "source": "/api/auth/telegram", "destination": "/api/auth" },
     { "source": "/api/auth/oauth/providers", "destination": "/api/auth?action=oauth&step=providers" },
-    { "source": "/api/auth/oauth/:provider(yandex|mailru)/:step(start|callback)", "destination": "/api/auth?action=oauth&provider=:provider&step=:step" },
+    { "source": "/api/auth/oauth/:provider(yandex)/:step(start|callback)", "destination": "/api/auth?action=oauth&provider=:provider&step=:step" },
     { "source": "/api/referrals/capture", "destination": "/api/auth?action=referral" },
     { "source": "/api/messages", "destination": "/api/visits?action=messages" },
     { "source": "/api/cron/notifications", "destination": "/api/cabinet?action=cron" },
