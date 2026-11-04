@@ -1,8 +1,8 @@
 import { Suspense, lazy } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { PublicShell } from '../layout/PublicShell';
 import { AuthShell } from '../layout/AuthShell';
-import { AuthPage } from '../pages/AuthPage';
+import { AuthModal } from '../auth/AuthModal';
 import { ResetPasswordPage } from '../pages/ResetPasswordPage';
 import { GeneratorPage } from '../pages/GeneratorPage';
 import { CellPrintPage } from '../pages/CellPrintPage';
@@ -86,11 +86,14 @@ export function App() {
           }
         />
 
-        {/* Авторизация — центрированная карточка без хрома */}
+        {/* Вход, регистрация и «забыли пароль» — модалка AuthModal поверх любой страницы.
+            Старые адреса остаются редиректами: на них ведут закладки, письма и бот. */}
+        <Route path="login" element={<LegacyAuthRedirect mode="login" />} />
+        <Route path="register" element={<LegacyAuthRedirect mode="register" />} />
+        <Route path="forgot-password" element={<LegacyAuthRedirect mode="forgot" />} />
+
+        {/* Служебные страницы — центрированная карточка без хрома */}
         <Route element={<AuthShell />}>
-          <Route path="login" element={<AuthPage mode="login" />} />
-          <Route path="register" element={<AuthPage mode="register" />} />
-          <Route path="forgot-password" element={<AuthPage mode="forgot" />} />
           <Route path="reset-password" element={<ResetPasswordPage />} />
           <Route path="bot-checkout" element={<BotCheckoutPage />} />
           <Route path="telegram-account" element={<TelegramAccountPage />} />
@@ -108,6 +111,15 @@ export function App() {
           }
         />
       </Routes>
+      <AuthModal />
     </>
   );
+}
+
+/** /login?x=1 → /?auth=login&x=1 с сохранением state.from (RequireAuth, ссылки «войдите»). */
+function LegacyAuthRedirect({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set('auth', mode);
+  return <Navigate to={{ pathname: '/', search: `?${params.toString()}` }} replace state={location.state} />;
 }

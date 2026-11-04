@@ -1,20 +1,26 @@
+import { useEffect } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { observer } from 'mobx-react-lite';
 import { useStores } from '../stores/root-store';
 import { useT } from '../i18n';
 
 /**
- * Заглушка доступа поверх мок-авторизации: раньше /cabinet открывался кому угодно
- * и показывал захардкоженный demo@shk-wb.ru.
- *
- * Это НЕ безопасность — данные всё равно приходят с сервера, который проверяет
- * права сам. Здесь только маршрутизация, чтобы кабинет не выглядел публичным.
- * Заменить на реальную проверку сессии при подключении Supabase Auth.
+ * Гард кабинета. Это НЕ безопасность — данные всё равно приходят с сервера, который проверяет
+ * права сам. Здесь только маршрутизация: без сессии уводим на главную и открываем модалку входа,
+ * а after входа возвращаем туда, куда человек шёл.
  */
 export const RequireAuth = observer(() => {
-  const { auth } = useStores();
+  const { auth, ui } = useStores();
   const location = useLocation();
   const t = useT();
+  const anonymous = auth.status !== 'initializing' && !auth.user;
+  // from вместе с query: на /cabinet/payment-result в нём лежит token заказа,
+  // без него человек вернётся на пустую страницу «заказ не найден».
+  const from = `${location.pathname}${location.search}`;
+
+  useEffect(() => {
+    if (anonymous) ui.openAuth('login', { from });
+  }, [anonymous, from, ui]);
 
   if (auth.status === 'initializing') {
     return (
@@ -24,14 +30,7 @@ export const RequireAuth = observer(() => {
     );
   }
 
-  if (!auth.user) {
-    // from — чтобы после входа вернуть человека туда, куда он шёл.
-    // Вместе с query: на /cabinet/payment-result в нём лежит token заказа,
-    // без него человек вернётся на пустую страницу «заказ не найден».
-    return (
-      <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />
-    );
-  }
+  if (!auth.user) return <Navigate to="/" replace />;
 
   return <Outlet />;
 });

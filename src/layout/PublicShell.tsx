@@ -14,6 +14,7 @@ import { isPrerender } from '../lib/prerender';
 import { TelegramIcon } from '../components/TelegramIcon';
 import { BrandMark } from '../components/BrandMark';
 import { useStores } from '../stores/root-store';
+import { useAuthParam } from '../auth/useAuthParam';
 import { useVisitCounter } from '../lib/visits';
 import { BOT_URL, CHANNEL_URL } from '../lib/telegram';
 import s from './PublicShell.module.css';
@@ -46,7 +47,8 @@ const footerDocs = (t: T) => [
  * внутренний инструмент.
  */
 export const PublicShell = observer(() => {
-  const { auth } = useStores();
+  const { auth, ui } = useStores();
+  useAuthParam();
   const [moreOpen, setMoreOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -138,12 +140,9 @@ export const PublicShell = observer(() => {
                 поэтому после входа на публичных страницах висело «Войти».
                 Пока сессия проверяется, кнопку не рисуем — иначе «Войти»
                 мигает перед «Кабинетом» на каждой загрузке. */}
-            {auth.status !== 'initializing' && (
-              <Link to={auth.isAuthenticated ? '/cabinet' : '/login'} className={s.wideOnly}>
-                <Button variant="secondary" size="sm">
-                  {auth.isAuthenticated ? t('Кабинет', 'Кабинет') : t('Войти', 'Кіру')}
-                </Button>
-              </Link>
+            {auth.status !== 'initializing' && (auth.isAuthenticated
+              ? <Link to="/cabinet" className={s.wideOnly}><Button variant="secondary" size="sm">{t('Кабинет', 'Кабинет')}</Button></Link>
+              : <span className={s.wideOnly}><Button variant="secondary" size="sm" onClick={() => ui.openAuth('login')}>{t('Войти', 'Кіру')}</Button></span>
             )}
 
             {/* Телефон (по прототипу): компактный индикатор WB и иконка аккаунта.
@@ -152,14 +151,9 @@ export const PublicShell = observer(() => {
               <span className={s.wbdot} />
               WB
             </span>
-            {auth.status !== 'initializing' && (
-              <Link
-                to={auth.isAuthenticated ? '/cabinet' : '/login'}
-                className={`${s.acctBtn} ${s.mobileOnly}`}
-                aria-label={auth.isAuthenticated ? t('Личный кабинет', 'Жеке кабинет') : t('Войти в аккаунт', 'Аккаунтқа кіру')}
-              >
-                {auth.isAuthenticated ? <User size={20} /> : <LogIn size={20} />}
-              </Link>
+            {auth.status !== 'initializing' && (auth.isAuthenticated
+              ? <Link to="/cabinet" className={`${s.acctBtn} ${s.mobileOnly}`} aria-label={t('Личный кабинет', 'Жеке кабинет')}><User size={20} /></Link>
+              : <button type="button" className={`${s.acctBtn} ${s.mobileOnly}`} aria-label={t('Войти в аккаунт', 'Аккаунтқа кіру')} onClick={() => ui.openAuth('login')}><LogIn size={20} /></button>
             )}
           </div>
         </div>

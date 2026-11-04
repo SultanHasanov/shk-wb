@@ -907,7 +907,7 @@ async function wizardBack(from, chatId, session, messageId) {
 function miniAppKeyboard() {
   return choiceKeyboard([
     [{ text: 'У меня уже есть кабинет', web_app: { url: publicUrl('/telegram-account') } }],
-    [{ text: 'Создать кабинет через Telegram', web_app: { url: publicUrl('/login') } }],
+    [{ text: 'Создать кабинет через Telegram', web_app: { url: publicUrl('/?auth=login') } }],
     [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
     MENU_ROW,
   ]);

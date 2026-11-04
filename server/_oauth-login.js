@@ -138,7 +138,7 @@ function redirect(res, location, cookie) {
 }
 
 function failRedirect(res, reason, cookie) {
-  redirect(res, `/login?oauth=error&reason=${encodeURIComponent(reason)}`, cookie);
+  redirect(res, `/?auth=login&oauth=error&reason=${encodeURIComponent(reason)}`, cookie);
 }
 
 async function exchangeCode(provider, code) {

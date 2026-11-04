@@ -118,7 +118,7 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
 Маршруты (`vercel.json` → `api/auth?action=oauth`): `GET /api/auth/oauth/providers` (что настроено),
 `GET /api/auth/oauth/{yandex|mailru}/start?next=` (302 к провайдеру, подписанный state + nonce в cookie `shk_oauth`),
 `GET /api/auth/oauth/{yandex|mailru}/callback` (code → профиль → аккаунт → 302 `/auth/oauth?token_hash=…`).
-Ошибки возвращаются на `/login?oauth=error&reason=denied|no_email|state|provider|failed`.
+Ошибки возвращаются на `/?auth=login&oauth=error&reason=denied|no_email|state|provider|failed` (модалка входа).
 
 Аккаунт: сначала связка `(provider, provider_user_id)` в `user_oauth_identities`, затем совпадение по почте провайдера
 (`rpc auth_user_id_by_email`, security definer, только service_role), иначе новый пользователь с настоящей почтой и
@@ -139,3 +139,16 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
 с Bearer отвечает `{ url }`, в state уезжает id кабинета; callback сохраняет связку и возвращает на
 `/cabinet/profile?oauth=linked` (чужая связка → `?oauth=error&reason=taken`). Профиль отдаёт `oauth: [{provider, email, displayName}]`,
 отвязка — `DELETE /api/cabinet/oauth?provider=` (последний способ входа у кабинета без почты не удаляется, `LAST_LOGIN_METHOD`).
+
+## Вход — модалка вместо страниц (2026-11-04)
+
+Вход, регистрация и «забыли пароль» — одна модалка `src/auth/AuthModal.tsx` (на `Modal` из UI-кита, на телефоне нижняя
+шторка), состояние в `UiStore.authModal` (`ui.openAuth(mode, { from, oauthError })`, `ui.closeAuth()`), рендерится в `App.tsx`.
+После входа: `from` (контекстные ссылки «войдите» передают текущий адрес) или `/cabinet` (кнопка в шапке).
+Внешние входы одним рядом `src/auth/SocialRow.tsx`: виджет Telegram (`size="medium"`, `navigateAfterLogin={false}`) + круглые
+Яндекс ID / Mail.ru. Поле пароля с глазком — `src/auth/PasswordInput.tsx`. Прототип: https://claude.ai/artifact/B19JQk834z6LA9UfnqwniA
+
+Адреса `/login`, `/register`, `/forgot-password` — редиректы (`LegacyAuthRedirect` в `App.tsx`) на `/?auth=login|register|forgot`
+с сохранением query и `state.from`; `useAuthParam` в `PublicShell` открывает модалку и чистит адрес. Сервер возвращает ошибку
+OAuth на `/?auth=login&oauth=error&reason=…`, бот открывает Mini App «Создать кабинет через Telegram» на `/?auth=login`.
+`RequireAuth` без сессии уводит на `/` и открывает модалку с `from`. `/reset-password` остаётся страницей (ссылка из письма).

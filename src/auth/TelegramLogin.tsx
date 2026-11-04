@@ -21,7 +21,7 @@ declare global {
   }
 }
 
-export function TelegramLogin({ mode = 'login', onError, onSuccess, closeMiniApp = true, navigateAfterLogin = true }: { mode?: 'login' | 'link'; onError?: (message: string) => void; onSuccess?: () => void; closeMiniApp?: boolean; navigateAfterLogin?: boolean }) {
+export function TelegramLogin({ mode = 'login', onError, onSuccess, closeMiniApp = true, navigateAfterLogin = true, size = 'large' }: { mode?: 'login' | 'link'; onError?: (message: string) => void; onSuccess?: () => void; closeMiniApp?: boolean; navigateAfterLogin?: boolean; size?: 'large' | 'medium' }) {
   const bot = BOT_USERNAME;
   const id = useId().replace(/[^a-z0-9]/gi, '');
   const host = useRef<HTMLDivElement>(null);
@@ -41,7 +41,8 @@ export function TelegramLogin({ mode = 'login', onError, onSuccess, closeMiniApp
         });
         if (mode === 'login' && response.token_hash) {
           await auth.acceptTelegramToken(response.token_hash);
-          navigate('/cabinet', { replace: true });
+          // Модалка входа ведёт сама (к from или в кабинет) — ей navigateAfterLogin={false}.
+          if (navigateAfterLogin) navigate('/cabinet', { replace: true });
         }
         onSuccess?.();
       } catch (error) {
@@ -88,7 +89,7 @@ export function TelegramLogin({ mode = 'login', onError, onSuccess, closeMiniApp
       script.async = true;
       script.src = 'https://telegram.org/js/telegram-widget.js?22';
       script.dataset.telegramLogin = bot;
-      script.dataset.size = 'large';
+      script.dataset.size = size;
       script.dataset.radius = '8';
       script.dataset.userpic = 'false';
       script.dataset.onauth = `${callback}(user)`;
@@ -101,7 +102,7 @@ export function TelegramLogin({ mode = 'login', onError, onSuccess, closeMiniApp
       delete window[callback];
       host.current?.replaceChildren();
     };
-  }, [auth, bot, closeMiniApp, id, mode, navigate, navigateAfterLogin, onError, onSuccess]);
+  }, [auth, bot, closeMiniApp, id, mode, navigate, navigateAfterLogin, onError, onSuccess, size]);
 
   if (!bot) return null;
   return <div ref={host} style={{ display: 'flex', justifyContent: 'center' }} />;

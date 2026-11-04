@@ -9,6 +9,7 @@ import {
   removeDuplicateCodes,
 } from '../lib/custom-sticker-list';
 import { useT } from '../i18n';
+import { useStores } from '../stores/root-store';
 import s from './BulkCustomStickerEditor.module.css';
 
 const STORAGE_KEY = 'custom-sticker-list-draft';
@@ -33,6 +34,7 @@ export function BulkCustomStickerEditor({
 }) {
   const location = useLocation(),
     client = useQueryClient();
+  const { ui } = useStores();
   const t = useT();
   const [codes, setCodes] = useState<string[]>(() =>
     parseCustomCodes(localStorage.getItem(STORAGE_KEY) || ''),
@@ -195,9 +197,9 @@ export function BulkCustomStickerEditor({
       {!authenticated && codes.length > 0 && (
         <Alert tone="info">
           {t('Чтобы сохранить очередь и начать генерацию,', 'Кезекті сақтап, генерацияны бастау үшін')}{' '}
-          <Link to="/login" state={{ from: location.pathname + location.search }}>
+          <button type="button" className="link-btn" onClick={() => ui.openAuth('login', { from: location.pathname + location.search })}>
             {t('войдите в кабинет', 'кабинетке кіріңіз')}
-          </Link>
+          </button>
           {t('. Список восстановится после входа.', '. Кіргеннен кейін тізім қалпына келеді.')}
         </Alert>
       )}

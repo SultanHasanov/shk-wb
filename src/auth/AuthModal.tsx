@@ -1,32 +1,31 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { observer } from 'mobx-react-lite';
 import { useForm } from 'react-hook-form';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
-import { TelegramLogin } from '../auth/TelegramLogin';
-import { OAuthButtons } from '../auth/OAuthButtons';
-import { useStores } from '../stores/root-store';
-import { useDocumentMeta } from '../lib/seo';
+import { type AuthMode, useStores } from '../stores/root-store';
 import { type T, useLocalePath, useT } from '../i18n';
-import { Alert, Button, Card, Checkbox, Field, Input, useToast } from '../ui';
+import { Alert, Button, Checkbox, Field, Input, Modal, useToast } from '../ui';
+import { PasswordInput } from './PasswordInput';
+import { SocialRow } from './SocialRow';
 
-type Mode = 'login' | 'register' | 'forgot';
 type Values = { email: string; password?: string; accept?: boolean };
 
-const copyFor = (t: T): Record<Mode, { title: string; text: string; submit: string }> => ({
+const copyFor = (t: T): Record<AuthMode, { title: string; text: string; submit: string }> => ({
   login: {
     title: t('Вход в кабинет', 'Кабинетке кіру'),
     text: t('Управляйте ключами, заказами и настройками из одного места.', 'Кілттерді, тапсырыстарды және баптауларды бір жерден басқарыңыз.'),
     submit: t('Войти', 'Кіру'),
   },
   register: {
-    title: t('Регистрация', 'Тіркелу'),
-    text: t('Создайте аккаунт, чтобы хранить ключи и историю генераций.', 'Кілттер мен генерациялар тарихын сақтау үшін аккаунт жасаңыз.'),
+    title: t('Создать аккаунт', 'Аккаунт жасау'),
+    text: t('История генераций, ключи и подписки будут храниться в кабинете.', 'Генерациялар тарихы, кілттер мен жазылымдар кабинетте сақталады.'),
     submit: t('Создать аккаунт', 'Аккаунт жасау'),
   },
   forgot: {
-    title: t('Восстановление доступа', 'Қолжетімділікті қалпына келтіру'),
-    text: t('Укажите почту — пришлём ссылку для смены пароля.', 'Поштаңызды көрсетіңіз — құпиясөзді өзгерту сілтемесін жібереміз.'),
+    title: t('Восстановление пароля', 'Құпиясөзді қалпына келтіру'),
+    text: t('Пришлём ссылку для смены пароля на почту, указанную при регистрации.', 'Тіркелу кезінде көрсетілген поштаға құпиясөзді өзгерту сілтемесін жібереміз.'),
     submit: t('Отправить ссылку', 'Сілтеме жіберу'),
   },
 });
@@ -46,7 +45,8 @@ function schemasFor(t: T) {
   };
 }
 
-function oauthErrorText(t: T, reason: string) {
+/** Сервер возвращает с провайдера OAuth на /?auth=login&oauth=error&reason=… (server/_oauth-login.js). */
+export function oauthErrorText(t: T, reason: string) {
   switch (reason) {
     case 'denied': return t('Вход отменён на стороне сервиса. Попробуйте ещё раз или войдите по почте.', 'Кіру сервис жағында тоқтатылды. Қайта көріңіз немесе пошта арқылы кіріңіз.');
     case 'no_email': return t('Сервис не передал адрес почты. Разрешите доступ к почте или войдите по почте с паролем.', 'Сервис пошта мекенжайын бермеді. Поштаға рұқсат беріңіз немесе пошта мен құпиясөзбен кіріңіз.');
@@ -56,16 +56,39 @@ function oauthErrorText(t: T, reason: string) {
   }
 }
 
-export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
-  const { auth } = useStores();
+const linkButton: React.CSSProperties = { border: 0, background: 'none', padding: 0, font: 'inherit', cursor: 'pointer' };
+
+/**
+ * Модалка входа / регистрации / восстановления пароля (вместо страниц /login, /register, /forgot-password).
+ * Открывается через ui.openAuth(mode, { from }); после входа ведёт в from, а без него — в кабинет.
+ * На телефоне Modal сам становится нижней шторкой. Прототип: https://claude.ai/artifact/B19JQk834z6LA9UfnqwniA
+ */
+export const AuthModal = observer(() => {
+  const { ui } = useStores();
+  const t = useT();
+  const state = ui.authModal;
+  // Экран «Проверьте почту» (после регистрации / запроса ссылки) меняет заголовок модалки.
+  const [sent, setSent] = useState(false);
+  const copy = copyFor(t)[state?.mode ?? 'login'];
+  return (
+    <Modal
+      open={!!state}
+      onOpenChange={open => { if (!open) ui.closeAuth(); }}
+      title={sent ? t('Проверьте почту', 'Поштаңызды тексеріңіз') : copy.title}
+      description={sent ? t('Письмо уже в пути.', 'Хат жолда.') : copy.text}
+    >
+      {state && <AuthForm key={state.mode} mode={state.mode} from={state.from} oauthError={state.oauthError} onSent={setSent} />}
+    </Modal>
+  );
+});
+
+const AuthForm = observer(({ mode, from, oauthError, onSent }: { mode: AuthMode; from?: string; oauthError?: string; onSent: (sent: boolean) => void }) => {
+  const { auth, ui } = useStores();
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
   const t = useT();
   const lp = useLocalePath();
-  // Сервер возвращает с провайдера OAuth на /login?oauth=error&reason=… (server/_oauth-login.js).
-  const oauthReason = new URLSearchParams(location.search).get('oauth') === 'error' ? new URLSearchParams(location.search).get('reason') || 'failed' : '';
-  const [formError, setFormError] = useState(() => oauthReason ? oauthErrorText(t, oauthReason) : '');
+  const [formError, setFormError] = useState(() => (oauthError ? oauthErrorText(t, oauthError) : ''));
   const [confirmationEmail, setConfirmationEmail] = useState('');
   const [resetEmail, setResetEmail] = useState('');
   const [isResending, setIsResending] = useState(false);
@@ -74,10 +97,22 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
   const [remember, setRemember] = useState(true);
   const c = copyFor(t)[mode];
   const schema = useMemo(() => schemasFor(t)[mode], [t, mode]);
-
-  useDocumentMeta(c.title, c.text);
-  const from = (location.state as { from?: string } | null)?.from ?? '/cabinet';
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schema) });
+
+  // Из шапки from не передаётся → кабинет; из контекстных ссылок на лендинге → остаёмся где были.
+  const target = from ?? '/cabinet';
+  const finish = useCallback(() => {
+    ui.closeAuth();
+    navigate(target, { replace: true });
+  }, [navigate, target, ui]);
+
+  // Открыли модалку уже вошедшим (старая ссылка /login с живой сессией) — просто ведём дальше.
+  useEffect(() => {
+    if (auth.isAuthenticated) finish();
+  }, [auth.isAuthenticated, finish]);
+
+  const sent = Boolean((mode === 'forgot' && resetEmail) || (mode === 'register' && confirmationEmail));
+  useEffect(() => { onSent(sent); return () => onSent(false); }, [onSent, sent]);
 
   const onSubmit = handleSubmit(async values => {
     setFormError('');
@@ -94,7 +129,7 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
           return;
         }
       } else await auth.signIn(values.email, values.password!, remember);
-      navigate(from, { replace: true });
+      finish();
     } catch (error) {
       setFormError(error instanceof Error ? error.message : t('Не удалось выполнить запрос', 'Сұранысты орындау мүмкін болмады'));
     }
@@ -102,8 +137,8 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
 
   const resendError = (error: unknown) =>
     setFormError(error instanceof Error ? error.message : t('Не удалось отправить письмо повторно', 'Хатты қайта жіберу мүмкін болмады'));
-  const checkMail = t('Проверьте почту', 'Поштаңызды тексеріңіз');
   const resendLabel = t('Отправить письмо повторно', 'Хатты қайта жіберу');
+  const socialError = useCallback((message: string) => setFormError(message), []);
 
   if (mode === 'forgot' && resetEmail) {
     const resend = async () => {
@@ -118,29 +153,19 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
         setIsResending(false);
       }
     };
-
-    return <Card><div className="stack">
-      <div>
-        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{checkMail}</h1>
-        <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
-          {t('Если аккаунт с адресом', 'Егер')} <strong>{resetEmail}</strong>{' '}
-          {t(
-            'существует, мы отправили ссылку для создания нового пароля.',
-            'мекенжайы бар аккаунт болса, жаңа құпиясөз жасау сілтемесін жібердік.',
-          )}
-        </p>
-      </div>
+    return <div className="stack">
+      <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
+        {t('Если аккаунт с адресом', 'Егер')} <strong>{resetEmail}</strong>{' '}
+        {t('существует, мы отправили ссылку для создания нового пароля.', 'мекенжайы бар аккаунт болса, жаңа құпиясөз жасау сілтемесін жібердік.')}
+      </p>
       <Alert tone="success">
-        {t(
-          'Проверьте папку «Входящие» и «Спам». Доставка письма может занять несколько минут.',
-          '«Кіріс» және «Спам» қалталарын тексеріңіз. Хаттың жетуі бірнеше минутқа созылуы мүмкін.',
-        )}
+        {t('Проверьте папку «Входящие» и «Спам». Доставка письма может занять несколько минут.', '«Кіріс» және «Спам» қалталарын тексеріңіз. Хаттың жетуі бірнеше минутқа созылуы мүмкін.')}
       </Alert>
       {formError && <Alert tone="error">{formError}</Alert>}
       <Button type="button" size="lg" block loading={isResending} onClick={resend}>{resendLabel}</Button>
       <Button type="button" variant="secondary" block onClick={() => setResetEmail('')}>{t('Указать другую почту', 'Басқа поштаны көрсету')}</Button>
-      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>{t('Вернуться ко входу', 'Кіруге оралу')}</Link>
-    </div></Card>;
+      <button type="button" className="accent" style={{ ...linkButton, textAlign: 'center' }} onClick={() => ui.setAuthMode('login')}>{t('Вернуться ко входу', 'Кіруге оралу')}</button>
+    </div>;
   }
 
   if (mode === 'register' && confirmationEmail) {
@@ -156,29 +181,27 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
         setIsResending(false);
       }
     };
-
-    return <Card><div className="stack">
-      <div>
-        <h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{checkMail}</h1>
-        <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
-          {t('Мы отправили ссылку для подтверждения на', 'Растау сілтемесін мына мекенжайға жібердік:')} <strong>{confirmationEmail}</strong>
-          {t('. Перейдите по ней, чтобы завершить регистрацию.', '. Тіркелуді аяқтау үшін сол сілтемеге өтіңіз.')}
-        </p>
-      </div>
+    return <div className="stack">
+      <Alert tone="success">
+        {t('Мы отправили ссылку для подтверждения на', 'Растау сілтемесін мына мекенжайға жібердік:')} <strong>{confirmationEmail}</strong>
+        {t('. Перейдите по ней, чтобы завершить регистрацию.', '. Тіркелуді аяқтау үшін сол сілтемеге өтіңіз.')}
+      </Alert>
+      <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-13)' }}>
+        {t('Письма нет? Проверьте папку «Спам» или отправьте ещё раз через минуту.', 'Хат жоқ па? «Спам» қалтасын тексеріңіз немесе бір минуттан кейін қайта жіберіңіз.')}
+      </p>
       {formError && <Alert tone="error">{formError}</Alert>}
       <Button type="button" size="lg" block loading={isResending} onClick={resend}>{resendLabel}</Button>
       <Button type="button" variant="secondary" block onClick={() => setConfirmationEmail('')}>{t('Исправить адрес почты', 'Пошта мекенжайын түзету')}</Button>
-      <Link className="accent" to="/login" style={{ textAlign: 'center' }}>{t('Перейти ко входу', 'Кіруге өту')}</Link>
-    </div></Card>;
+      <button type="button" className="accent" style={{ ...linkButton, textAlign: 'center' }} onClick={() => ui.setAuthMode('login')}>{t('Перейти ко входу', 'Кіруге өту')}</button>
+    </div>;
   }
 
-  return <Card><div className="stack">
-    <div><h1 style={{ fontSize: 'var(--fs-24)', marginBottom: 'var(--sp-2)' }}>{c.title}</h1><p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>{c.text}</p></div>
+  return <div className="stack">
     {formError && <Alert tone="error">{formError}</Alert>}
     <form className="stack" onSubmit={onSubmit}>
       <Field label={t('Электронная почта', 'Электрондық пошта')} error={errors.email?.message}><Input type="email" autoComplete="email" {...register('email')} /></Field>
       {mode !== 'forgot' && <Field label={t('Пароль', 'Құпиясөз')} error={errors.password?.message} help={mode === 'register' ? t('Минимум 8 символов', 'Кемінде 8 таңба') : undefined}>
-        <Input type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} {...register('password')} />
+        <PasswordInput autoComplete={mode === 'register' ? 'new-password' : 'current-password'} {...register('password')} />
       </Field>}
 
       {/* Без галочки сессия живёт в sessionStorage и гаснет с вкладкой —
@@ -187,10 +210,7 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
         <Checkbox id="remember-device" checked={remember} onChange={e => setRemember(e.target.checked)}>
           {t('Запомнить это устройство', 'Осы құрылғыны есте сақтау')}
           <span style={{ display: 'block', fontSize: 'var(--fs-12)', color: 'var(--text-tertiary)' }}>
-            {t(
-              'На чужом компьютере снимите галочку — вход забудется при закрытии браузера.',
-              'Бөтен компьютерде белгіні алып тастаңыз — браузерді жапқанда кіру ұмытылады.',
-            )}
+            {t('На чужом компьютере снимите галочку — вход забудется при закрытии браузера.', 'Бөтен компьютерде белгіні алып тастаңыз — браузерді жапқанда кіру ұмытылады.')}
           </span>
         </Checkbox>
       )}
@@ -212,11 +232,16 @@ export function AuthPage({ mode = 'login' }: { mode?: Mode }) {
 
       <Button size="lg" block loading={isSubmitting}>{c.submit}</Button>
     </form>
-    <div className="row" style={{ justifyContent: 'space-between', fontSize: 'var(--fs-13)' }}>
+
+    <div className="row" style={{ justifyContent: mode === 'login' ? 'space-between' : 'center', fontSize: 'var(--fs-13)' }}>
       {mode === 'login'
-        ? <><Link className="accent" to="/register">{t('Создать аккаунт', 'Аккаунт жасау')}</Link><Link className="accent" to="/forgot-password">{t('Забыли пароль?', 'Құпиясөзді ұмыттыңыз ба?')}</Link></>
-        : <Link className="accent" to="/login">{t('← Вернуться ко входу', '← Кіруге оралу')}</Link>}
+        ? <>
+            <button type="button" className="accent" style={linkButton} onClick={() => ui.setAuthMode('register')}>{t('Создать аккаунт', 'Аккаунт жасау')}</button>
+            <button type="button" className="accent" style={linkButton} onClick={() => ui.setAuthMode('forgot')}>{t('Забыли пароль?', 'Құпиясөзді ұмыттыңыз ба?')}</button>
+          </>
+        : <button type="button" className="accent" style={linkButton} onClick={() => ui.setAuthMode('login')}>{t('← Вернуться ко входу', '← Кіруге оралу')}</button>}
     </div>
-    {mode !== 'forgot' && <><div className="muted" style={{ textAlign: 'center', fontSize: 'var(--fs-13)' }}>{t('или войдите через Telegram', 'немесе Telegram арқылы кіріңіз')}</div><TelegramLogin onError={setFormError} /><OAuthButtons next={from} /></>}
-  </div></Card>;
-}
+
+    {mode !== 'forgot' && <SocialRow next={target} onError={socialError} onTelegramSuccess={finish} />}
+  </div>;
+});

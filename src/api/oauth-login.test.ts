@@ -106,7 +106,7 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     const res = response();
     await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', code: 'c', state }, headers: { cookie: 'shk_oauth=other' } }, res);
     expect(res.statusCode).toBe(302);
-    expect(res.headers.Location).toBe('/login?oauth=error&reason=state');
+    expect(res.headers.Location).toBe('/?auth=login&oauth=error&reason=state');
     expect(res.headers['Set-Cookie']).toContain('Max-Age=0');
     expect(calls).toHaveLength(0);
   });
@@ -236,10 +236,10 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     const state = oauth.makeState({ provider: 'yandex', next: '/cabinet', nonce: 'n4' });
     const res = response();
     await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', code: 'x', state }, headers: { cookie: 'shk_oauth=n4' } }, res);
-    expect(res.headers.Location).toBe('/login?oauth=error&reason=no_email');
+    expect(res.headers.Location).toBe('/?auth=login&oauth=error&reason=no_email');
 
     const denied = response();
     await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', error: 'access_denied' }, headers: {} }, denied);
-    expect(denied.headers.Location).toBe('/login?oauth=error&reason=denied');
+    expect(denied.headers.Location).toBe('/?auth=login&oauth=error&reason=denied');
   });
 });

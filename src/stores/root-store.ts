@@ -16,12 +16,27 @@ export const CUSTOM_CODE_LENGTH: Readonly<Record<StickerKind, number>> = Object.
   product: 11,
   box: 10,
 });
+export type AuthMode = 'login' | 'register' | 'forgot';
+/** Открытая модалка входа (src/auth/AuthModal.tsx): режим, куда вернуть после входа, ошибка OAuth с сервера. */
+export type AuthModalState = { mode: AuthMode; from?: string; oauthError?: string };
+
 class UiStore {
   sidebarOpen = false;
   sidebarCollapsed = localStorage.getItem('sidebar-collapsed') === '1';
+  /** null — модалка входа закрыта. Вход/регистрация/«забыли пароль» живут в ней, отдельных страниц нет. */
+  authModal: AuthModalState | null = null;
   constructor() {
     makeAutoObservable(this);
   }
+  openAuth = (mode: AuthMode = 'login', options: { from?: string; oauthError?: string } = {}) => {
+    this.authModal = { mode, from: options.from, oauthError: options.oauthError };
+  };
+  setAuthMode = (mode: AuthMode) => {
+    if (this.authModal) this.authModal = { ...this.authModal, mode, oauthError: undefined };
+  };
+  closeAuth = () => {
+    this.authModal = null;
+  };
   toggleMobile = () => {
     this.sidebarOpen = !this.sidebarOpen;
   };

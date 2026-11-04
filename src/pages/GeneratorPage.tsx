@@ -253,7 +253,7 @@ function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: stri
 export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages: () => void }) => {
   const { formatPerUnit } = useMoney();
   const t = useT();
-  const { generator: g, auth } = useStores();
+  const { generator: g, auth, ui } = useStores();
   const queryClient = useQueryClient();
   const location = useLocation();
   // Постоянные клиенты приходят с кодом в localStorage — им поле показываем сразу.
@@ -485,7 +485,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                 )}
               </>
             ) : (
-              <>{t('Генерацию можно купить без регистрации. Или войдите, чтобы оплатить её с общего баланса.', 'Генерацияны тіркелусіз сатып алуға болады. Немесе ортақ баланстан төлеу үшін кіріңіз.')} <Link to="/login">{t('Войти', 'Кіру')}</Link></>
+              <>{t('Генерацию можно купить без регистрации. Или войдите, чтобы оплатить её с общего баланса.', 'Генерацияны тіркелусіз сатып алуға болады. Немесе ортақ баланстан төлеу үшін кіріңіз.')} <button type="button" className="link-btn" onClick={() => ui.openAuth('login', { from: location.pathname + location.search })}>{t('Войти', 'Кіру')}</button></>
             )}
           </Alert>
 
@@ -634,9 +634,9 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
               </>
             ) : (
               <>
-                <Link to="/login" state={{ from: location.pathname + location.search }}>
+                <button type="button" className="link-btn" onClick={() => ui.openAuth('login', { from: location.pathname + location.search })}>
                   {t('Войдите', 'Кіріңіз')}
-                </Link>
+                </button>
                 {t(
                   ', и история ранее сгенерированных стикеров появится в личном кабинете.',
                   ' — бұрын генерацияланған стикерлер тарихы жеке кабинетте пайда болады.',
@@ -659,13 +659,13 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
                пакет. Раньше тут был только вход, и покупка не предлагалась вовсе. */
             <Alert tone="error">
               {t('Этот код принадлежит другому аккаунту.', 'Бұл код басқа аккаунтқа тиесілі.')}{' '}
-              <Link
-                className={s.alertLogin}
-                to="/login"
-                state={{ from: location.pathname + location.search }}
+              <button
+                type="button"
+                className={`link-btn ${s.alertLogin}`}
+                onClick={() => ui.openAuth('login', { from: location.pathname + location.search })}
               >
                 {t('Войдите', 'Иесі ретінде')}
-              </Link>{' '}
+              </button>{' '}
               {t('под его владельцем,', 'кіріңіз,')}{' '}
               <button type="button" className={s.codeToggle} onClick={clearAccessCode}>
                 {t('сгенерируйте без кода', 'кодсыз генерациялаңыз')}

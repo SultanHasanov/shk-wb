@@ -85,7 +85,7 @@ export const PackPurchase = observer(() => {
   const [email, setEmail] = useState('');
   // Оплата уводит на ЮKassa, поэтому состав заказа показываем до ухода со страницы.
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const { auth } = useStores();
+  const { auth, ui } = useStores();
   const cabinet = useCabinet(auth.isAuthenticated);
   const { pathname } = useLocation();
   // Этот же блок показывает кабинет, поэтому «откуда покупали» знает только клиент:
@@ -165,9 +165,9 @@ export const PackPurchase = observer(() => {
         {!auth.isAuthenticated && (
           <Alert tone="info">
             {t('Купить можно без регистрации — код доступа выдадим сразу.', 'Тіркелусіз сатып алуға болады — қолжетімділік кодын бірден береміз.')}{' '}
-            <Link className="accent" to="/login">
+            <button type="button" className="link-btn" onClick={() => ui.openAuth('login', { from: pathname })}>
               {t('Войдите', 'Кіріңіз')}
-            </Link>
+            </button>
             {t(
               ', и пакет вместе с уже созданными в этом браузере стикерами появится в личном кабинете.',
               ' — пакет осы браузерде жасалған стикерлермен бірге жеке кабинетте пайда болады.',
