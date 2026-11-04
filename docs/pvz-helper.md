@@ -627,3 +627,37 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 (`Target`: NIIMBOT печатает страницы по одной, Windows — одним заданием), `stickers_find_niimbot` — поиск ~6 с.
 Фронт `Stickers.tsx`: `hasPrinter/printerLabel`, поиск/выбор принтера, насыщенность, подсказка про ширину B21 48 мм.
 Вживую с принтером НЕ проверено (нет NIIMBOT под рукой) — протокол тот же, что в «Печати ячеек».
+
+## Код клиента — только с подтверждением владельца в Telegram-боте (2026-11-04, код написан, НЕ выложено)
+План: `~/.claude/plans/dapper-coalescing-parasol.md` (28 сценариев). Решения владельца 04.11: любой ПК (и владельца тоже)
+шлёт запрос, подтверждает только Telegram, привязанный к аккаунту; в боте сначала квота тарифа, потом 50 ₽ с баланса.
+- **Сервер.** Миграция `20261108_app_code_approvals.sql`: `app_code_approvals` (запросы: pending|approved|declined|cancelled|
+  expired|undeliverable|failed, TTL 10 мин), `app_telegram_link_tokens` (ссылка привязки на 10 мин), `app_code_once`
+  принимает `p_device=null` при `via='bot'`. Модуль `server/_code-approvals.js` (создание, сообщение владельцу, approve/
+  decline/cancel, ленивая просрочка, повтор того же SID за день без списания, пейволл с баланса), `server/_telegram-identity.js`
+  (привязка Telegram, общая для сайта и узла бота), `_app-account.js chargeClientCode(userId, deviceId|null, …)`.
+  Флаг `app_code_via_bot` (`_app-flags.js`, тумблер в админке «Программа») — включён → `client-qr`/`crack-code` вошедшему
+  аккаунту отвечают **403 APPROVAL_REQUIRED** (старые версии показывают текст «обновите программу»); ключ WBPK без входа —
+  как раньше. Выключить флаг = откат на прямую выдачу без деплоя.
+  `api/app.js` после `requireDevice`: `POST code-request {sid,cell}` → `{id,status,expiresAt,ownerTelegram,reused}` (ошибки
+  `TELEGRAM_NOT_LINKED`, `REQUEST_FLOOD` ≤10/10 мин на ПК, `DENIED_BY_OWNER`, `CODE_VIA_BOT_OFF`), `GET code-request-status?id`
+  (approved → `qrImage`), `POST code-request-cancel {id}`, `POST telegram-link` (только ПК владельца → `t.me/<бот>?start=link_<24>`).
+  `/me`: `telegramLinked`, `user.telegram.firstName`, `flags.codeViaBot`. Маршруты добавлены в `vercel.json`.
+- **Бот.** Кнопки `cq:ok|no|wallet:<uuid>` (чужой Telegram → «Это не ваш запрос»; квота пуста → экран «выдать за 50 ₽ с баланса /
+  пополнить `cqa:<id>` / пакет / отклонить»), `/start link_<token>` (чужой аккаунт → отказ; уже есть другой Telegram → «Заменить?»
+  `cq:link:yes|no`), экран `/code` показывает «Ожидают решения: N» с кнопками. Прямой `Код <SID>` — сначала `chargeClientCode`
+  (квота/пакет, `requestId` случайный на каждое сообщение), `LIMIT_EXCEEDED` → баланс как раньше. На узле бота в `.env` нужен
+  `APP_UNLIMITED_USER_IDS` (добавлен в `selfhost/env.bot.example`), иначе безлимит там не распознаётся.
+- **Программа 1.11.0.** `client_qr` → кэш на сегодня / вошёл → `code-request` (pending; `CODE_VIA_BOT_OFF` → прямой путь) / ключ →
+  прямой; `client_qr_status`, `client_qr_cancel`, `telegram_link`; ошибки теперь `ApiError` с кодом, а не строка. Незавершённый
+  запрос — `config.pending_code_requests["approval:<sid>"]`, после перезапуска опрос продолжается. «Быстрый QR» и `crack_code`
+  удалены (серверный флаг остался без клиента). UI: `components/CodeRequestDialog.tsx` (отправка → ожидание с таймером и «Отменить»
+  → QR / отклонено / истекло «Отправить ещё раз» / не доставлено), `components/TelegramLinkDialog.tsx` (QR ссылки + «Открыть
+  Telegram» через `open_url`, которому разрешён `https://t.me/`; опрос `/me` до `telegramLinked`), строка «Telegram-бот» в
+  «Вход и безопасность», кнопка «Запросить QR у владельца» / «Показать QR». На ПК сотрудника без Telegram у аккаунта — подсказка
+  попросить владельца. Проверено: `cargo check --lib`, `tsc -b`, `vite build`, `npm test` сайта 398/398
+  (`src/api/code-approvals.test.ts` — 19). Вживую НЕ проверено.
+- **Порядок выпуска:** миграция → сайт из main → узел бота (`ROLE=bot …`, перед этим `APP_UNLIMITED_USER_IDS` в `.env` узла) →
+  `curl …/api/app/code-request` → 401 (не 404) → тест в тестовом боте (`/start link_…`, кнопки `cq:*`) → включить флаг в админке →
+  программа 1.11.0 (`auto:true`) → через несколько дней `PVZ_APP_MIN_VERSION=1.11.0`.
+- **Границы:** ключ WBPK без входа выдаёт напрямую; доверенные подтверждающие кроме владельца — не сделано.

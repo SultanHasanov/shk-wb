@@ -42,4 +42,22 @@ async function setCrackFallback(enabled) {
   return { enabled: enabled === true };
 }
 
-module.exports = { readFlag, writeFlag, crackFallbackEnabled, crackFallbackState, setCrackFallback };
+// Код клиента только с подтверждением владельца в Telegram-боте (server/_code-approvals.js): включён →
+// /api/app/client-qr для вошедшего аккаунта отвечает 403 APPROVAL_REQUIRED, программа шлёт запрос владельцу.
+const CODE_VIA_BOT_KEY = 'app_code_via_bot';
+
+async function codeViaBotEnabled() {
+  return readFlag(CODE_VIA_BOT_KEY);
+}
+async function codeViaBotState() {
+  return { enabled: await codeViaBotEnabled() };
+}
+async function setCodeViaBot(enabled) {
+  await writeFlag(CODE_VIA_BOT_KEY, enabled === true);
+  return { enabled: enabled === true };
+}
+
+/** Для тестов: забыть кэшированные значения. */
+function clearFlagCache() { cache.clear(); }
+
+module.exports = { readFlag, writeFlag, clearFlagCache, crackFallbackEnabled, crackFallbackState, setCrackFallback, codeViaBotEnabled, codeViaBotState, setCodeViaBot };

@@ -8,6 +8,9 @@ const { generateStickers, getAccessStatus, selectAccessCode } = require('./_stic
 const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
+const approvals = require('./_code-approvals');
+const account = require('./_app-account');
+const { findIdentity, identityForUser, saveIdentity, telegramLabel } = require('./_telegram-identity');
 const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
@@ -360,30 +363,143 @@ async function showMainMenu(from, chatId, messageId, { greet = false, invited = 
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
 }
 
-/** Подписанная ссылка на «голый» QR кода клиента (отдаёт api/stickers/image в режиме qr). */
-function clientQrUrl(qrText) {
-  const expires = Math.floor(Date.now() / 1000) + 3600;
-  const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(`qr:${qrText}:${expires}`).digest('base64url');
-  return publicUrl(`/api/stickers/image?qr=${encodeURIComponent(qrText)}&token=${encodeURIComponent(token)}&expires=${expires}&format=png`);
+// Подписанная ссылка на «голый» QR кода клиента (отдаёт api/stickers/image в режиме qr) — общая с подтверждениями.
+const { clientQrUrl } = approvals;
+
+/** Открытые запросы QR с компьютеров владельца — блок сверху экрана «Код клиента» и кнопки по каждому. */
+async function pendingApprovalRows(userId) {
+  const pending = userId ? await approvals.pendingFor(userId) : [];
+  if (!pending.length) return { lines: [], rows: [] };
+  const ids = [...new Set(pending.map(r => r.device_id))].map(encodeURIComponent).join(',');
+  const devices = await supabaseFetch(`app_devices?id=in.(${ids})&select=id,name`).catch(() => []);
+  const nameOf = id => devices.find(d => d.id === id)?.name || 'ПК';
+  const rows = pending.map(r => [
+    { text: `✅ Выдать · ${nameOf(r.device_id)}${r.cell ? ` · яч. ${r.cell}` : ''}`.slice(0, 60), callback_data: `cq:ok:${r.id}` },
+    { text: '❌', callback_data: `cq:no:${r.id}` },
+  ]);
+  return { lines: [`⏳ <b>Ожидают решения: ${pending.length}</b> — запросы QR с ваших компьютеров.`, ''], rows };
 }
 
 async function showClientCode(chatId, messageId, from) {
-  const [free, { price, club }] = await Promise.all([helperFreeText(), clientCodePrice(from?.id)]);
+  const userId = from?.id ? await findUser(from.id).catch(() => null) : null;
+  const [free, { price, club }, pending] = await Promise.all([helperFreeText(), clientCodePrice(from?.id), pendingApprovalRows(userId)]);
   // Коротко: что прислать и сколько стоит; где взять ID — кнопками ниже.
   const text = [
     '<b>🔑 Код клиента</b>',
+    ...pending.lines,
     ...(club ? [clubLine] : []),
-    `Отправьте ID клиента, например <code>Код 191607973</code>, — пришлю QR за <b>${wallet.formatRub(price)}</b>.`,
+    `Отправьте ID клиента, например <code>Код 191607973</code>, — пришлю QR. Сначала списывается код тарифа «Помощника ПВЗ», без него — <b>${wallet.formatRub(price)}</b> с баланса.`,
     '',
     'ID найдёте здесь в боте по ячейке или телефону, или в программе «Помощник ПВЗ»',
     `(тариф «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес${free ? `, сейчас ${free}` : ''}).`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    ...pending.rows,
     [{ text: '🔎 Найти ID в боте', callback_data: 'code:find' }],
     [{ text: `🛒 Купить «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:standard' }],
     [{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }],
     MENU_ROW,
   ]) });
+}
+
+// ── Подтверждение QR-кода клиента с компьютеров (server/_code-approvals.js) ──
+
+/** Экран «коды тарифа закончились»: выдать с баланса, пополнить, купить пакет или отклонить. */
+async function showApprovalPaywall(chatId, messageId, row, price, balance) {
+  const base = await approvals.ownerMessage(row);
+  const enough = balance >= price;
+  const text = [
+    base.text,
+    '',
+    `Коды тарифа закончились. Выдать за <b>${wallet.formatRub(price)}</b> с баланса (на балансе ${wallet.formatRub(balance)})${enough ? '?' : ' — не хватает.'}`,
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    enough ? [{ text: `💳 Выдать за ${wallet.formatRub(price)} с баланса`, callback_data: `cq:wallet:${row.id}` }] : topupAndBuyRow(price - balance, `cqa:${row.id}`),
+    [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
+    [{ text: '❌ Отклонить', callback_data: `cq:no:${row.id}` }],
+  ]) });
+}
+
+async function handleApprovalButton(from, chatId, messageId, callbackId, action, id) {
+  if (action === 'no') {
+    const r = await approvals.decline(id, { telegramUserId: from.id });
+    await answerCallbackQuery(callbackId, r.outcome === 'declined' ? 'Отклонено' : r.outcome === 'not_owner' ? 'Это не ваш запрос' : 'Запрос устарел');
+    if (r.outcome === 'stale' && r.row) await approvals.updateOwnerMessage(r.row);
+    return;
+  }
+  const r = await approvals.approve(id, { telegramUserId: from.id, payWithWallet: action === 'wallet' });
+  if (r.outcome === 'approved') {
+    answerCallbackQuery(callbackId, 'Выдано — QR показан на компьютере').catch(() => {});
+    await approvals.sendQrToOwner(r.row);
+    return;
+  }
+  if (r.outcome === 'not_owner') return answerCallbackQuery(callbackId, 'Это не ваш запрос');
+  if (r.outcome === 'stale') {
+    await answerCallbackQuery(callbackId, 'Запрос устарел');
+    if (r.row) await approvals.updateOwnerMessage(r.row);
+    return;
+  }
+  // limit | wallet_short — квота пуста или на балансе не хватает
+  answerCallbackQuery(callbackId).catch(() => {});
+  await showApprovalPaywall(chatId, r.row.telegram_message_id || messageId, r.row, r.price, r.balance ?? await walletRub(r.row.user_id));
+}
+
+/** После пополнения «и выдать» (walletThen = cqa:<id>): выдать с баланса без повторного нажатия. */
+async function afterTopupApproval(from, chatId, id) {
+  const r = await approvals.approve(id, { telegramUserId: from.id, payWithWallet: true });
+  if (r.outcome === 'approved') { await approvals.sendQrToOwner(r.row); return true; }
+  await sendMessage(chatId, r.outcome === 'wallet_short'
+    ? 'Баланс пополнен, но на QR всё ещё не хватает — откройте запрос в меню «Код клиента».'
+    : 'Баланс пополнен. Запрос с компьютера уже недействителен — деньги остались на балансе.');
+  return true;
+}
+
+// ── Привязка Telegram к аккаунту по ссылке из программы: /start link_<token> (POST /api/app/telegram-link) ──
+
+const LINK_PAYLOAD = /^link_([A-Za-z0-9_-]{24})$/;
+
+async function loadLinkToken(token) {
+  const rows = await supabaseFetch(`app_telegram_link_tokens?token=eq.${encodeURIComponent(token)}&select=token,user_id,expires_at,used_at&limit=1`);
+  const row = rows[0];
+  if (!row || row.used_at || Date.parse(row.expires_at) < Date.now()) return null;
+  return row;
+}
+
+async function completeLink(from, chatId, tokenRow) {
+  await saveIdentity(tokenRow.user_id, from, { replace: true });
+  await supabaseFetch(`app_telegram_link_tokens?token=eq.${encodeURIComponent(tokenRow.token)}`, { method: 'PATCH', body: JSON.stringify({ used_at: new Date().toISOString() }) }).catch(() => {});
+  await bindTelegramReferral(from.id, tokenRow.user_id).catch(() => {});
+  await sendMessage(chatId, [
+    '<b>✅ Telegram подключён к аккаунту «Помощника ПВЗ»</b>',
+    'Теперь запросы QR-кода клиента с ваших компьютеров будут приходить сюда — вы решаете, выдать или отклонить.',
+    'Этим же Telegram можно входить на сайт.',
+  ].join('\n'));
+  return showMainMenu(from, chatId);
+}
+
+async function handleLinkStart(from, chatId, token) {
+  const tokenRow = await loadLinkToken(token);
+  if (!tokenRow) return sendMessage(chatId, 'Ссылка устарела — получите новую в программе: Профиль → «Подключить Telegram».', { reply_markup: choiceKeyboard([MENU_ROW]) });
+  const existing = await findIdentity(from.id);
+  if (existing && existing.user_id !== tokenRow.user_id) {
+    return sendMessage(chatId, 'Этот Telegram уже привязан к другому аккаунту. Отвяжите его в кабинете на сайте (Профиль → Telegram) и откройте ссылку снова.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+  }
+  const current = await identityForUser(tokenRow.user_id);
+  if (current && Number(current.telegram_user_id) !== Number(from.id)) {
+    return sendMessage(chatId, `К аккаунту уже привязан Telegram ${escapeHtml(telegramLabel(current))}. Заменить на этот? Прежний Telegram потеряет вход на сайт и перестанет получать запросы.`, {
+      reply_markup: choiceKeyboard([[{ text: '✅ Да, заменить', callback_data: `cq:link:yes:${token}` }, { text: 'Нет', callback_data: `cq:link:no:${token}` }]]),
+    });
+  }
+  return completeLink(from, chatId, tokenRow);
+}
+
+async function handleLinkConfirm(from, chatId, messageId, callbackId, answer, token) {
+  answerCallbackQuery(callbackId).catch(() => {});
+  if (answer === 'no') return showScreen(chatId, messageId, 'Привязка отменена.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+  const tokenRow = await loadLinkToken(token);
+  if (!tokenRow) return showScreen(chatId, messageId, 'Ссылка устарела — получите новую в программе.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+  await deleteMessage(chatId, messageId).catch(() => {});
+  return completeLink(from, chatId, tokenRow);
 }
 
 /** Не хватает денег на QR — пополнить ровно на недостающее и выдать QR (afterWalletTopup → qr:<sid>). */
@@ -431,7 +547,22 @@ const reviewPrice = telegramId => clubPrice(telegramId, REVIEW_PRICE);
 
 const clubLine = '🎁 У вас скидка 20% как у участника клуба.';
 
-/** «Код <SID>» → списать цену QR (CLIENT_CODE_PRICE, со скидкой клуба меньше) и прислать только QR-код. */
+/** «Коды: 3 из 10 в этом месяце · в пакетах 5» после списания кода тарифа; ошибка → пусто. */
+async function codesLeftText(userId) {
+  try {
+    const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) });
+    const limit = Number(ent?.codes_limit || 0), used = Number(ent?.codes_used || 0), packs = Number(ent?.packs_left || 0);
+    const parts = [];
+    if (limit > 0) parts.push(`${Math.max(0, limit - used)} из ${limit} в этом месяце`);
+    if (packs > 0) parts.push(`в пакетах ${packs}`);
+    return parts.length ? ` · осталось ${parts.join(', ')}` : '';
+  } catch { return ''; }
+}
+
+/**
+ * «Код <SID>» → QR клиента. Сначала код тарифа/пакета «Помощника ПВЗ» (как в программе), если их нет —
+ * CLIENT_CODE_PRICE с баланса (со скидкой клуба меньше). Присылаем только QR-код.
+ */
 async function handleClientCode(from, chatId, sid) {
   const { qrText: freeQr } = buildClientQr(sid);
   if (clientCodeFreeFor(from.id)) {
@@ -442,6 +573,19 @@ async function handleClientCode(from, chatId, sid) {
   if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR, войдите через Telegram — баланс хранится в кабинете.'); return; }
   // Каждый ввод SID — новая платная операция, даже если этот SID уже вводили сегодня.
   const { qrText } = buildClientQr(sid);
+  // 1) квота тарифа или пакет подборов — без ПК (p_device = null, via = 'bot'); нет → 2) баланс
+  let charged = null;
+  try {
+    charged = await account.chargeClientCode(userId, null, { requestId: crypto.randomUUID(), sid, qrText, meta: { via: 'bot' } });
+  } catch (error) {
+    if (error.code !== 'LIMIT_EXCEEDED') throw error;
+  }
+  if (charged) {
+    const b = charged.billing || {};
+    const caption = b.free ? 'Без списания.' : b.source === 'pack' ? `Списан 1 код из пакета${await codesLeftText(userId)}` : `Списан 1 код тарифа${await codesLeftText(userId)}`;
+    await sendPhoto(chatId, clientQrUrl(charged.qrText || qrText), { caption });
+    return;
+  }
   const [balance, { price, club }] = await Promise.all([walletRub(userId), clientCodePrice(from.id)]);
   if (balance < price) return showClientCodePaywall(from, chatId, sid, balance, price);
   const spent = await supabaseFetch('rpc/wallet_spend', {
@@ -2142,6 +2286,9 @@ async function afterWalletTopup(order, noticeId = null) {
     await handleClientCode(from, chatId, qr[1]);
     return true;
   }
+  // «Пополнить и выдать» по запросу QR с компьютера (server/_code-approvals.js)
+  const approval = /^cqa:([0-9a-f-]{36})$/.exec(then);
+  if (approval) return afterTopupApproval(from, chatId, approval[1]);
   if (then.startsWith('shop:')) {
     // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
     const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
@@ -2259,6 +2406,11 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }
+  // Запрос QR с компьютера: выдать / отклонить / выдать с баланса; подтверждение замены привязки Telegram.
+  const approvalMatch = data.match(/^cq:(ok|no|wallet):([0-9a-f-]{36})$/);
+  if (approvalMatch) { await handleApprovalButton(from, chatId, messageId, callback.id, approvalMatch[1], approvalMatch[2]); return; }
+  const linkMatch = data.match(/^cq:link:(yes|no):([A-Za-z0-9_-]{24})$/);
+  if (linkMatch) { await handleLinkConfirm(from, chatId, messageId, callback.id, linkMatch[1], linkMatch[2]); return; }
   const codeQr = data.match(/^code:qr:(\d{1,12})$/);
   if (codeQr) { answerCallbackQuery(callback.id).catch(() => {}); await handleClientCode(from, chatId, codeQr[1]); return; }
   if (data === 'code:enter') {
@@ -2344,6 +2496,9 @@ async function handleMessage(message) {
   if (startMatch) {
     // Сброс черновика и связка с кабинетом (греет кеш для меню) — параллельно.
     await Promise.all([clearSession(from.id), findUser(from.id).catch(() => null)]);
+    // t.me/<бот>?start=link_<token> — привязать этот Telegram к аккаунту из программы «Помощник ПВЗ».
+    const link = LINK_PAYLOAD.exec(startMatch[1] || '');
+    if (link) return handleLinkStart(from, chatId, link[1]);
     // t.me/<бот>?start=r_<КОД> — переход по приглашению.
     const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
     const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;

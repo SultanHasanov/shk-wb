@@ -506,6 +506,28 @@ export function useSetAdminAppCrackFallback() {
   });
 }
 
+/** Код клиента только с подтверждением владельца в Telegram-боте (server/_code-approvals.js). */
+export type AdminAppCodeViaBot = { enabled: boolean };
+
+export function useAdminAppCodeViaBot() {
+  return useQuery({
+    queryKey: ['admin', 'app-code-via-bot'] as const,
+    queryFn: () => adminApi<AdminAppCodeViaBot>(`${RESOURCE}appCodeViaBot`),
+  });
+}
+
+export function useSetAdminAppCodeViaBot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      adminApi<AdminAppCodeViaBot>(`${RESOURCE}appCodeViaBot`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: data => queryClient.setQueryData(['admin', 'app-code-via-bot'], data),
+  });
+}
+
 /** Статистика «Помощника ПВЗ»: скачивания установщика, новые компьютеры, активные, оплаты. */
 export type AdminAppStats = {
   totals: {

@@ -1,4 +1,7 @@
-const { sendApiError } = require('../server/_supabase');
+const crypto = require('crypto');
+const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const approvals = require('../server/_code-approvals');
+const { telegramRequest } = require('../server/_telegram-api');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { enforceProgramVersion } = require('../server/_program-version');
 const { requireUser, optionalUser } = require('../server/_user-auth');
@@ -9,7 +12,7 @@ const QRCode = require('qrcode');
 const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
 const { appFreeMode } = require('../server/_app-free');
-const { crackFallbackEnabled } = require('../server/_app-flags');
+const { crackFallbackEnabled, codeViaBotEnabled } = require('../server/_app-flags');
 const { buildClientQr } = require('../server/_wb-code');
 const { crackClientQr } = require('../server/_wb-crack');
 const wallet = require('../server/_wallet');
@@ -52,6 +55,26 @@ async function ownerAllows(req, key) {
   await account.requireAllowed(req, user.id, key).catch(error => {
     if (error.code === 'DENIED_BY_OWNER') throw error;
   });
+}
+
+// Код клиента только через подтверждение владельца в боте (флаг app_code_via_bot): вошедшему аккаунту прямой
+// путь закрыт — 403 APPROVAL_REQUIRED (старые версии программы покажут этот текст тостом). Ключ WBPK без входа
+// владельца не имеет — работает как раньше. Возвращает false, если ответ уже отправлен.
+async function approvalRequired(req, res) {
+  if (!await codeViaBotEnabled()) return true;
+  const user = await optionalUser(req).catch(() => null);
+  if (!user) return true;
+  res.status(403).json({ error: 'Код клиента выдаёт владелец через Telegram-бот. Обновите программу до версии 1.11 или новее.', code: 'APPROVAL_REQUIRED' });
+  return false;
+}
+
+let cachedBotUsername = null;
+/** Имя бота для ссылки t.me/<бот>?start=… — getMe через релей с кэшем, запасной путь — TELEGRAM_BOT_USERNAME. */
+async function botUsername() {
+  if (cachedBotUsername) return cachedBotUsername;
+  const me = await telegramRequest('getMe', {}, { timeoutMs: 5000 }).catch(() => null);
+  cachedBotUsername = me?.username || process.env.TELEGRAM_BOT_USERNAME || process.env.VITE_TELEGRAM_BOT_USERNAME || null;
+  return cachedBotUsername;
 }
 
 function body(req) {
@@ -260,6 +283,7 @@ module.exports = async function handler(req, res) {
     if (action === 'client-qr' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-client-qr', limit: 60, windowSeconds: 60 })) return;
       await ownerAllows(req, 'act.client_qr');
+      if (!await approvalRequired(req, res)) return;
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
@@ -277,6 +301,7 @@ module.exports = async function handler(req, res) {
       if (!await crackFallbackEnabled()) return res.status(403).json({ error: 'Резервный подбор отключён', code: 'CRACK_DISABLED' });
       if (!await enforceRateLimit(req, res, { scope: 'app-crack-code', limit: 5, windowSeconds: 60 })) return;
       await ownerAllows(req, 'act.client_qr');
+      if (!await approvalRequired(req, res)) return;
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');
       if (!sid) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
@@ -341,6 +366,44 @@ module.exports = async function handler(req, res) {
       return payments(req, res);
     }
     const device = await account.requireDevice(req, user.id);
+
+    // --- Код клиента с подтверждением владельца в Telegram (server/_code-approvals.js) ---
+    if (action === 'code-request' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-code-request', limit: 30, windowSeconds: 600, key: device.id })) return;
+      if (!await codeViaBotEnabled()) return res.status(409).json({ error: 'Подтверждение через бот выключено — код выдаётся напрямую', code: 'CODE_VIA_BOT_OFF' });
+      if (permissions.isDenied(device, 'act.client_qr')) return res.status(403).json({ error: 'Владелец закрыл QR-код клиента на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.client_qr' });
+      const b = body(req);
+      const sid = String(b.sid || '').replace(/\D/g, '');
+      if (!sid || sid.length > 12) return res.status(400).json({ error: 'Нет SID клиента', code: 'VALIDATION_ERROR' });
+      const cell = String(b.cell || '').slice(0, 16) || null;
+      const { row, reused, owner } = await approvals.createApproval({ userId: user.id, device, sid, cell });
+      const current = reused ? row : await approvals.notifyOwner(row, owner);
+      return res.status(200).json({ ...approvals.statusPayload(current), reused, ownerTelegram: owner.label });
+    }
+    if (action === 'code-request-status' && req.method === 'GET') {
+      const row = await approvals.loadApproval(String(req.query.id || ''));
+      if (!row || row.user_id !== user.id || row.device_id !== device.id) return res.status(404).json({ error: 'Запрос не найден', code: 'NOT_FOUND' });
+      const payload = approvals.statusPayload(row);
+      if (row.status === 'approved') payload.qrImage = await clientQrImage(row.qr_text);
+      return res.status(200).json(payload);
+    }
+    if (action === 'code-request-cancel' && req.method === 'POST') {
+      const row = await approvals.cancel(String(body(req).id || ''), { userId: user.id, deviceId: device.id });
+      if (!row) return res.status(404).json({ error: 'Запрос не найден', code: 'NOT_FOUND' });
+      return res.status(200).json(approvals.statusPayload(row));
+    }
+    // Одноразовая ссылка t.me/<бот>?start=link_<token> — привязать Telegram владельца к аккаунту. Только с ПК
+    // владельца: сотрудник не должен подключить свой Telegram и подтверждать коды сам себе.
+    if (action === 'telegram-link' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-telegram-link', limit: 10, windowSeconds: 600, key: user.id })) return;
+      if (permissions.isWork(device) || permissions.isDenied(device, 'act.account')) return res.status(403).json(WORK_PC);
+      const username = await botUsername();
+      if (!username) return res.status(503).json({ error: 'Имя бота неизвестно — попробуйте позже', code: 'BOT_UNAVAILABLE' });
+      const token = crypto.randomBytes(18).toString('base64url');
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      await supabaseFetch('app_telegram_link_tokens', { method: 'POST', body: JSON.stringify({ token, user_id: user.id, device_id: device.id, expires_at: expiresAt }) });
+      return res.status(200).json({ url: `https://t.me/${username}?start=link_${token}`, expiresAt });
+    }
 
     // --- загрузка данных пункта с другого ПК (server/_app-relay.js) — свой потолок частоты:
     // ПК держит inbox постоянно, а большая загрузка идёт сотней кусков ---

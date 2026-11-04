@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { type AdminProgramKey, useAdminAppCrackFallback, useAdminAppFreeMode, useAdminAppStats, useAdminResource, useAdminResourceMutation, useSetAdminAppCrackFallback, useSetAdminAppFreeMode } from '../../api/admin';
+import { type AdminProgramKey, useAdminAppCodeViaBot, useAdminAppCrackFallback, useAdminAppFreeMode, useAdminAppStats, useAdminResource, useAdminResourceMutation, useSetAdminAppCodeViaBot, useSetAdminAppCrackFallback, useSetAdminAppFreeMode } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
 import { shortDate } from '../../lib/admin-users';
 import { Alert, Badge, Button, Card, Field, Input, Segmented, Skeleton, Stat, Switch, Table, useToast } from '../../ui';
@@ -20,10 +20,34 @@ export function AdminProgramPage() {
   const setFreeMode = useSetAdminAppFreeMode();
   const crack = useAdminAppCrackFallback();
   const setCrack = useSetAdminAppCrackFallback();
+  const codeViaBot = useAdminAppCodeViaBot();
+  const setCodeViaBot = useSetAdminAppCodeViaBot();
 
   return (
     <div className="page stack-lg">
       <AppStatsCard />
+      <Card>
+        <h3>Код клиента — только с подтверждением владельца в Telegram</h3>
+        {codeViaBot.isPending ? (
+          <Skeleton height={48} />
+        ) : codeViaBot.isError ? (
+          <Alert tone="error">Не удалось загрузить настройку: {codeViaBot.error.message}</Alert>
+        ) : (
+          <Switch
+            checked={codeViaBot.data.enabled}
+            disabled={setCodeViaBot.isPending}
+            onChange={e =>
+              setCodeViaBot.mutate(e.target.checked, {
+                onSuccess: d => toast(d.enabled ? 'Код клиента выдаётся через подтверждение в боте' : 'Код клиента снова выдаётся напрямую из программы', 'success'),
+                onError: error => toast(error.message, 'error'),
+              })
+            }
+            description="Пока включено, «QR код клиента» в программе (версия 1.11+) отправляет запрос владельцу в Telegram-бот: тот нажимает «Выдать» или «Отклонить», и QR появляется на компьютере. Старые версии программы получают 403 с просьбой обновиться. Аккаунт без привязанного Telegram коды получить не может — программа предложит владельцу подключить бот. Выключение возвращает прямую выдачу без обновления программы — аварийный выключатель, если бот недоступен."
+          >
+            Код клиента только через Telegram-бот
+          </Switch>
+        )}
+      </Card>
       <Card>
         <h3>Бесплатный режим программы</h3>
         {freeMode.isPending ? (

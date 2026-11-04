@@ -15,7 +15,7 @@ const {
   createCellLicense, createStickerAccessCode, recordAdminAction, validateProgramPromo,
 } = require('../../server/_admin-grants');
 const { freeModeState, setAppFreeMode } = require('../../server/_app-free');
-const { crackFallbackState, setCrackFallback } = require('../../server/_app-flags');
+const { codeViaBotState, crackFallbackState, setCodeViaBot, setCrackFallback } = require('../../server/_app-flags');
 
 module.exports = async function handler(req, res) {
   if (req.query.cabinet) return handleCabinetAdmin(req, res);
@@ -32,6 +32,7 @@ module.exports = async function handler(req, res) {
   if (req.query.resource === 'freeGenerations') return handleFreeGenerations(req, res);
   if (req.query.resource === 'appFreeMode') return handleAppFreeMode(req, res);
   if (req.query.resource === 'appCrackFallback') return handleAppCrackFallback(req, res);
+  if (req.query.resource === 'appCodeViaBot') return handleAppCodeViaBot(req, res);
   if (req.query.resource === 'appStats') return handleAppStats(req, res);
   const config = RESOURCES[req.query.resource];
   const id = req.query.id;
@@ -181,6 +182,21 @@ async function handleAppCrackFallback(req, res) {
     if (req.method === 'POST') {
       const state = await setCrackFallback(req.body?.enabled === true);
       await recordAdminAction(req, 'setAppCrackFallback', null, { enabled: state.enabled }).catch(() => {});
+      return res.json(state);
+    }
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  } catch (error) { return sendApiError(res, error); }
+}
+
+// Код клиента только с подтверждением владельца в Telegram-боте (server/_code-approvals.js): GET — состояние,
+// POST {enabled}. Включённый флаг закрывает прямой /api/app/client-qr для вошедших аккаунтов (403 APPROVAL_REQUIRED).
+async function handleAppCodeViaBot(req, res) {
+  try {
+    if (req.method === 'GET') return res.json(await codeViaBotState());
+    if (req.method === 'POST') {
+      const state = await setCodeViaBot(req.body?.enabled === true);
+      await recordAdminAction(req, 'setAppCodeViaBot', null, { enabled: state.enabled }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');

@@ -12,7 +12,7 @@ const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
 const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, mirrorLimit } = require('./_app-plans');
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
-const { crackFallbackEnabled } = require('./_app-flags');
+const { crackFallbackEnabled, codeViaBotEnabled } = require('./_app-flags');
 const { CLUB_DISCOUNT_PERCENT, clubUserDiscount } = require('./_club');
 const permissions = require('./_app-permissions');
 
@@ -382,7 +382,7 @@ function maskKey(key) {
 // Сводка для программы и кабинета.
 async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
-  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback, clubDiscount] = await Promise.all([
+  const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback, clubDiscount, codeViaBot] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
     supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
@@ -397,6 +397,7 @@ async function accountSummary(user, currentHash) {
     // Скидка участника «Клуба вопросов» на тариф «Про» (server/_club.js): кабинет показывает цену со скидкой,
     // сервер применяет её в api/payments.js. Ошибка проверки → без скидки.
     clubUserDiscount(user.id).catch(() => false),
+    codeViaBotEnabled().catch(() => false),
   ]);
   const unlimited = isUnlimited(user.id);
   const all = free || unlimited;
@@ -411,15 +412,18 @@ async function accountSummary(user, currentHash) {
       email: technicalEmail(user.email) ? null : user.email,
       name: profile.display_name || tg?.first_name || null,
       phone: profile.phone || null,
-      telegram: tg ? { username: tg.username || null } : null,
+      telegram: tg ? { username: tg.username || null, firstName: tg.first_name || null } : null,
     },
+    // Telegram привязан к аккаунту (username бывает пустым — поэтому отдельный флаг): туда приходят
+    // запросы QR-кода клиента с компьютеров.
+    telegramLinked: Boolean(tg),
     // Бесплатный режим (админка): всем вошедшим — Про. Программа читает поле plan первым.
     freeMode: free,
     freeUntil: free ? freeUntil : null,
     // Безлимитный аккаунт: всё открыто бессрочно, оплаты не нужны.
     unlimited,
     // Переключатели из админки (резервный подбор кода и т.п.).
-    flags: { crackFallback: crackFallback === true },
+    flags: { crackFallback: crackFallback === true, codeViaBot: codeViaBot === true },
     // Скидка участника клуба на «Про», в процентах (0 — нет). Применяется только к тарифу pro.
     clubDiscountPercent: clubDiscount ? CLUB_DISCOUNT_PERCENT : 0,
     ...(all ? { plan: 'pro' } : {}),
@@ -547,29 +551,42 @@ async function authorizeCodeAttempt(req, key) {
   if (!active) throw appError(401, 'INVALID_KEY', 'Ключ не найден или подборы закончились');
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function codeOnce(body) {
+  try {
+    return await supabaseFetch('rpc/app_code_once', { method: 'POST', body: JSON.stringify(body) });
+  } catch (error) {
+    if (dbErrorCode(error) === 'LIMIT_EXCEEDED') throw appError(409, 'LIMIT_EXCEEDED', 'Подборы закончились. Докупите пакет или смените тариф.');
+    if (dbErrorCode(error) === 'CODE_REQUEST_CONFLICT') throw appError(409, 'CODE_REQUEST_CONFLICT', 'Этот запрос уже использован для другого клиента');
+    throw error;
+  }
+}
+
+/**
+ * Списание одного кода клиента по аккаунту без HTTP-запроса — для подтверждений в боте
+ * (server/_code-approvals.js) и прямого «Код <SID>» в боте (deviceId = null, meta.via = 'bot').
+ * Идемпотентно по requestId (app_code_once). Безлимит и бесплатный режим — без списания.
+ */
+async function chargeClientCode(userId, deviceId, { requestId, sid, qrText, meta }) {
+  if (!UUID_RE.test(String(requestId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректный идентификатор запроса кода');
+  if (isUnlimited(userId) || await appFreeMode()) {
+    return { qrText, billing: { via: 'account', ok: true, free: true }, replayed: false };
+  }
+  return codeOnce({ p_request: requestId, p_user: userId, p_device: deviceId || null, p_key: null, p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
+}
+
 async function billClientCode(req, { key, meta, requestId, sid, qrText }) {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(requestId || ''))) {
+  if (!UUID_RE.test(String(requestId || ''))) {
     throw appError(400, 'VALIDATION_ERROR', 'Некорректный идентификатор запроса кода');
   }
   const user = await optionalUser(req).catch(() => null);
-  const charge = async body => {
-    try {
-      return await supabaseFetch('rpc/app_code_once', { method: 'POST', body: JSON.stringify(body) });
-    } catch (error) {
-      if (dbErrorCode(error) === 'LIMIT_EXCEEDED') throw appError(409, 'LIMIT_EXCEEDED', 'Подборы закончились. Докупите пакет или смените тариф.');
-      if (dbErrorCode(error) === 'CODE_REQUEST_CONFLICT') throw appError(409, 'CODE_REQUEST_CONFLICT', 'Этот запрос уже использован для другого клиента');
-      throw error;
-    }
-  };
   if (user) {
     const device = await requireDevice(req, user.id);
-    if (isUnlimited(user.id) || await appFreeMode()) {
-      return { qrText, billing: { via: 'account', ok: true, free: true }, replayed: false };
-    }
-    return charge({ p_request: requestId, p_user: user.id, p_device: device.id, p_key: null, p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
+    return chargeClientCode(user.id, device.id, { requestId, sid, qrText, meta });
   }
   if (!key) throw appError(401, 'AUTH_REQUIRED', 'Войдите в аккаунт или добавьте ключ');
-  return charge({ p_request: requestId, p_user: null, p_device: null, p_key: String(key).trim(), p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
+  return codeOnce({ p_request: requestId, p_user: null, p_device: null, p_key: String(key).trim(), p_sid: sid, p_qr_text: qrText, p_meta: meta || {} });
 }
 
 /**
@@ -846,6 +863,7 @@ module.exports = {
   consumeKey,
   authorizeCodeAttempt,
   billClientCode,
+  chargeClientCode,
   billCode,
   dbErrorCode,
   deviceHashFrom,
