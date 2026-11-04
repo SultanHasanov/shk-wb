@@ -1701,7 +1701,8 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
     }
   }
   const clientLine = identifiers.length ? `ID клиента: <code>${identifiers[0]}</code>\n` : '';
-  let pickupText;
+  let pickupText = '';
+  let lines = [];
   if (pickupResult.error) {
     pickupText = `Когда забрал/отказался: <i>не удалось получить (${escapeHtml(pickupResult.error.message)})</i>`;
   } else if (!pickupResult.events.length && !identifiers.length) {
@@ -1709,7 +1710,8 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
   } else if (!pickupResult.events.length) {
     pickupText = '<i>Выдача/отказ не найдены в текущем окне продаж WB — возможно, уже выпали из списка. Для старых событий нужна накопленная локальная база.</i>';
   } else {
-    const recent = pickupResult.events.slice(0, 5).map((item, index) => {
+    // Все события клиента из окна WB: показываются по AUTHOR_HISTORY_PAGE штук, листаются в том же сообщении.
+    lines = pickupResult.events.map((item, index) => {
       const returned = pickupAction(item.status) === 'returned';
       const label = returned ? '↩️ отказ' : '✅ взял';
       const shk = item.shk_code || item.barcode || item.sticker_code || item.shk_id;
@@ -1719,14 +1721,72 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
       if (shk) parts.push(`ШК <code>${escapeHtml(shk)}</code>`);
       return parts.join(' · ');
     });
-    pickupText = `<b>Когда забрал / отказался:</b>\n${recent.join('\n')}`;
   }
   const phone = maskWbPhone(user?.phone ?? user?.mobile);
   const found = phone !== '—' || Boolean(!pickupResult.error && pickupResult.events.length);
+  const header = `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>`;
+  return { found, header, pickupText, lines, clientId: identifiers[0] || null };
+}
+
+// ── История автора: по 5 событий на страницу, «Назад»/«Далее» редактируют то же сообщение ──
+const AUTHOR_HISTORY_PAGE = 5;
+const AUTHOR_HISTORY_TTL_MS = 30 * 60 * 1000;
+/** Ключ `${telegramId}:${clientId}` → { info, footer, savedAt }. Хранится после показа, чтобы листать без повторных запросов к WB. */
+const authorHistoryCache = new Map();
+
+function rememberAuthorHistory(telegramId, info, footer) {
+  if (!info.clientId) return;
+  for (const [key, entry] of authorHistoryCache) if (Date.now() - entry.savedAt > AUTHOR_HISTORY_TTL_MS) authorHistoryCache.delete(key);
+  authorHistoryCache.set(`${telegramId}:${info.clientId}`, { info, footer, savedAt: Date.now() });
+}
+
+/** Текст и кнопки страницы истории. Без событий — одна страница с пояснением и без кнопок листания. */
+function renderAuthorHistory(info, footer, page) {
+  const total = info.lines.length;
+  const pages = Math.max(1, Math.ceil(total / AUTHOR_HISTORY_PAGE));
+  const safePage = Math.max(0, Math.min(Number(page) || 0, pages - 1));
+  let body = info.pickupText;
+  if (total) {
+    const start = safePage * AUTHOR_HISTORY_PAGE;
+    const slice = info.lines.slice(start, start + AUTHOR_HISTORY_PAGE);
+    const counter = total > AUTHOR_HISTORY_PAGE ? ` (${start + 1}–${start + slice.length} из ${total})` : '';
+    body = `<b>Когда забрал / отказался${counter}:</b>\n${slice.join('\n')}`;
+  }
+  const navigation = [];
+  if (info.clientId && safePage > 0) navigation.push({ text: '⬅️ Назад', callback_data: `rv:hist:${info.clientId}:${safePage - 1}` });
+  if (info.clientId && safePage + 1 < pages) navigation.push({ text: 'Далее ➡️', callback_data: `rv:hist:${info.clientId}:${safePage + 1}` });
   return {
-    found,
-    text: `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>\n\n${pickupText}`,
+    text: `${info.header}\n\n${body}\n\n<i>${footer}</i>`,
+    options: navigation.length ? { reply_markup: choiceKeyboard([navigation]) } : {},
   };
+}
+
+async function sendAuthorHistory(from, chatId, info, footer) {
+  rememberAuthorHistory(from.id, info, footer);
+  const view = renderAuthorHistory(info, footer, 0);
+  await sendMessage(chatId, view.text, view.options);
+}
+
+/** Кнопки «Назад»/«Далее» под историей: берём из кэша, а если он истёк — перечитываем у WB (показ уже оплачен). */
+async function turnAuthorHistory(from, chatId, messageId, clientId, page) {
+  let entry = authorHistoryCache.get(`${from.id}:${clientId}`);
+  if (!entry || Date.now() - entry.savedAt > AUTHOR_HISTORY_TTL_MS) {
+    const connection = await getWbConnection(from.id);
+    if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
+    if (!reviewFreeFor(from.id)) {
+      const userId = await findUser(from.id);
+      const pointId = Number(connection.session.pointId) || 0;
+      const revealed = userId
+        ? await supabaseFetch(`bot_review_reveals?user_id=eq.${encodeURIComponent(userId)}&point_id=eq.${pointId}&client_id=eq.${clientId}&select=client_id&limit=1`).then(rows => rows.length > 0).catch(() => false)
+        : false;
+      if (!revealed) return sendMessage(chatId, 'История этого автора устарела. Откройте отзыв и нажмите «Кто поставил оценку» ещё раз.');
+    }
+    const info = await buildReviewAuthor(from, connection, clientId);
+    entry = { info, footer: reviewFreeFor(from.id) ? unlimitedLine(from.id) : 'Этого автора вы уже смотрели — бесплатно.', savedAt: Date.now() };
+    authorHistoryCache.set(`${from.id}:${clientId}`, entry);
+  }
+  const view = renderAuthorHistory(entry.info, entry.footer, page);
+  await showScreen(chatId, messageId, view.text, view.options);
 }
 
 /**
@@ -1743,7 +1803,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   if (reviewFreeFor(from.id)) {
     const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
-    return sendMessage(chatId, `${info.text}\n\n<i>${unlimitedLine(from.id)}</i>`);
+    return sendAuthorHistory(from, chatId, info, unlimitedLine(from.id));
   }
   const userId = await findUser(from.id);
   if (!userId) return showReviewPaywall(from, chatId);
@@ -1770,7 +1830,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
     if (!spent.free) notifyAdminSpend({ userId, priceRub: price, title: `Кто поставил оценку${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
     footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
   }
-  await sendMessage(chatId, `${info.text}\n\n<i>${footer}</i>`);
+  await sendAuthorHistory(from, chatId, info, footer);
 }
 
 function reviewTag(review) {
@@ -2393,6 +2453,8 @@ async function handleCallback(callback) {
   if (reviewPageMatch) { answerCallbackQuery(callback.id).catch(() => {}); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
   const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)(?::([0-9a-f]{8}))?$/);
   if (authorPositionMatch) { answerCallbackQuery(callback.id).catch(() => {}); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4]); return; }
+  const historyMatch = data.match(/^rv:hist:(\d{1,12}):(\d{1,4})$/);
+  if (historyMatch) { answerCallbackQuery(callback.id).catch(() => {}); await turnAuthorHistory(from, chatId, messageId, Number(historyMatch[1]), Number(historyMatch[2])); return; }
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
   if (authorMatch) { answerCallbackQuery(callback.id).catch(() => {}); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { answerCallbackQuery(callback.id).catch(() => {}); await startGeneration(from, chatId); return; }
