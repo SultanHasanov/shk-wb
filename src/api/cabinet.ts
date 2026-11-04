@@ -29,7 +29,7 @@ export type UserProfile = {
     photo_url?: string;
   } | null;
   /** Привязанные Яндекс ID / Mail.ru (Профиль → «Способы входа»). */
-  oauth: { provider: 'yandex' | 'mailru'; email: string | null; displayName: string | null }[];
+  oauth: { provider: 'yandex' | 'mailru' | 'vkid'; email: string | null; displayName: string | null }[];
   preferences: UserPreferences;
 };
 export type StickerAsset = {

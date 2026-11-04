@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 
-export type OAuthProviderId = 'yandex' | 'mailru';
+export type OAuthProviderId = 'yandex' | 'mailru' | 'vkid';
 export type OAuthProvider = { id: OAuthProviderId; title: string };
 
 /** Яндекс ID и Mail.ru подключаются в .env сервера; без ключей список пуст и кнопок нет. */

@@ -116,8 +116,8 @@ rpc `app_db_size` (миграция `20261030_db_size.sql`, применена).
 OAuth 2.0 по той же схеме, что вход через Telegram: `server/_oauth-login.js` находит или создаёт пользователя Supabase
 и выписывает magic-link `token_hash`, браузер обменивает его на сессию на `/auth/oauth` (`OAuthCompletePage`).
 Маршруты (`vercel.json` → `api/auth?action=oauth`): `GET /api/auth/oauth/providers` (что настроено),
-`GET /api/auth/oauth/{yandex}/start?next=` (302 к провайдеру, подписанный state + nonce в cookie `shk_oauth`),
-`GET /api/auth/oauth/{yandex}/callback` (code → профиль → аккаунт → 302 `/auth/oauth?token_hash=…`).
+`GET /api/auth/oauth/{yandex|vkid}/start?next=` (302 к провайдеру, подписанный state + nonce в cookie `shk_oauth`),
+`GET /api/auth/oauth/{yandex|vkid}/callback` (code → профиль → аккаунт → 302 `/auth/oauth?token_hash=…`).
 Ошибки возвращаются на `/?auth=login&oauth=error&reason=denied|no_email|state|provider|failed` (модалка входа).
 
 Аккаунт: сначала связка `(provider, provider_user_id)` в `user_oauth_identities`, затем совпадение по почте провайдера
@@ -129,9 +129,12 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
 1. `npx supabase db query --linked --yes -f supabase/migrations/20261109_oauth_identities.sql`.
 2. Яндекс: https://oauth.yandex.ru/client/new — Redirect URI `https://shk-wb.ru/api/auth/oauth/yandex/callback`,
    доступы «Доступ к адресу электронной почты», «Доступ к логину, имени и фамилии, полу», «Доступ к портрету пользователя».
-   Mail.ru НЕ подключён (04.11.2026): с 1 июля 2025 прямой OAuth Mail «только для продуктовых запросов», новое приложение
-   из o2.mail.ru/app на oauth.mail.ru/login отвечает «bad client». Если понадобится — через VK ID («Дополнительные способы входа → Mail»).
-3. В `/srv/shk-wb/.env` (бэкап `.env.bak-*`): `YANDEX_OAUTH_CLIENT_ID/SECRET`,
+   Mail.ru — поверх VK ID (прямой OAuth Mail с 1 июля 2025 закрыт для новых приложений, «bad client»): приложение в
+   https://id.vk.com/about/business (Web, базовый домен shk-wb.ru, Redirect `https://shk-wb.ru/api/auth/oauth/vkid/callback`,
+   доступ email, «Дополнительные способы входа → Mail»). Провайдер `vkid`: id.vk.ru/authorize с provider=mail_ru и PKCE
+   (verifier в cookie shk_oauth как nonce.verifier), обмен на id.vk.ru/oauth2/auth с service_token и device_id, профиль oauth2/user_info.
+   Миграция `20261110_oauth_vkid.sql` (provider in yandex|mailru|vkid).
+3. В `/srv/shk-wb/.env` (бэкап `.env.bak-*`): `YANDEX_OAUTH_CLIENT_ID/SECRET`, `VKID_APP_ID`, `VKID_SERVICE_TOKEN` (сервисный ключ доступа),
    по желанию `OAUTH_STATE_SECRET` (иначе state подписывается `STICKER_CLIENT_SECRET`); `systemctl restart shk-wb`.
 4. Проверка: `curl -s https://shk-wb.ru/api/auth/oauth/providers` → оба провайдера; вход на `/login` кнопкой.
 Тесты: `src/api/oauth-login.test.ts`.

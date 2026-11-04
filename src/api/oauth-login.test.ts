@@ -60,8 +60,8 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
 
   beforeEach(() => {
     for (const [key, value] of Object.entries(ENV)) vi.stubEnv(key, value);
-    vi.stubEnv('MAILRU_OAUTH_CLIENT_ID', '');
-    vi.stubEnv('MAILRU_OAUTH_CLIENT_SECRET', '');
+    vi.stubEnv('VKID_APP_ID', '');
+    vi.stubEnv('VKID_SERVICE_TOKEN', '');
     calls = [];
     routes = [];
     installFetch();
@@ -225,6 +225,73 @@ describe('вход через Яндекс ID / Mail.ru (server/_oauth-login.js)
     await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'yandex', code: 'x', state }, headers: { cookie: 'shk_oauth=n6' } }, res);
     expect(res.headers.Location).toBe('/cabinet/profile?oauth=error&reason=taken');
     expect(calls.some(c => /on_conflict/.test(c.url))).toBe(false);
+  });
+
+  it('vkid: start идёт на id.vk.ru с provider=mail_ru, PKCE и state без точки, verifier в cookie', async () => {
+    vi.stubEnv('VKID_APP_ID', '5100');
+    vi.stubEnv('VKID_SERVICE_TOKEN', 'svc');
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'start', provider: 'vkid' }, headers: {} }, res);
+    expect(res.statusCode).toBe(302);
+    const url = new URL(res.headers.Location);
+    expect(url.origin + url.pathname).toBe('https://id.vk.ru/authorize');
+    expect(url.searchParams.get('client_id')).toBe('5100');
+    expect(url.searchParams.get('provider')).toBe('mail_ru');
+    expect(url.searchParams.get('scope')).toBe('email');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://shk-wb.ru/api/auth/oauth/vkid/callback');
+    const state = url.searchParams.get('state')!;
+    expect(state).toMatch(/^[A-Za-z0-9_-]{32,}$/);
+    const [nonce, verifier] = cookieOf(res).split('.');
+    expect(oauth.readState(state)!.r).toBe(nonce);
+    expect(verifier.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it('vkid: callback обменивает code с device_id, verifier и service_token, берёт почту из user_info', async () => {
+    vi.stubEnv('VKID_APP_ID', '5100');
+    vi.stubEnv('VKID_SERVICE_TOKEN', 'svc');
+    routes = [
+      [/id\.vk\.ru\/oauth2\/auth/, call => {
+        const body = new URLSearchParams(String(call.init.body));
+        expect(body.get('grant_type')).toBe('authorization_code');
+        expect(body.get('code')).toBe('c1');
+        expect(body.get('device_id')).toBe('dev-1');
+        expect(body.get('code_verifier')).toBe('verifier-xyz');
+        expect(body.get('service_token')).toBe('svc');
+        expect(body.get('client_id')).toBe('5100');
+        return { body: { access_token: 'vk-token' } };
+      }],
+      [/id\.vk\.ru\/oauth2\/user_info/, call => {
+        const body = new URLSearchParams(String(call.init.body));
+        expect(body.get('access_token')).toBe('vk-token');
+        return { body: { user: { user_id: 777001, first_name: 'Иван', last_name: 'Петров', email: 'Ivan@Mail.ru', avatar: 'https://a/1.jpg' } } };
+      }],
+      [/user_oauth_identities\?provider=eq\.vkid/, () => ({ body: [] })],
+      [/rpc\/auth_user_id_by_email/, () => ({ body: null })],
+      [/auth\/v1\/admin\/users$/, call => {
+        expect(JSON.parse(String(call.init.body))).toMatchObject({ email: 'ivan@mail.ru', user_metadata: { auth_source: 'vkid' } });
+        return { body: { id: 'user-vk', email: 'ivan@mail.ru' } };
+      }],
+      [/user_oauth_identities\?on_conflict/, call => {
+        expect(JSON.parse(String(call.init.body))).toMatchObject({ provider: 'vkid', provider_user_id: '777001', user_id: 'user-vk' });
+        return { body: null };
+      }],
+      [/auth\/v1\/admin\/generate_link/, () => ({ body: { properties: { hashed_token: 'hash-vk' } } })],
+    ];
+    const state = oauth.makeState({ provider: 'vkid', next: '/cabinet', nonce: 'n9' });
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'vkid', code: 'c1', device_id: 'dev-1', state }, headers: { cookie: 'shk_oauth=n9.verifier-xyz' } }, res);
+    expect(res.headers.Location).toBe('/auth/oauth?token_hash=hash-vk&next=%2Fcabinet&provider=vkid&new=1');
+  });
+
+  it('vkid: callback без verifier в cookie — ошибка state', async () => {
+    vi.stubEnv('VKID_APP_ID', '5100');
+    vi.stubEnv('VKID_SERVICE_TOKEN', 'svc');
+    const state = oauth.makeState({ provider: 'vkid', next: '/cabinet', nonce: 'n9' });
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'oauth', step: 'callback', provider: 'vkid', code: 'c1', device_id: 'd', state }, headers: { cookie: 'shk_oauth=n9' } }, res);
+    expect(res.headers.Location).toBe('/?auth=login&oauth=error&reason=state');
+    expect(calls).toHaveLength(0);
   });
 
   it('callback: провайдер не отдал почту — reason=no_email; отказ пользователя — reason=denied', async () => {

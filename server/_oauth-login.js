@@ -1,9 +1,9 @@
-// Вход на сайт через Яндекс ID (OAuth 2.0, authorization code).
+// Вход на сайт через Яндекс ID (OAuth 2.0) и через Mail.ru поверх VK ID (OAuth 2.1 с PKCE, provider=mail_ru).
 //
 // Схема та же, что у входа через Telegram (api/auth.js): сервер находит или создаёт пользователя
 // Supabase, выписывает magic-link token_hash, а браузер обменивает его на сессию (auth.verifyOtp).
 //
-//   GET /api/auth/oauth/providers           → { providers: ['yandex'] } — что настроено в .env
+//   GET /api/auth/oauth/providers           → { providers: ['yandex', 'vkid'] } — что настроено в .env
 //   GET /api/auth/oauth/:provider/start     → 302 к провайдеру; state подписан, nonce в cookie shk_oauth
 //   GET /api/auth/oauth/:provider/callback  → обмен code → профиль → аккаунт → 302 /auth/oauth?token_hash=…
 //
@@ -45,8 +45,45 @@ const PROVIDERS = {
       };
     },
   },
-  // Mail.ru убран 04.11.2026: с 1 июля 2025 прямой OAuth Mail работает «только для продуктовых запросов»,
-  // новые приложения из o2.mail.ru/app отвечают «bad client». Путь на будущее — VK ID с «Авторизацией через Mail».
+  // Mail.ru: прямой OAuth Mail с 1 июля 2025 «только для продуктовых запросов» (новые приложения из o2.mail.ru/app
+  // отвечают «bad client»), поэтому вход через почту Mail идёт поверх VK ID: id.vk.ru/authorize с provider=mail_ru,
+  // PKCE (code_verifier в cookie рядом с nonce), обмен на id.vk.ru/oauth2/auth с service_token, профиль — oauth2/user_info.
+  vkid: {
+    title: 'Mail.ru',
+    authorize: 'https://id.vk.ru/authorize',
+    token: 'https://id.vk.ru/oauth2/auth',
+    scope: 'email',
+    env: ['VKID_APP_ID', 'VKID_SERVICE_TOKEN'],
+    pkce: true,
+    authorizeParams: { provider: 'mail_ru' },
+    async exchange({ code, deviceId, verifier, state }) {
+      const { clientId, clientSecret } = credentials('vkid');
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code', code, code_verifier: verifier, client_id: clientId, device_id: deviceId,
+        redirect_uri: redirectUri('vkid'), state, service_token: clientSecret,
+      });
+      const response = await fetch(this.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.access_token) throw new Error(`vkid token exchange failed (${response.status}) ${data.error || ''} ${data.error_description || ''}`.trim());
+      return data.access_token;
+    },
+    async profile(accessToken) {
+      const { clientId } = credentials('vkid');
+      const response = await fetch('https://id.vk.ru/oauth2/user_info', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: clientId, access_token: accessToken }).toString(),
+      });
+      const data = await response.json().catch(() => ({}));
+      const user = data.user;
+      if (!response.ok || !user?.user_id) throw new Error(`vkid profile failed (${response.status}) ${data.error || ''}`.trim());
+      return {
+        id: String(user.user_id),
+        email: String(user.email || '').trim().toLowerCase() || null,
+        name: [user.first_name, user.last_name].filter(Boolean).join(' ').trim(),
+        avatar: user.avatar || null,
+      };
+    },
+  },
 };
 
 function origin() {
@@ -84,12 +121,17 @@ function makeState({ provider, next, nonce, linkUserId = null }) {
   const payload = { p: provider, n: next, t: Math.floor(Date.now() / 1000), r: nonce };
   if (linkUserId) payload.u = linkUserId;
   const raw = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return `${raw}.${sign(raw)}`;
+  // VK ID пускает в state только [A-Za-z0-9_-]: подпись (43 символа base64url) приклеена без разделителя.
+  return `${raw}${sign(raw)}`;
 }
 
+const SIGNATURE_LENGTH = 43;
+
 function readState(value) {
-  const [raw, signature] = String(value || '').split('.');
-  if (!raw || !signature) return null;
+  const text = String(value || '');
+  if (text.length <= SIGNATURE_LENGTH) return null;
+  const raw = text.slice(0, -SIGNATURE_LENGTH);
+  const signature = text.slice(-SIGNATURE_LENGTH);
   const expected = sign(raw);
   if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
   let payload;
@@ -99,9 +141,18 @@ function readState(value) {
   return payload;
 }
 
+/** cookie shk_oauth = nonce, для PKCE-провайдеров — nonce.code_verifier */
 function readCookie(req) {
-  const match = String(req.headers.cookie || '').match(/(?:^|;\s*)shk_oauth=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  const match = String(req.headers.cookie || '').match(/(?:^|;s*)shk_oauth=([^;]+)/);
+  if (!match) return { nonce: null, verifier: null };
+  const [nonce, verifier] = decodeURIComponent(match[1]).split('.');
+  return { nonce: nonce || null, verifier: verifier || null };
+}
+
+function pkcePair() {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
 }
 
 function cookieHeader(value, maxAge) {
@@ -276,12 +327,20 @@ async function handleStart(req, res, provider) {
   url.searchParams.set('scope', spec.scope);
   url.searchParams.set('state', state);
   if (provider === 'yandex') url.searchParams.set('force_confirm', 'yes');
+  for (const [key, value] of Object.entries(spec.authorizeParams || {})) url.searchParams.set(key, value);
+  let cookieValue = nonce;
+  if (spec.pkce) {
+    const { verifier, challenge } = pkcePair();
+    url.searchParams.set('code_challenge', challenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    cookieValue = `${nonce}.${verifier}`;
+  }
   if (link) {
-    res.setHeader('Set-Cookie', cookieHeader(nonce, STATE_TTL_SEC));
+    res.setHeader('Set-Cookie', cookieHeader(cookieValue, STATE_TTL_SEC));
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json({ url: url.toString() });
   }
-  redirect(res, url.toString(), cookieHeader(nonce, STATE_TTL_SEC));
+  redirect(res, url.toString(), cookieHeader(cookieValue, STATE_TTL_SEC));
 }
 
 /** Режим привязки: связку получает кабинет из state, аккаунт по почте не ищется и не создаётся. */
@@ -301,12 +360,15 @@ async function handleCallback(req, res, provider) {
   const query = req.query || {};
   if (query.error) return failRedirect(res, query.error === 'access_denied' ? 'denied' : 'provider', clear);
   const state = readState(query.state);
-  const nonce = readCookie(req);
+  const { nonce, verifier } = readCookie(req);
   if (!state || state.p !== provider || !nonce || state.r !== nonce) return failRedirect(res, 'state', clear);
   const code = String(query.code || '').trim();
-  if (!code) return failRedirect(res, 'state', clear);
+  const spec = PROVIDERS[provider];
+  if (!code || (spec.pkce && !verifier)) return failRedirect(res, 'state', clear);
   try {
-    const accessToken = await exchangeCode(provider, code);
+    const accessToken = spec.exchange
+      ? await spec.exchange({ code, deviceId: String(query.device_id || ''), verifier, state: String(query.state) })
+      : await exchangeCode(provider, code);
     const profile = await PROVIDERS[provider].profile(accessToken);
     if (state.u) {
       await linkToAccount(provider, profile, String(state.u));

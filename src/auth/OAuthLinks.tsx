@@ -7,7 +7,7 @@ import { useT } from '../i18n';
 import { Button, useToast } from '../ui';
 import { useOAuthProviders } from './OAuthButtons';
 
-type ProviderId = 'yandex' | 'mailru';
+type ProviderId = 'yandex' | 'mailru' | 'vkid';
 
 /**
  * Профиль → «Способы входа»: привязать или отвязать Яндекс ID / Mail.ru у текущего кабинета.

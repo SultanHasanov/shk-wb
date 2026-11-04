@@ -1039,7 +1039,7 @@ module.exports = async function handler(req, res) {
     }
     if (a === 'oauth' && req.method === 'DELETE') {
       const provider = String(req.query.provider || '');
-      if (!['yandex', 'mailru'].includes(provider))
+      if (!['yandex', 'mailru', 'vkid'].includes(provider))
         return res.status(400).json({ error: 'Неизвестный способ входа', code: 'VALIDATION_ERROR' });
       // Последний способ входа удалять нельзя: у кабинета без почты должен остаться Telegram или второй провайдер.
       if (user.email?.endsWith('@users.invalid')) {
