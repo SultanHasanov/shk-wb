@@ -76,6 +76,8 @@ const PROVIDERS = {
       const data = await response.json().catch(() => ({}));
       const user = data.user;
       if (!response.ok || !user?.user_id) throw new Error(`vkid profile failed (${response.status}) ${data.error || ''}`.trim());
+      // Без почты аккаунт не сопоставить: пишем, какие поля пришли (без значений), чтобы видеть, выключен ли доступ email в приложении.
+      if (!user.email) console.warn(`[oauth:vkid] user_info без email; поля: ${Object.keys(user).join(",")}`);
       return {
         id: String(user.user_id),
         email: String(user.email || '').trim().toLowerCase() || null,
