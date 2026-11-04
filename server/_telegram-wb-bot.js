@@ -1749,7 +1749,7 @@ function renderAuthorHistory(info, footer, page) {
   if (total) {
     const start = safePage * AUTHOR_HISTORY_PAGE;
     const slice = info.lines.slice(start, start + AUTHOR_HISTORY_PAGE);
-    const counter = total > AUTHOR_HISTORY_PAGE ? ` (${start + 1}–${start + slice.length} из ${total})` : '';
+    const counter = ` (${start + 1}–${start + slice.length} из ${total})`;
     body = `<b>Когда забрал / отказался${counter}:</b>\n${slice.join('\n')}`;
   }
   const navigation = [];
