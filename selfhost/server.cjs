@@ -216,6 +216,7 @@ app.use((req, res) => {
 app.listen(port, '127.0.0.1', () => console.log(`shk-wb (${botRole.role()}) listening on 127.0.0.1:${port}`));
 
 // Мало места на диске (архив/зеркало Помощника в своём Postgres) — сообщение админу в Telegram. Только на сайте.
-if (!isBotNode) require('../server/_disk-alert').startDiskAlert();
+// Локальный запуск (scripts/run-site-local.cjs) — без мониторов: они пишут админу в Telegram.
+if (!isBotNode && process.env.SHK_LOCAL_DEV !== '1') require('../server/_disk-alert').startDiskAlert();
 // Бот тормозит, релей или вебхук Telegram не работают — сообщение админу в Telegram (через запасной релей, если нужно).
-require('../server/_bot-health').startBotHealth();
+if (process.env.SHK_LOCAL_DEV !== '1') require('../server/_bot-health').startBotHealth();
