@@ -10,6 +10,7 @@ import {
   Handshake,
   Home,
   KeyRound,
+  MessageSquare,
   Laptop,
   LogOut,
   Menu,
@@ -55,6 +56,7 @@ const cabinetNavGroups = (t: T): { title: string | null; items: NavItem[] }[] =>
       ...(APP_SUBSCRIPTIONS_LIVE ? [
         { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
         { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
+        { to: '/cabinet/pc-messages', label: t('Сообщения на ПК', 'ДК-ға хабарламалар'), Icon: MessageSquare, end: false },
       ] : []),
       { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
     ],
@@ -86,6 +88,7 @@ const titlesFor = (t: T): Record<string, string> => ({
   '/cabinet/payment-result': t('Результат оплаты', 'Төлем нәтижесі'),
   '/cabinet/subscription': t('Тарифы «Помощник ПВЗ»', '«ПВЗ көмекшісі» тарифтері'),
   '/cabinet/access': t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'),
+  '/cabinet/pc-messages': t('Сообщения на ПК', 'ДК-ға хабарламалар'),
   '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
   '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),

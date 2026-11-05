@@ -18,7 +18,8 @@ function copyDirectory(source, destination) {
 }
 // css/ и js/ нужны не публичным страницам, а админке: admin-enigma/index.html
 // подключает ../css/style.css и десяток ../js/*-admin.js.
-for (const directory of ['admin-enigma', 'images', 'css', 'js']) {
+// sounds/ — сигналы окна «сообщение от владельца» для прослушивания в кабинете (те же WAV, что в программе).
+for (const directory of ['admin-enigma', 'images', 'css', 'js', 'sounds']) {
   if (existsSync(directory)) copyDirectory(directory, resolve(output, directory));
 }
 // Платные установщики никогда не попадают в публичный dist. Публичным остаётся

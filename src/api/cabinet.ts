@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { currentLocale, intlLocale } from '../i18n';
 
-export type NotificationKind = 'order' | 'key_expiry' | 'low_balance' | 'product_news' | 'system';
+export type NotificationKind = 'order' | 'key_expiry' | 'low_balance' | 'product_news' | 'system' | 'pc_reply';
 export type UserPreferences = {
   thermalPrintSettings: Record<string, unknown>;
   notifyOrderStatus: boolean;

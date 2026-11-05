@@ -44,9 +44,24 @@ function devicesOf(userId) {
   return map;
 }
 
-function wake(waiters) {
+function wakeAll(waiters) {
   for (const w of [...waiters]) w();
   waiters.clear();
+}
+
+/** Разбудить спящий inbox ПК (новое сообщение владельца) — если он сейчас держит запрос. */
+function wake(userId, deviceId) {
+  const entry = presence.get(userId)?.get(deviceId);
+  if (entry) wakeAll(entry.waiters);
+}
+
+/** ПК аккаунта, которые держат inbox прямо сейчас (для кабинета: «в сети»). */
+function onlineIds(userId, now = Date.now()) {
+  const out = new Set();
+  for (const [id, d] of presence.get(userId) || []) {
+    if (now - d.seenAt < ONLINE_MS) out.add(id);
+  }
+  return out;
 }
 
 // Ждать сигнала (или таймаута). Возвращает true, если разбудили.
@@ -96,7 +111,7 @@ function userBytes(userId) {
 
 function dropJob(job) {
   jobs.delete(job.id);
-  wake(job.waiters);
+  wakeAll(job.waiters);
   fs.rm(path.join(relayDir(), job.id), { recursive: true, force: true }, () => {});
 }
 
@@ -161,7 +176,7 @@ function put(userId, device, query, bytes) {
   if (!job || job.user !== userId || job.to !== device.id) throw appError(404, 'JOB_GONE', 'Загрузка уже отменена');
   if (query.error) {
     job.error = str(query.error, 300);
-    wake(job.waiters);
+    wakeAll(job.waiters);
     return { ok: true };
   }
   const idx = Number(query.idx);
@@ -170,7 +185,7 @@ function put(userId, device, query, bytes) {
   if (bytes.length > MAX_CHUNK_BYTES) throw appError(413, 'TOO_LARGE', 'Слишком большой кусок');
   if (job.bytes + bytes.length > MAX_JOB_BYTES || userBytes(userId) + bytes.length > MAX_USER_BYTES) {
     job.error = 'Слишком большой объём данных за раз';
-    wake(job.waiters);
+    wakeAll(job.waiters);
     throw appError(413, 'TOO_LARGE', job.error);
   }
   if (job.chunks.has(idx)) return { ok: true }; // повтор после обрыва
@@ -180,7 +195,7 @@ function put(userId, device, query, bytes) {
   fs.writeFileSync(file, bytes);
   job.chunks.set(idx, { file, size: bytes.length, last: query.last === '1' || query.last === 'true' });
   job.bytes += bytes.length;
-  wake(job.waiters);
+  wakeAll(job.waiters);
   return { ok: true };
 }
 
@@ -271,7 +286,7 @@ async function ask(userId, device, body) {
     waiters: new Set(),
   };
   jobs.set(job.id, job);
-  wake(entry.waiters);
+  wakeAll(entry.waiters);
   return { job: job.id };
 }
 
@@ -304,4 +319,4 @@ function resetForTests() {
   presence.clear();
 }
 
-module.exports = { ack, ask, get, inbox, peers, put, sweep, resetForTests, ONLINE_MS, JOB_TTL_MS };
+module.exports = { ack, ask, get, inbox, onlineIds, peers, put, sweep, wake, resetForTests, ONLINE_MS, JOB_TTL_MS };

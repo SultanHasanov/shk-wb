@@ -235,7 +235,7 @@ function Devices({ account }: { account: AppAccount }) {
               <div key={device.id} className={s.device}>
                 <div>
                   <strong>{device.name}</strong>
-                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{roleLabel(device)} · {t('Был в сети', 'Желіде болды')} {new Date(device.lastSeenAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{device.appVersion ? ` · v${device.appVersion}` : ''}</div>
+                  <div className="muted" style={{ fontSize: 'var(--fs-13)' }}>{roleLabel(device)} · {device.online ? t('В сети', 'Желіде') : `${t('Был в сети', 'Желіде болды')} ${new Date(device.lastSeenAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}{device.appVersion ? ` · v${device.appVersion}` : ''}</div>
                 </div>
                 <div className="row" style={{ gap: 4 }}>
                   <Button variant="ghost" size="sm" loading={setRole.isPending && setRole.variables?.id === device.id} onClick={() => changeRole(device)}>
@@ -246,7 +246,7 @@ function Devices({ account }: { account: AppAccount }) {
                 </div>
               </div>
             ))}</div>}
-        <p className="muted" style={{ margin: 0 }}>{t('Отключённый компьютер выйдет из аккаунта при следующем обращении к серверу.', 'Ажыратылған компьютер серверге келесі жүгінгенде аккаунттан шығады.')}</p>
+        <p className="muted" style={{ margin: 0 }}>{t('Отключённый компьютер выйдет из аккаунта при следующем обращении к серверу. Выход из аккаунта в самой программе компьютер не отключает: он остаётся в списке, отдаёт базу и получает сообщения.', 'Ажыратылған компьютер серверге келесі жүгінгенде аккаунттан шығады.')}</p>
         {account.devices.length > 0 && (
           <p style={{ margin: 0 }}>
             <Link to={lp('/cabinet/access')}><ShieldCheck size={15} style={{ verticalAlign: -3 }} /> {t('Ограничить разделы на компьютерах сотрудников', 'Қызметкерлер компьютерлерінде бөлімдерді шектеу')}</Link>

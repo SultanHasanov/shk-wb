@@ -288,24 +288,91 @@ async function registerDeviceLimited(userId, deviceHash, name, version) {
   }
 }
 
+const DEVICE_SELECT = 'id,name,last_seen_at,denied,point_wb,role,alert_sound';
+// Звуки окна «сообщение владельца» — те же id, что WAV в программе (src-tauri/sounds) и на сайте (sounds/pvz).
+const ALERT_SOUNDS = Object.freeze(['chime', 'bell', 'ding', 'knock', 'pulse', 'soft']);
+const DEVICE_KEY_RE = /^[A-Za-z0-9_-]{40,64}$/;
+
+// last_seen_at / версия — не чаще раза в 10 минут.
+async function touchDevice(device, req) {
+  if (Date.now() - new Date(device.last_seen_at).getTime() <= 10 * 60 * 1000) return;
+  await supabaseFetch(`app_devices?id=eq.${device.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ last_seen_at: new Date().toISOString(), app_version: String(req.headers['x-app-version'] || '').slice(0, 32) }),
+  }).catch(() => {});
+}
+
 // ПК, с которого пришёл запрос программы; без него — 401 DEVICE_REVOKED.
 async function requireDevice(req, userId) {
   const hash = deviceHashFrom(req);
   if (!hash) throw appError(400, 'DEVICE_REQUIRED', 'Обновите программу');
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=id,name,last_seen_at,denied,point_wb,role&limit=1`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=${DEVICE_SELECT}&limit=1`);
   if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
   const device = rows[0];
-  if (Date.now() - new Date(device.last_seen_at).getTime() > 10 * 60 * 1000) {
-    await supabaseFetch(`app_devices?id=eq.${device.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ last_seen_at: new Date().toISOString(), app_version: String(req.headers['x-app-version'] || '').slice(0, 32) }),
-    }).catch(() => {});
-  }
+  await touchDevice(device, req);
   return device;
 }
 
+// --- Ключ устройства (1.12+): ПК ходит в передатчик и за сообщениями владельца без сессии ---
+// Ключ выдаётся при входе (finishLogin) или по запросу device-key с сессией; в базе только sha256.
+// Выход из аккаунта строку не отзывает — отзывает «Отключить» в кабинете, и тогда ключ мёртв.
+
+function deviceKeyFrom(req) {
+  const value = String(req.headers['x-device-key'] || '').trim();
+  return DEVICE_KEY_RE.test(value) ? value : null;
+}
+
+/** Новый ключ ПК (прежний перестаёт действовать). Возвращает сам ключ — отдать программе один раз. */
+async function issueDeviceKey(userId, deviceId) {
+  const key = crypto.randomBytes(32).toString('base64url');
+  const rows = await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ key_hash: hashSecret(key), key_issued_at: new Date().toISOString() }),
+  });
+  if (!rows.length) throw appError(404, 'NOT_FOUND', 'Устройство не найдено');
+  return key;
+}
+
+/**
+ * ПК по X-Device-Id + X-Device-Key, без сессии → { userId, device }.
+ * 401 DEVICE_KEY_REQUIRED — нет заголовков; 401 DEVICE_REVOKED — живой строки с ключом нет (ПК отключён
+ * в кабинете: программа забывает ключ и сессию); 401 DEVICE_KEY_INVALID — строка есть, ключ не тот
+ * (программа забывает только ключ и запрашивает новый по сессии).
+ */
+async function requireDeviceByKey(req) {
+  const hash = deviceHashFrom(req);
+  const key = deviceKeyFrom(req);
+  if (!hash || !key) throw appError(401, 'DEVICE_KEY_REQUIRED', 'Войдите в аккаунт');
+  const rows = await supabaseFetch(`app_devices?device_hash=eq.${hash}&revoked_at=is.null&key_hash=not.is.null&select=user_id,key_hash,${DEVICE_SELECT}`);
+  if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
+  const given = Buffer.from(hashSecret(key));
+  // один ПК мог входить в разные аккаунты — строк с этим хэшем несколько, ключ выбирает свою
+  const row = rows.find(r => {
+    const expected = Buffer.from(String(r.key_hash || ''));
+    return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+  });
+  if (!row) throw appError(401, 'DEVICE_KEY_INVALID', 'Ключ компьютера устарел');
+  await touchDevice(row, req);
+  const { user_id: userId, key_hash: _hash, ...device } = row;
+  return { userId, device };
+}
+
+async function setAlertSound(userId, deviceId, sound) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
+  const value = sound === null || sound === '' ? null : String(sound);
+  if (value !== null && !ALERT_SOUNDS.includes(value)) throw appError(400, 'VALIDATION_ERROR', 'Неизвестный звук');
+  const rows = await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ alert_sound: value }),
+  });
+  if (!rows.length) throw appError(404, 'NOT_FOUND', 'Устройство не найдено');
+  return { id: rows[0].id, alertSound: rows[0].alert_sound || null };
+}
+
 async function listDevices(userId, currentHash) {
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at,denied,point_wb,access_updated_at,role&order=last_seen_at.desc`);
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,device_hash,name,app_version,last_seen_at,created_at,denied,point_wb,access_updated_at,role,alert_sound&order=last_seen_at.desc`);
   return rows.map(row => ({
     id: row.id,
     name: row.name,
@@ -316,6 +383,7 @@ async function listDevices(userId, currentHash) {
     denied: Array.isArray(row.denied) ? row.denied : [],
     pointWb: row.point_wb || null,
     accessUpdatedAt: row.access_updated_at || null,
+    alertSound: row.alert_sound || null,
     // owner | work | null (роль не назначена — как owner)
     role: permissions.roleOf(row),
   }));
@@ -486,25 +554,40 @@ async function accountSummary(user, currentHash) {
  */
 async function leaseRights(req) {
   const user = await optionalUser(req).catch(() => null);
-  if (!user) return { user: null, plan: null, features: [], archive_until: null, free: false };
-  let device;
-  try {
-    device = await requireDevice(req, user.id);
-  } catch (error) {
-    if (error.code === 'DEVICE_REVOKED' || error.code === 'DEVICE_REQUIRED') {
-      return { user: user.id, plan: null, features: [], archive_until: null, free: false, denied: [], role: null };
+  let userId = user?.id || null;
+  let device = null;
+  // Без сессии, но с ключом устройства (1.12+): права только на фоновую работу — отдавать базу по
+  // передатчику (mirror) и получать сообщения владельца. Разделы тарифа без входа закрыты, как раньше.
+  const viaKey = !user && Boolean(req.headers['x-device-key']);
+  if (viaKey) {
+    try {
+      ({ userId, device } = await requireDeviceByKey(req));
+    } catch (error) {
+      if (error.status === 401) return { user: null, plan: null, features: [], archive_until: null, free: false };
+      throw error;
     }
-    throw error;
+  }
+  if (!userId) return { user: null, plan: null, features: [], archive_until: null, free: false };
+  if (!device) {
+    try {
+      device = await requireDevice(req, userId);
+    } catch (error) {
+      if (error.code === 'DEVICE_REVOKED' || error.code === 'DEVICE_REQUIRED') {
+        return { user: userId, plan: null, features: [], archive_until: null, free: false, denied: [], role: null };
+      }
+      throw error;
+    }
   }
   await rememberDevicePoint(device, req.headers['x-point-wb']);
-  const { free, unlimited, plan, addons, features } = await entitlementsFor(user.id);
+  const { free, unlimited, plan, addons, features } = await entitlementsFor(userId);
   const all = free || unlimited;
   const archiveUntil = all ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
   // закрытое владельцем на этом ПК: разделы вычитаются из тарифа, весь список — программе
   const denied = permissions.cleanDenied(device.denied);
   const open = features.filter(f => !denied.includes(f));
+  const granted = viaKey ? open.filter(f => f === 'mirror') : open;
   // роль ПК — подписана вместе с правами: компьютер сотрудника не покажет чужие ПК и не загрузит их базы
-  return { user: user.id, plan: all ? 'pro' : plan, features: open, archive_until: archiveUntil, free: all, denied, role: permissions.roleOf(device) };
+  return { user: userId, plan: all ? 'pro' : plan, features: granted, archive_until: viaKey ? null : archiveUntil, free: all, denied, role: permissions.roleOf(device), via: viaKey ? 'key' : 'session' };
 }
 
 // Пункт, чья база WB стоит на ПК (программа шлёт в /lease), — для группировки ПК в кабинете.
@@ -867,6 +950,11 @@ module.exports = {
   billCode,
   dbErrorCode,
   deviceHashFrom,
+  deviceKeyFrom,
+  issueDeviceKey,
+  requireDeviceByKey,
+  setAlertSound,
+  ALERT_SOUNDS,
   listDevices,
   logout,
   magicTokenHash,

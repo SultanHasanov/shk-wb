@@ -96,7 +96,8 @@ describe('вход и списание в программе', () => {
     const res = response();
     await handler(request('login', { method: 'POST', body: { email: 'A@b.c', password: 'x', deviceName: 'Касса' } }), res);
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ session: { access_token: 'acc', refresh_token: 'ref', expires_in: 3600, expires_at: 1 } });
+    // deviceKey: в этом моке PATCH app_devices не отдаёт строку — ключ не выдан (null), программа запросит его позже
+    expect(res.body).toEqual({ session: { access_token: 'acc', refresh_token: 'ref', expires_in: 3600, expires_at: 1 }, deviceKey: null });
   });
 
   it('при лимите ПК отдаёт список компьютеров и сессию', async () => {

@@ -1,0 +1,143 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.devices {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.device {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.device:hover {
+  border-color: var(--border-strong);
+}
+
+.device.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.deviceText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-13);
+}
+
+.deviceText strong {
+  font-size: var(--fs-14);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Точка «в сети»: заполненная — ПК держит связь прямо сейчас, пустая — нет. */
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid var(--success);
+  background: var(--success);
+}
+
+.dot.off {
+  background: transparent;
+  border-color: var(--border-strong);
+}
+
+.soundRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.soundRow select {
+  min-width: 180px;
+}
+
+.compose {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.compose textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.composeBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.counter {
+  margin-left: auto;
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.thread {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.item {
+  display: grid;
+  gap: 6px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.itemHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.itemText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-14);
+}
+
+.reply {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--r-sm, 6px) var(--r-sm, 6px) 0;
+  font-size: var(--fs-14);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

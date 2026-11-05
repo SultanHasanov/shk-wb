@@ -11,6 +11,7 @@ const account = require('../server/_app-account');
 const QRCode = require('qrcode');
 const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
+const messages = require('../server/_app-messages');
 const { appFreeMode } = require('../server/_app-free');
 const { crackFallbackEnabled, codeViaBotEnabled } = require('../server/_app-flags');
 const { buildClientQr } = require('../server/_wb-code');
@@ -95,14 +96,35 @@ async function clientQrImage(qrText) {
 // можно сразу отключить лишний компьютер и повторить регистрацию.
 async function finishLogin(res, session, userId, deviceHash, deviceName, version) {
   const tokens = account.sessionPayload(session);
+  let deviceId;
   try {
-    await account.registerDevice(userId, deviceHash, deviceName, version);
+    deviceId = await account.registerDevice(userId, deviceHash, deviceName, version);
   } catch (error) {
     if (error.code === 'DEVICE_LIMIT') return res.status(409).json({ error: error.message, code: error.code, ...error.extra, session: tokens });
     throw error;
   }
-  return res.status(200).json({ session: tokens });
+  // Ключ устройства (1.12+): ПК отдаёт базу и получает сообщения владельца и после выхода из аккаунта.
+  const deviceKey = await account.issueDeviceKey(userId, deviceId).catch(() => null);
+  return res.status(200).json({ session: tokens, deviceKey });
 }
+
+// Запросы ПК, которые работают и по ключу устройства (без сессии), и по сессии: передатчик (этот ПК
+// отдаёт свои данные), сообщения владельца, звук уведомления. userId/device уже проверены вызывающим кодом.
+async function deviceActions(req, res, action, userId, device) {
+  if (action === 'relay-inbox' && req.method === 'POST') {
+    // Непоказанные сообщения владельца едут в том же ответе: если они уже есть — не ждём заданий,
+    // если нет — спим до задания, таймаута или пробуждения новым сообщением (relay.wake).
+    let list = await messages.pull(userId, device.id).catch(() => []);
+    const out = await relay.inbox(userId, device, body(req), list.length ? { waitMs: 0 } : {});
+    if (!list.length) list = await messages.pull(userId, device.id).catch(() => []);
+    return res.status(200).json({ ...out, messages: list, alertSound: device.alert_sound || null });
+  }
+  if (action === 'relay-put' && req.method === 'POST') return res.status(200).json(relay.put(userId, device, req.query, req.body));
+  if (action === 'messages-ack' && req.method === 'POST') return res.status(200).json(await messages.ack(userId, device, body(req)));
+  if (action === 'device-settings' && req.method === 'POST') return res.status(200).json(await account.setAlertSound(userId, device.id, body(req).alertSound));
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+const KEYED_ACTIONS = new Set(['relay-inbox', 'relay-put', 'messages-ack', 'device-settings']);
 
 // Общие документы (server/_app-sync.js) → какой доступ нужен ПК, чтобы их менять или получать.
 const DOC_WRITE_PERMS = Object.freeze({
@@ -161,7 +183,23 @@ module.exports = async function handler(req, res) {
       // Кабинет на сайте: та же сводка, без привязки к ПК.
       const user = await requireUser(req, res);
       if (!user) return;
-      return res.status(200).json(await account.accountSummary(user, null));
+      const summary = await account.accountSummary(user, null);
+      // «в сети» — ПК держит inbox передатчика прямо сейчас (в памяти процесса сайта)
+      const online = relay.onlineIds(user.id);
+      if (Array.isArray(summary.devices)) summary.devices = summary.devices.map(d => ({ ...d, online: online.has(d.id) }));
+      return res.status(200).json(summary);
+    }
+    // Кабинет на сайте: сообщения владельца на ПК (server/_app-messages.js).
+    if (action === 'messages' && !req.headers['x-device-id']) {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (req.method === 'GET') return res.status(200).json(await messages.list(user.id, { deviceId: req.query.device, limit: req.query.limit }));
+      if (req.method === 'POST') {
+        if (!await enforceRateLimit(req, res, { scope: 'app-messages-send', limit: 60, windowSeconds: 600, key: user.id })) return;
+        const b = body(req);
+        return res.status(201).json(await messages.send({ userId: user.id, deviceId: b.deviceId, text: b.text }));
+      }
+      return res.status(405).json({ error: 'Method not allowed' });
     }
     if (action === 'point' && req.method === 'DELETE' && !req.headers['x-device-id']) {
       // кабинет на сайте: отключить пункт (облачные данные пункта сохраняются)
@@ -190,6 +228,11 @@ module.exports = async function handler(req, res) {
         : strict ? await account.requireDevice(req, user.id)
         : await account.requireDevice(req, user.id).catch(() => null);
       const self = Boolean(by && by.id === String(req.query.id || ''));
+      // звук окна «сообщение владельца» на ПК: кабинет, компьютер владельца или сам ПК
+      if (typeof b.alertSound === 'string' || b.alertSound === null) {
+        if (by && permissions.isWork(by) && !self) return res.status(403).json(WORK_PC);
+        return res.status(200).json(await account.setAlertSound(user.id, req.query.id, b.alertSound));
+      }
       // роль ПК: «компьютер владельца» — с паролем (или с другого ПК владельца), «сотрудника» — с ПК владельца
       if (typeof b.role === 'string') {
         return res.status(200).json(await account.setDeviceRole(user, req.query.id, b.role, { by, password: b.password, denied: b.denied }));
@@ -333,6 +376,14 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ code: found.code, qrText: found.qrText, qrImage: await clientQrImage(found.qrText), billing });
     }
 
+    // --- ПК по ключу устройства, без сессии (1.12+): передатчик, сообщения владельца, звук.
+    // Сессия (Bearer) имеет приоритет — тогда обычный путь ниже. ---
+    if (KEYED_ACTIONS.has(action) && !req.headers.authorization && req.headers['x-device-key']) {
+      const { userId, device } = await account.requireDeviceByKey(req);
+      if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: userId })) return;
+      return await deviceActions(req, res, action, userId, device);
+    }
+
     const user = await requireUser(req, res);
     if (!user) return;
 
@@ -381,6 +432,16 @@ module.exports = async function handler(req, res) {
       return payments(req, res);
     }
     const device = await account.requireDevice(req, user.id);
+
+    // Ключ устройства по сессии: ПК, который вошёл до 1.12, или потерявший ключ (DEVICE_KEY_INVALID).
+    if (action === 'device-key' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-device-key', limit: 10, windowSeconds: 600, key: device.id })) return;
+      return res.status(200).json({ deviceKey: await account.issueDeviceKey(user.id, device.id) });
+    }
+    if ((action === 'messages-ack' || action === 'device-settings') && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
+      return await deviceActions(req, res, action, user.id, device);
+    }
 
     // --- Код клиента с подтверждением владельца в Telegram (server/_code-approvals.js) ---
     if (action === 'code-request' && req.method === 'POST') {
@@ -431,13 +492,12 @@ module.exports = async function handler(req, res) {
       if (toMe && action !== 'relay-peers' && permissions.isDenied(device, 'act.load_pc')) {
         return res.status(403).json({ error: 'Владелец закрыл загрузку с другого ПК на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.load_pc' });
       }
-      if (action === 'relay-inbox' && req.method === 'POST') return res.status(200).json(await relay.inbox(user.id, device, body(req)));
+      if (action === 'relay-inbox' || action === 'relay-put') return await deviceActions(req, res, action, user.id, device);
       if (action === 'relay-peers' && req.method === 'GET') {
         const list = await account.listDevices(user.id).catch(() => []);
         return res.status(200).json(relay.peers(user.id, device, list));
       }
       if (action === 'relay-ask' && req.method === 'POST') return res.status(200).json(await relay.ask(user.id, device, body(req)));
-      if (action === 'relay-put' && req.method === 'POST') return res.status(200).json(relay.put(user.id, device, req.query, req.body));
       if (action === 'relay-ack' && req.method === 'POST') return res.status(200).json(relay.ack(user.id, device, req.query));
       if (action === 'relay-get' && req.method === 'GET') {
         const out = await relay.get(user.id, device, req.query);
@@ -585,7 +645,8 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ url: `${publicOrigin(req)}/app-login?th=${encodeURIComponent(tokenHash)}&next=${encodeURIComponent(next)}` });
     }
     if (action === 'logout' && req.method === 'POST') {
-      await account.revokeDevice(user.id, device.id).catch(() => {});
+      // ПК остаётся в аккаунте (ключ устройства жив: отдаёт базу и получает сообщения владельца);
+      // отключает его только «Отключить» в кабинете или в списке компьютеров.
       await account.logout(user._accessToken);
       return res.status(204).end();
     }

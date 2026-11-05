@@ -53,6 +53,26 @@ export type AppDevice = {
   accessUpdatedAt?: string | null;
   /** owner — компьютер владельца, work — сотрудника, null — роль не назначена (ведёт себя как владельца) */
   role?: 'owner' | 'work' | null;
+  /** держит связь с сервером прямо сейчас (окно сообщений появится сразу) */
+  online?: boolean;
+  /** звук окна «сообщение от владельца» на этом ПК (см. lib/alert-sounds) */
+  alertSound?: string | null;
+};
+
+/** Сообщение владельца на ПК (api/app.js action=messages, server/_app-messages.js). */
+export type PcMessage = {
+  id: string;
+  deviceId: string;
+  text: string;
+  createdAt: string;
+  expiresAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
+  answeredAt: string | null;
+  answer: 'ok' | 'done' | 'cannot' | 'closed' | 'reply' | null;
+  answerLabel: string | null;
+  reply: string | null;
+  status: 'pending' | 'delivered' | 'read' | 'answered' | 'expired';
 };
 export type AppAccount = {
   freeMode?: boolean;
@@ -94,8 +114,38 @@ export function useAppPlans() {
   return useQuery({ queryKey: ['app-plans'], queryFn: () => api<AppPlans>('/api/app/plans'), staleTime: 5 * 60 * 1000 });
 }
 
-export function useAppAccount() {
-  return useQuery({ queryKey: appAccountKey, queryFn: () => api<AppAccount>('/api/app/me') });
+export function useAppAccount({ refetchInterval }: { refetchInterval?: number } = {}) {
+  return useQuery({ queryKey: appAccountKey, queryFn: () => api<AppAccount>('/api/app/me'), refetchInterval });
+}
+
+export const pcMessagesKey = (deviceId: string) => ['pc-messages', deviceId] as const;
+
+/** Переписка с ПК: пока страница открыта, опрашиваем статусы доставки и ответы. */
+export function usePcMessages(deviceId: string) {
+  return useQuery({
+    queryKey: pcMessagesKey(deviceId),
+    queryFn: () => api<{ items: PcMessage[] }>(`/api/app/messages?device=${encodeURIComponent(deviceId)}`),
+    refetchInterval: 5000,
+  });
+}
+
+export function useSendPcMessage() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, text }: { deviceId: string; text: string }) =>
+      api<PcMessage>('/api/app/messages', { method: 'POST', body: JSON.stringify({ deviceId, text }) }),
+    onSuccess: (_m, { deviceId }) => client.invalidateQueries({ queryKey: pcMessagesKey(deviceId) }),
+  });
+}
+
+/** Звук окна сообщений на ПК; программа подхватит его со следующим опросом (до минуты). */
+export function useSetDeviceAlertSound() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, alertSound }: { id: string; alertSound: string }) =>
+      api<{ id: string; alertSound: string | null }>(`/api/app/devices/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ alertSound }) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: appAccountKey }),
+  });
 }
 
 export function useRevokeAppDevice() {
