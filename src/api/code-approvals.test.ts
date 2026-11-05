@@ -335,3 +335,19 @@ describe('флаг app_code_via_bot', () => {
     expect(res.body).toMatchObject({ telegramLinked: true, flags: { codeViaBot: true }, user: { telegram: { username: 'owner' } } });
   });
 });
+
+describe('client-error (аварийный экран программы)', () => {
+  it('принимает отчёт без входа и пишет в журнал без ПДн', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const res = response();
+    await handler(request('client-error', { method: 'POST', headers: { authorization: undefined, 'x-app-name': 'pvz-helper' }, body: { screen: 'cells/cell', message: 'Minified React error #185', stack: 'x'.repeat(5000) } }), res);
+    expect(res.statusCode).toBe(204);
+    const line = warn.mock.calls.find(([head]) => head === '[app] client error');
+    expect(line).toBeTruthy();
+    const logged = JSON.parse(String(line![1]));
+    expect(logged).toMatchObject({ app: 'pvz-helper', version: '1.11.0', screen: 'cells/cell', message: 'Minified React error #185' });
+    expect(logged.stack.length).toBe(1500);
+    expect(logged.device).not.toContain(DEVICE.slice(10));
+    warn.mockRestore();
+  });
+});

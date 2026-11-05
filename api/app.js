@@ -126,6 +126,21 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ...publicPlans(), freeMode: await appFreeMode() });
     }
 
+    // Аварийный экран программы (AppErrorBoundary): текст ошибки, раздел и версия — в журнал сервера,
+    // чтобы разбирать жалобы без скриншотов. Без входа: экран может упасть и до авторизации.
+    if (action === 'client-error' && req.method === 'POST') {
+      if (!await enforceRateLimit(req, res, { scope: 'app-client-error', limit: 20, windowSeconds: 600 })) return;
+      const b = body(req);
+      const cut = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+      const deviceId = cut(req.headers['x-device-id'], 64);
+      console.warn('[app] client error', JSON.stringify({
+        app: cut(req.headers['x-app-name'], 32), version: cut(req.headers['x-app-version'], 32),
+        device: deviceId ? `${deviceId.slice(0, 8)}…` : '', screen: cut(b.screen, 80), message: cut(b.message, 500),
+        stack: cut(b.stack, 1500), components: cut(b.componentStack, 1500),
+      }));
+      return res.status(204).end();
+    }
+
     // Подтверждение входа со страницы сайта — без заголовка версии программы.
     if (action === 'login-request' && req.method === 'GET') {
       const code = account.normalizeLoginCode(req.query.code);
