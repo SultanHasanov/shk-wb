@@ -10,6 +10,9 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   mainMenuKeyboard: (signedIn: boolean) => {inline_keyboard: Array<Array<Record<string, any>>>};
   profileKeyboard: (options?: Record<string, boolean>) => {inline_keyboard: Array<Array<Record<string, any>>>};
   topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
+  topupAndBuyRow: (missing: number, then: string) => Array<Record<string, any>>;
+  topupPurchaseLines: (input: { amount: number; bonus?: number; balance: number; missing: number }) => string[];
+  noPointsView: (phone?: string) => { text: string; reply_markup: { inline_keyboard: Array<Array<Record<string, any>>> } };
   freeUntilText: (enabled: boolean, until: string | null) => string;
   claimErrorText: (error: unknown) => string | null;
   clientCodeEventKey: (userId: string, qrText: string) => string;
@@ -139,6 +142,33 @@ describe('Telegram sticker generator bot', () => {
     expect(buttons.every(button => !button.web_app)).toBe(true);
     // Не хватает 400 ₽: 100 и 300 не помогут, 500 (+25 бонус) и 1000 — да.
     expect(bot.topupRows(400).flat().map(button => button.callback_data)).toEqual(['tp:500', 'tp:1000']);
+  });
+
+  it('объясняет, почему пополнение больше недостающего', () => {
+    const row = bot.topupAndBuyRow(5, 'rv:5:0:3:07d5a547');
+    expect(row[0].text).toContain('25 ₽');
+    expect(row[0].callback_data).toBe('tp:25~500:rv:5:0:3:07d5a547');
+    const lines = bot.topupPurchaseLines({ amount: 25, balance: 20, missing: 5 }).join(' ').replace(/\s/g, ' ');
+    expect(lines).toContain('Покупка стоит 25 ₽, на балансе 20 ₽, не хватает 5 ₽.');
+    expect(lines).toContain('Минимальное пополнение — 25 ₽, поэтому после покупки на балансе останется 20 ₽.');
+    // Не хватает ровно цены — объяснять нечего.
+    expect(bot.topupPurchaseLines({ amount: 25, balance: 0, missing: 25 }).join(' ').replace(/\s/g, ' ')).toBe('Покупка стоит 25 ₽, на балансе 0 ₽.');
+    expect(bot.topupPurchaseLines({ amount: 25, balance: NaN, missing: NaN })).toEqual([]);
+  });
+
+  it('длинное действие не ломает кнопку пополнения лимитом Telegram в 64 байта', () => {
+    const then = 'cqa:01234567-89ab-cdef-0123-456789abcdef' + ':'.repeat(12);
+    const data = bot.topupAndBuyRow(1234.5, then)[0].callback_data;
+    expect(Buffer.byteLength(data)).toBeLessThanOrEqual(64);
+    expect(data).toBe(`tp:1235:${then}`);
+  });
+
+  it('нет ПВЗ — понятный экран с повтором и входом под другим номером', () => {
+    const view = bot.noPointsView('79601234567');
+    expect(view.text).toContain('Нет доступных ПВЗ');
+    expect(view.text).not.toContain('ошибка');
+    const actions = view.reply_markup.inline_keyboard.flat().map(button => button.callback_data);
+    expect(actions).toEqual(expect.arrayContaining(['rv:points', 'rv:relogin']));
   });
 
   it('пишет конец бесплатного периода как «до следующего дня»', () => {

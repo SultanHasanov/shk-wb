@@ -40,14 +40,14 @@ describe('баланс генератора в кабинете', () => {
     expect(screen.getByText(/разовую скидку 20%/)).toBeInTheDocument();
   });
 
-  it('принимает пополнение с копейками от 20 рублей', async () => {
+  it('принимает пополнение с копейками от 25 рублей', async () => {
     const user = userEvent.setup();
     renderPage();
     const input = await screen.findByRole('textbox', { name: 'Сумма пополнения, ₽' });
     await user.clear(input);
-    await user.type(input, '20,50');
+    await user.type(input, '25,50');
     await user.click(screen.getByRole('button', { name: 'Пополнить баланс' }));
     await waitFor(() => expect(paymentBody).not.toBeNull());
-    expect(paymentBody).toMatchObject({ productKind: 'wallet_topup', walletAmount: 20.5, returnTo: 'cabinet' });
+    expect(paymentBody).toMatchObject({ productKind: 'wallet_topup', walletAmount: 25.5, returnTo: 'cabinet' });
   });
 });

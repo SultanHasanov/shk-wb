@@ -942,7 +942,22 @@ function topupRows(missing = 0) {
  */
 function topupAndBuyRow(missingRub, then) {
   const amount = Math.max(wallet.MIN_TOPUP, Math.ceil(Number(missingRub) - 1e-9));
-  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, callback_data: `tp:${amount}:${then}` }];
+  // ~<копейки> — сколько не хватает, для пояснения на экране оплаты. Лимит callback_data у Telegram — 64 байта;
+  // не влезло — кнопка без пояснения, покупка от этого не зависит.
+  const detailed = `tp:${amount}~${Math.round(Number(missingRub) * 100)}:${then}`;
+  const callbackData = Buffer.byteLength(detailed) <= 64 ? detailed : `tp:${amount}:${then}`;
+  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, callback_data: callbackData }];
+}
+
+/** Почему сумма пополнения не равна цене: цена, баланс, нехватка, минимум и остаток. Числа неизвестны — пустой список. */
+function topupPurchaseLines({ amount, bonus = 0, balance, missing }) {
+  if (!Number.isFinite(balance) || !Number.isFinite(missing) || missing <= 0) return [];
+  const price = balance + missing;
+  const left = Math.round((amount + bonus - missing) * 100) / 100;
+  const lines = [`Покупка стоит ${wallet.formatRub(price)}, на балансе ${wallet.formatRub(balance)}${balance > 0 ? `, не хватает ${wallet.formatRub(missing)}` : ''}.`];
+  if (amount === wallet.MIN_TOPUP && amount > missing) lines.push(`Минимальное пополнение — ${wallet.formatRub(wallet.MIN_TOPUP)}, поэтому после покупки на балансе останется ${wallet.formatRub(left)}.`);
+  else if (left > 0) lines.push(`После покупки на балансе останется ${wallet.formatRub(left)}.`);
+  return lines;
 }
 
 const OFFER_LINE = `Нажимая «Перейти к оплате», вы принимаете <a href="${publicUrl('/offer')}">оферту</a>.`;
@@ -951,7 +966,7 @@ const OFFER_LINE = `Нажимая «Перейти к оплате», вы пр
  * Нажата кнопка пополнения: создать заказ ЮKassa и показать ссылку на оплату в том же сообщении.
  * then — что купить после зачисления (afterWalletTopup), screenId — экран, который после оплаты станет «Готово».
  */
-async function startTopupPayment(from, chatId, amount, then, screenId) {
+async function startTopupPayment(from, chatId, amount, then, screenId, missing = null) {
   const userId = await findUser(from.id);
   if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
   const bonus = wallet.topupBonus(amount);
@@ -963,9 +978,11 @@ async function startTopupPayment(from, chatId, amount, then, screenId) {
     await showScreen(chatId, screenId, `⚠️ ${escapeHtml(error.message)}`, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать снова', callback_data: 'topup:home' }], MENU_ROW]) });
     return;
   }
+  const balance = then && missing != null ? await walletRub(userId).catch(() => null) : null;
   const text = [
     `<b>💳 Пополнение на ${wallet.formatRub(amount)}</b>`,
     ...(bonus ? [`Зачислим ${wallet.formatRub(amount + bonus)} с бонусом.`] : []),
+    ...topupPurchaseLines({ amount, bonus, balance: balance ?? NaN, missing: missing ?? NaN }),
     ...(then ? ['После оплаты покупка пройдёт сама, ничего нажимать не нужно.'] : ['Деньги появятся на балансе сразу после оплаты.']),
     '',
     OFFER_LINE,
@@ -1858,9 +1875,33 @@ async function showReviewAuthorByPosition(from, chatId, filterKey, page, index, 
   return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${foundPage}:${foundIndex}${tag ? `:${tag}` : ''}`);
 }
 
+function noPointsView(phone) {
+  const number = phone ? ` для номера <code>${escapeHtml(maskWbPhone(phone))}</code>` : '';
+  return {
+    text: [
+      '<b>Нет доступных ПВЗ</b>',
+      '',
+      `Вход в WB выполнен, но WB не показывает ни одного ПВЗ${number}.`,
+      '',
+      'Проверьте, что владелец добавил вас в сотрудники именно по этому номеру. Когда доступ появится, нажмите «Проверить снова» — входить заново не нужно.',
+    ].join('\n'),
+    reply_markup: choiceKeyboard([
+      [{ text: '🔄 Проверить снова', callback_data: 'rv:points' }],
+      [{ text: '📱 Войти другим номером', callback_data: 'rv:relogin' }],
+      MENU_ROW,
+    ]),
+  };
+}
+
 async function beginPointSelection(from, chatId, connection) {
   const points = await wbPvz.loadPoints(connection.session);
-  if (!points.length) throw new Error('В кабинете WB не найдено доступных ПВЗ');
+  if (!points.length) {
+    // Обычное состояние, а не сбой: вход прошёл, но WB не отдаёт этому номеру ни одного пункта.
+    await saveWbConnection(from, chatId, 'await_point', connection.session, { lastError: 'В кабинете WB не найдено доступных ПВЗ' });
+    const view = noPointsView(connection.session?.phone);
+    await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+    return;
+  }
   if (points.length === 1) {
     const session = await wbPvz.selectPoint(connection.session, points[0].id);
     await saveWbConnection(from, chatId, 'ready', session);
@@ -2414,12 +2455,12 @@ async function handleCallback(callback) {
   // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
   if (data === 'topup:home' || data === 'code:buy') { answerCallbackQuery(callback.id).catch(() => {}); await showTopup(from, chatId, messageId); return; }
   // tp:<сумма>[:<then>] — пополнить (и купить): заказ ЮKassa создаётся здесь, ссылка на оплату — в том же сообщении.
-  const topupMatch = data.match(/^tp:(\d{1,6})(?::(.+))?$/);
+  const topupMatch = data.match(/^tp:(\d{1,6})(?:~(\d{1,9}))?(?::(.+))?$/);
   if (topupMatch) {
     const amount = Number(topupMatch[1]);
     if (!wallet.validTopup(amount)) { await answerCallbackQuery(callback.id, 'Сумма больше не актуальна'); return; }
     answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {});
-    await startTopupPayment(from, chatId, amount, topupMatch[2] || '', messageId);
+    await startTopupPayment(from, chatId, amount, topupMatch[3] || '', messageId, topupMatch[2] ? Number(topupMatch[2]) / 100 : null);
     return;
   }
   if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
@@ -2428,6 +2469,7 @@ async function handleCallback(callback) {
   if (shopPay) { answerCallbackQuery(callback.id).catch(() => {}); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
   if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
   if (data === 'rv:start' || data === 'rv:filters') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId, messageId); return; }
+  if (data === 'rv:relogin') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await showReviewFilters(from, chatId, messageId); return; }
   if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
   if (data === 'rv:cancel') { answerCallbackQuery(callback.id).catch(() => {}); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
   if (data === 'rv:points') {
@@ -2730,4 +2772,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

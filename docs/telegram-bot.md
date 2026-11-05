@@ -120,15 +120,16 @@ Mini App `/bot-checkout` (он входил в кабинет, слал «Вхо
   Витрины `showFindCode`/`showHelperInfo`/`showCellPrintInfo`/`showSupport`, канал https://t.me/wbtools_ru в меню.
   Команды бота — `BOT_COMMANDS` (setMyCommands в `scripts/run-telegram-bot-local.cjs`; для боевого бота вызвать отдельно).
 - **Баланс** (`server/_wallet.js`, миграция `20261023_wallet.sql` ПРИМЕНЕНА): `wallet_accounts`/`wallet_ledger`, всё через
-  `wallet_move` с уникальным `event_key`. Пополнение = заказ `wallet_topup` (100/300/500/1000 или своя 20–50000 ₽ — `MIN_TOPUP`, бонус +5% от
+  `wallet_move` с уникальным `event_key`. Пополнение = заказ `wallet_topup` (100/300/500/1000 или своя 25–50000 ₽ — `MIN_TOPUP`, бонус +5% от
   500, +10% от 1000; Mini App `/bot-checkout?kind=topup&amount=N`). Покупка с баланса = обычный заказ `amount=0, gross_amount=0,
   wallet_paid_kopecks=цена` → `wallet_pay_order` → штатный `completeOrder` → при ошибке `wallet_refund_order`
   (`payWithWallet`). Так реферальная комиссия и выручка считаются один раз — с пополнения. `notifyCompleted` молчит для таких заказов.
   Генерации: сначала коды доступа, иначе `generationCost(units)` = min(пакет сверху, штучная цена пакета снизу) и докупка на свой
   код (`renewal_target_key`). Магазин `shop:*` (подписка Помощника, ключ Печати ячеек новый/продление, пакет подборов WBPK) —
   цену считает `resolveShopItem` на сервере, кнопка оплаты `shop:pay:<nonce>:…` + claim в `telegram_generation_requests`.
+  Пустой `pickpoint/list` у WB (вход прошёл, ПВЗ нет) — не сбой: экран «Нет доступных ПВЗ» с «Проверить снова» (`rv:points`) и «Войти другим номером» (`rv:relogin`), состояние `await_point` и `last_error` остаются.
   «Кто поставил оценку» = 25 ₽ с баланса (`bot_review_spend` переопределён, повтор того же автора бесплатный).
-  Не хватает денег → одна кнопка «💳 Пополнить на X ₽ и купить» (`topupAndBuyRow`, X = недостающее, мин. 20 ₽ — `MIN_TOPUP`):
+  Не хватает денег → одна кнопка «💳 Пополнить на X ₽ и купить» (`topupAndBuyRow`, X = недостающее, мин. 25 ₽ — `MIN_TOPUP`; кнопка несёт нехватку `tp:X~<копейки>:then`, экран оплаты по ней пишет цену, баланс и остаток — `topupPurchaseLines`):
   `/bot-checkout?kind=topup&amount=X&then=<gen|rv:ф:стр:№|shop:…>&m=<экран>` → `pricing_snapshot.wallet.then/message`
   (api/payments.js проверяет формат; переиспользование старого счёта для wallet_topup отключено) → после зачисления
   `notifyCompleted` вызывает `afterWalletTopup` (ленивый require бота) и покупка проходит сама.

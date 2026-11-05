@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { WalletCards } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCabinet } from '../../api/cabinet';
+import { MAX_TOPUP, MIN_TOPUP } from '../../lib/pricing';
 import { rememberPendingOrder } from '../../lib/pending-orders';
 import { useDocumentMeta } from '../../lib/seo';
 import { Alert, Button, Card, EmptyState, Input } from '../../ui';
@@ -27,7 +28,7 @@ export function PackagesPage() {
   const [amount, setAmount] = useState('500');
   const value = Number(amount.replace(',', '.'));
   const kopecks = Math.round(value * 100);
-  const valid = Number.isFinite(value) && value >= 20 && value <= 50000 && Math.abs(kopecks - value * 100) < 1e-6;
+  const valid = Number.isFinite(value) && value >= MIN_TOPUP && value <= MAX_TOPUP && Math.abs(kopecks - value * 100) < 1e-6;
   const checkout = useMutation({
     mutationFn: () => api<{ confirmationUrl: string; token: string }>('/api/payments/create', {
       method: 'POST',
@@ -82,7 +83,7 @@ export function PackagesPage() {
           />
           <Button variant="secondary" disabled={!valid} loading={checkout.isPending} onClick={() => checkout.mutate()}>{t('Пополнить баланс', 'Балансты толықтыру')}</Button>
         </div>
-        <p className={c.balanceNote}>{t('Бонус начисляется от 500 ₽. Баланс тратится на генерации и покупки с баланса. От 20 до 50 000 ₽.', 'Бонус 500 ₽-ден бастап есептеледі. Баланс генерациялар мен сатып алуларға жұмсалады. 20-дан 50 000 ₽-ге дейін.')}</p>
+        <p className={c.balanceNote}>{t('Бонус начисляется от 500 ₽. Баланс тратится на генерации и покупки с баланса. От 25 до 50 000 ₽.', 'Бонус 500 ₽-ден бастап есептеледі. Баланс генерациялар мен сатып алуларға жұмсалады. 25-тен 50 000 ₽-ге дейін.')}</p>
       </Card>
 
       {/* RIGHT: последние операции */}
@@ -107,7 +108,7 @@ export function PackagesPage() {
     </div>
 
     {wallet.discountAvailable && <Alert tone="success">{t('Ваша следующая генерация получит разовую скидку 20%: 6 ₽ по номеру или 16 ₽ за пачку.', 'Келесі генерацияңызға бір реттік 20% жеңілдік беріледі: нөмір бойынша 6 ₽ немесе пакетке 16 ₽.')}</Alert>}
-    {!valid && <Alert tone="warning">{t('Введите сумму от 20 до 50 000 ₽, не более двух знаков после запятой.', '20-дан 50 000 ₽-ге дейінгі соманы енгізіңіз, үтірден кейін екі таңбадан аспасын.')}</Alert>}
+    {!valid && <Alert tone="warning">{t('Введите сумму от 25 до 50 000 ₽, не более двух знаков после запятой.', '25-тен 50 000 ₽-ге дейінгі соманы енгізіңіз, үтірден кейін екі таңбадан аспасын.')}</Alert>}
     {checkout.isError && <Alert tone="error">{checkout.error.message}</Alert>}
   </div>;
 }

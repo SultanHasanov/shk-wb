@@ -9,7 +9,7 @@ const { supabaseFetch } = require('./_supabase');
 const { completeOrder, PACKAGE_PRICES } = require('./_payments');
 
 const TOPUP_AMOUNTS = Object.freeze([100, 300, 500, 1000]);
-const MIN_TOPUP = 20;
+const MIN_TOPUP = 25;
 const MAX_TOPUP = 50000;
 // Бонус к пополнению: от 1000 ₽ — +10%, от 500 ₽ — +5%.
 const TOPUP_BONUS_STEPS = Object.freeze([[1000, 10], [500, 5]]);
