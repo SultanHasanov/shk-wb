@@ -99,7 +99,9 @@ export class AuthStore {
   }
 
   async signOut() {
-    const { error } = await getSupabase().auth.signOut();
+    // Только этот браузер. По умолчанию scope='global' гасит ВСЕ сессии пользователя, в том числе
+    // «Помощник ПВЗ» на компьютере — программа получала SESSION_EXPIRED и разлогинивалась (жалобы 05.11.2026).
+    const { error } = await getSupabase().auth.signOut({ scope: 'local' });
     if (error) throw publicAuthError(error);
     runInAction(() => this.applySession(null));
   }
