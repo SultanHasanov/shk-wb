@@ -676,3 +676,56 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 - Установщик `/dl/pvz-helper-1.11.1-setup.exe`, sha256 `ad4142d1…2620f`, `latest.json`: `auto:true, mandatory:false`, бэкап
   `latest.json.bak-1793872101`. Проверено: `cargo check --lib`, `tsc -b`, `vite build`, `npm test` 418/418, `/api/app/client-error` → 204.
   Вживую с базой НЕ проверено — ждать отчётов в журнале.
+
+## 1.12.0 (2026-11-05): ключ устройства и «Сообщения на ПК» (миграции применены, сайт — коммит f1c4ba67, НЕ выложено; программа собрана, НЕ опубликована)
+**Зачем.** Рабочий ПК отдавал базу по передатчику только пока программа залогинена; сессия умирала от выхода на сайте
+(05.11: все сессии гасил глобальный signOut кабинета), смены пароля, протухшего токена — владелец терял данные. Плюс
+владельцу нужно писать на ПК пункта («пришла поставка», «выключите свет») с ответом сотрудника.
+
+**Ключ устройства (сервер `server/_app-account.js`, программа `account.rs`).**
+- Выдаётся при входе (`finishLogin` → `deviceKey` в ответе) и по `POST /api/app/device-key` (с сессией; программа
+  запрашивает через 8 с после запуска, если ключа нет — для ПК, вошедших до 1.12). В базе — только sha256
+  (`app_devices.key_hash`, миграция `20261111_app_device_key.sql`), у ПК — DPAPI `device-key.bin`, заголовок `X-Device-Key`
+  во всех запросах программы (и в `/lease`).
+- `requireDeviceByKey(req)` → `{userId, device}`; коды: `DEVICE_KEY_REQUIRED` (нет заголовков), `DEVICE_REVOKED` (живой
+  строки нет — ПК отключён в кабинете: программа забывает ключ и сессию), `DEVICE_KEY_INVALID` (строка есть, ключ не тот:
+  программа забывает ключ и перевыпускает по сессии).
+- По ключу без сессии работают только `relay-inbox`, `relay-put`, `messages-ack`, `device-settings` (блок `KEYED_ACTIONS`
+  в `api/app.js` до `requireUser`; Bearer, если есть, имеет приоритет). Права аренды по ключу — только `mirror`
+  (`leaseRights`, `via: 'key'`): разделы тарифа без входа закрыты, как раньше.
+- **`logout` больше не отзывает ПК**: строка и ключ живут, ПК остаётся в списке, отдаёт базу и получает сообщения.
+  Отключает только «Отключить» в кабинете/списке ПК (`revoked_at`) — тогда ключ мёртв. `logoutOthers` по-прежнему отзывает
+  остальные ПК. Следствие: выход не освобождает слот лимита ПК — при `DEVICE_LIMIT` отключить лишний ПК.
+- Программа: `relay.rs serve_loop` держит inbox при `has_device_key() || logged_in()` (без проверки базы WB и mirror —
+  сервер не даёт заданий без услуги, `build()` откажет за чужой пункт); `api_device`/`api_raw_device` — запросы без Bearer.
+  `refresh()` при `SESSION_EXPIRED` забывает только сессию, при `DEVICE_REVOKED` — всё.
+
+**Сообщения владельца (`server/_app-messages.js`, `messages.rs`, кабинет `PcMessagesPage.tsx`).**
+- Таблица `app_device_messages` (миграция `20261112_app_device_messages.sql`, там же `in_app_notifications.kind` +
+  `pc_reply`): текст ≤500, `expires_at` +3 дня, `delivered_at/read_at/answered_at`, `answer_kind` ok|done|cannot|closed|reply,
+  `reply_text`. Крон кабинета удаляет старше 30 дней.
+- Кабинет → `POST /api/app/messages {deviceId, text}` (лимит 60/10 мин, ≥20 неотвеченных на ПК → 409 `TOO_MANY_OPEN`),
+  `GET /api/app/messages?device=` — лента со статусами pending|delivered|read|answered|expired. Новое сообщение будит спящий
+  inbox ПК (`relay.wake`); ответ `relay-inbox` теперь `{jobs, messages, alertSound}`, `messages.pull` ставит `delivered_at`
+  и отдаёт всё с `read_at = null` (ПК дедуплицирует по id).
+- ПК: окно `messages` (`index.html#messages`, `MessagePopup.tsx`, поверх всего, без фокуса при показе, низ-право), очередь
+  по одному; при показе `messages-ack {status:'read'}`, кнопки/текст → `ok|done|cannot|closed|reply`; владельцу уведомление
+  в кабинете (`pc_reply`, ссылка `/cabinet/pc-messages?device=`) и в Telegram (`ownerTelegramId` + `sendMessage`). Ack без
+  сети — 3 попытки, потом следующее сообщение (владелец увидит «Показано» без ответа).
+- Звук: 6 WAV (`tools/make-sounds.py` → `src-tauri/sounds` через `include_bytes!`, и `sounds/pvz` на сайте), `sound.rs`
+  играет через winmm `PlaySoundW` из памяти. Хранится в `config general.alert_sound` (не синхронизируется между ПК) и в
+  `app_devices.alert_sound`; меняется в программе (Настройки → «Сообщения от владельца», `alert_sound_set` → `POST
+  /device-settings`, флаг `alert_sound_pending` досылается из serve_loop) и в кабинете (`PATCH /devices/:id {alertSound}`,
+  приходит в `relay-inbox.alertSound`, `sound::sync_from_server`). Сервер — источник истины.
+- «В сети» в кабинете — `relay.onlineIds` (inbox за последние 70 с) в `GET /api/app/me` без `x-device-id`; страница
+  опрашивает `me` раз в 30 с, ленту — раз в 5 с. Теперь «в сети» и ПК без базы WB (points пустые) — это нормально.
+
+**Выпуск (сервер первым).** 1) Миграции применены 05.11 (`key_hash,key_issued_at,alert_sound` есть, таблица создана).
+2) Сайт из `main` (`deploy.sh`), проверить curl: `/api/app/device-key`, `/api/app/messages`, `/api/app/messages-ack`,
+`/api/app/device-settings` → JSON с `code` (401), НЕ 404; `/api/app/relay/inbox` с `X-Device-Key: x` + `X-Device-Id` →
+`DEVICE_KEY_REQUIRED`/`DEVICE_REVOKED`; `/sounds/pvz/chime.wav` → 200. 3) Программа 1.12.0 по обычной процедуре
+(`auto:true`, не обязательное; старые версии совместимы — Bearer-путь не тронут, лишние поля игнорируют).
+4) Живой тест на двух ПК: выход на «рабочем» → ≤60 с он `online` в кабинете и отдаёт базу; сообщение приходит при
+скрытом окне; «Отключить» в кабинете → `DEVICE_REVOKED`, ключ и сессия удалены.
+Проверено: `npm test` 55 файлов (новый `src/api/app-device-key.test.ts`, 10 тестов), `cargo check --lib`, `cargo test`
+(`sound::`, `messages::`), `tsc -b` + `vite build` в программе и на сайте.
