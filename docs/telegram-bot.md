@@ -50,7 +50,8 @@ Telegram и Supabase — напрямую, Supabase там в 1 мс). Узел 
 порту отвечает «Bad Request: wrong type of the web page content» (03.11.2026, сломались «Скачать PDF» и QR кода
 клиента; сам Caddy при этом отдавал PNG правильно). Маршрут `/media` в Caddy оставлен, но не используется. Caddy :88
 (`selfhost/caddy/Caddyfile.tg-relay`): `/webhook` и `/media/*` → 127.0.0.1:3001, `/rpc` → узел только с IP VPS,
-`/api/*` и `/file` — по-прежнему релей для исходящих вызовов сайта.
+`/api/*` и `/file` — по-прежнему релей для исходящих вызовов сайта, `/sb/*` → Supabase для сайта на VPS
+(с 05.11.2026, только с IP VPS; почему — `docs/site.md`, «Supabase — через релей в Германии»).
 Сайт на VPS зовёт бота через `server/_bot-rpc.js` (`BOT_RPC_URL=https://tg.shk-wb.ru:88/rpc`, `BOT_RPC_SECRET`):
 `afterWalletTopup` (оплата «пополнить и купить»), `notifyMiniAppAuthorized`, `bindTelegramReferral` (вход через Telegram).
 Узел не ответил — вызов выполняется локально, как раньше. За узлом следит `_bot-health` сайта (`BOT_NODE_URL`).

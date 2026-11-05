@@ -19,6 +19,21 @@ React + `api/` + `server/` + `selfhost/`. Один процесс обслужи
   `BOT_ROLE=bot`, выкладывается отдельно `ROLE=bot … bash selfhost/deploy.sh root@109.120.140.116`, Actions его не
   трогает. Подробности — `docs/telegram-bot.md`.
 
+### Supabase — через релей в Германии (с 05.11.2026)
+С 03.11.2026 ~15:00 с VPS в РФ установленные TCP-соединения к Cloudflare (за ним Supabase) молча глушатся через
+10–25 с: пакеты уходят, ответа нет, соседние соединения к тому же IP живут. Любой запрос по такому соединению
+висит до таймаута (10 с в `_fetch-retry`), в журнале — `fetch retry (supabase): The operation was aborted due to
+timeout` по 100–560 в час, плюс `[UFW BLOCK] … SPT=443` в `journalctl -k` (поздние FIN от Supabase уже после того,
+как наша сторона закрыла сокет). Российский хост (ya.ru) на одном соединении не рвётся, из Германии Supabase —
+ноль обрывов на 120 запросах. Поэтому:
+- сервер: `SUPABASE_URL=https://tg.shk-wb.ru:88/sb` в `/srv/shk-wb/.env` (Caddy на узле бота проксирует `/sb/*`
+  в `ouxsvlfaszsaykzpnkwh.supabase.co`, только с IP VPS — `selfhost/caddy/Caddyfile.tg-relay`);
+- браузер: nginx `location /supabase/` тоже ведёт на `tg.shk-wb.ru:88/sb/…` (`selfhost/nginx-live.conf`).
+После переключения таймаутов в журнале 0. Откат: `SUPABASE_URL=https://ouxsvlfaszsaykzpnkwh.supabase.co`
+(бэкап `.env.bak-*`), рестарт; nginx — прошлая версия `nginx-live.conf` через `nginx-sync.sh`.
+Узел бота в Германии ходит в Supabase напрямую, его это не касается. Если немецкий узел лёг — сайт теряет
+Supabase целиком, это осознанная цена; `_bot-health` следит за узлом.
+
 ### nginx: два файла, не путать
 `deploy.sh` nginx НЕ трогает, поэтому конфиг выкладывается отдельно.
 - `selfhost/nginx.conf` — только для чистой машины: порт 80, без TLS. `setup.sh` копирует его и сразу делает

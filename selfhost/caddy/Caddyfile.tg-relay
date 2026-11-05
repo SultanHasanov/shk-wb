@@ -8,6 +8,9 @@
 #   GET  /media/api/stickers/* → узел бота (картинки и PDF стикеров для Telegram)
 #   POST /rpc                  → узел бота, внутренний RPC только с IP сайта (VPS 212.193.59.72)
 #   POST /api/<метод>, GET /file?path=  → api.telegram.org (релей для исходящих вызовов сайта с VPS, где Telegram недоступен)
+#   /sb/*                      → Supabase (REST, auth, storage, realtime) для сайта с VPS: с 03.11.2026 из РФ
+#                                 установленные TCP-соединения к Cloudflare (за ним Supabase) глушатся через
+#                                 10–25 с, каждый такой запрос висит до таймаута; из Германии обрывов нет
 tg.shk-wb.ru:88 {
 	# Только боевой (8804824717) и тестовый (8894809412) боты — чужие токены не проксируем.
 	@bot header_regexp tok Authorization ^Bearer\s+(8804824717|8894809412):([A-Za-z0-9_-]{20,})$
@@ -67,6 +70,23 @@ tg.shk-wb.ru:88 {
 			reverse_proxy https://api.telegram.org {
 				header_up Host api.telegram.org
 				header_up -Authorization
+			}
+		}
+		handle {
+			respond 403
+		}
+	}
+
+	# Supabase для сайта на VPS (SUPABASE_URL=https://tg.shk-wb.ru:88/sb и nginx /supabase/ → сюда).
+	# Только с IP сайта: это не публичный прокси. Ключи идут в заголовках apikey/Authorization как есть.
+	handle_path /sb/* {
+		handle @site {
+			reverse_proxy https://ouxsvlfaszsaykzpnkwh.supabase.co {
+				header_up Host ouxsvlfaszsaykzpnkwh.supabase.co
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 60s
+				}
 			}
 		}
 		handle {
