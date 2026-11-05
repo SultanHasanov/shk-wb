@@ -661,3 +661,18 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
   `curl …/api/app/code-request` → 401 (не 404) → тест в тестовом боте (`/start link_…`, кнопки `cq:*`) → включить флаг в админке →
   программа 1.11.0 (`auto:true`) → через несколько дней `PVZ_APP_MIN_VERSION=1.11.0`.
 - **Границы:** ключ WBPK без входа выдаёт напрямую; доверенные подтверждающие кроме владельца — не сделано.
+
+## Выпуск 2026-11-05: программа 1.11.1 (фоновое, необязательное) — сбой «не смог открыть этот экран» при переходе в ячейку
+Жалоба пользователя: третий день при переходе в ячейку аварийный экран, «Техническая информация» — `Minified React error #185`
+(«Maximum update depth exceeded»). Причина — `@tanstack/react-virtual` в списке ячеек/товаров/«В пути»: пока список спрятан
+под карточкой/досье (`display:none` в `App.tsx`), ResizeObserver библиотеки замеряет скрытые ряды нулевой высотой и через
+`flushSync` перерисовывает список по кругу. Исправление в `components/virtual.tsx`: проп `enabled` (выключаем виртуализатор,
+пока открыта карточка/досье — `openCell`/`openDossier` из store, передают `Cells.tsx`, `CellsGoods.tsx`, `OnWay.tsx`) и
+`useFlushSync:false`; библиотека обновлена до react-virtual 3.14.26 / virtual-core 3.19.11.
+- **Отчёты об ошибках.** `AppErrorBoundary` теперь шлёт текст, стек, стек компонентов и раздел (`markScreen` из store:
+  `tab`, `tab/cell`, `tab/dossier`) командой `report_client_error` → `POST /api/app/client-error` (сайт 49610274, маршрут в
+  `vercel.json`, без входа, лимит 20/10 мин, в журнал `[app] client error` без ПДн — `journalctl -u shk-wb | grep 'client error'`).
+  Тест в `src/api/code-approvals.test.ts`.
+- Установщик `/dl/pvz-helper-1.11.1-setup.exe`, sha256 `ad4142d1…2620f`, `latest.json`: `auto:true, mandatory:false`, бэкап
+  `latest.json.bak-1793872101`. Проверено: `cargo check --lib`, `tsc -b`, `vite build`, `npm test` 418/418, `/api/app/client-error` → 204.
+  Вживую с базой НЕ проверено — ждать отчётов в журнале.
