@@ -660,12 +660,12 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 - **Порядок выпуска:** миграция → сайт из main → узел бота (`ROLE=bot …`, перед этим `APP_UNLIMITED_USER_IDS` в `.env` узла) →
   `curl …/api/app/code-request` → 401 (не 404) → тест в тестовом боте (`/start link_…`, кнопки `cq:*`) → включить флаг в админке →
   программа 1.11.0 (`auto:true`) → через несколько дней `PVZ_APP_MIN_VERSION=1.11.0`.
-- **Индивидуальное исключение (2026-11-05, в коде, НЕ выложено):** владельцу без Telegram подтверждение через бот не подходит,
+- **Индивидуальное исключение (ВЫЛОЖЕНО 05.11.2026: миграция применена, сайт 20261105-193917; переключатель вживую не нажимали):** владельцу без Telegram подтверждение через бот не подходит,
   поэтому в админке на странице пользователя есть карточка «Помощник ПВЗ — код клиента» с переключателем. Выключен →
   `user_profiles.app_code_via_bot_off = true` (миграция `20261113_app_code_via_bot_user_off.sql`): при включённом общем флаге
   `client-qr` этому аккаунту отвечает напрямую (`codeViaBotEnabledFor` в `server/_app-flags.js`), `code-request` → 409
   `CODE_VIA_BOT_OFF`, `/me` отдаёт `flags.codeViaBot=false` — программа 1.11+ сама идёт прямым путём без обновления.
-  Админ-действие `POST /api/admin/users?action=appCodeViaBot {userId, enabled}` (`server/_admin-users.js`).
+  Админ-действие `POST /api/admin/data?resource=users&action=appCodeViaBot {userId, enabled}` (`server/_admin-users.js`).
   Порядок выпуска: миграция → сайт из `main` (узел бота не трогали). Тесты — `src/api/code-approvals.test.ts` (22).
 - **Границы:** ключ WBPK без входа выдаёт напрямую; доверенные подтверждающие кроме владельца — не сделано.
 
