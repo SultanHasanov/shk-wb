@@ -452,7 +452,7 @@ async function accountSummary(user, currentHash) {
   const uid = encodeURIComponent(user.id);
   const [ent, profiles, telegram, packs, stickerCodes, devices, free, freeUntil, freeWin, points, crackFallback, clubDiscount, codeViaBot] = await Promise.all([
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: user.id }) }),
-    supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone&limit=1`).catch(() => []),
+    supabaseFetch(`user_profiles?user_id=eq.${uid}&select=display_name,phone,app_code_via_bot_off&limit=1`).catch(() => []),
     supabaseFetch(`user_telegram_identities?user_id=eq.${uid}&select=username,first_name&limit=1`).catch(() => []),
     supabaseFetch(`license_keys?owner_user_id=eq.${uid}&active=eq.true&select=key,usage_limit,used,created_at&order=created_at.asc`),
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${uid}&active=eq.true&app_subscription_id=is.null&select=generation_limit,generation_used`),
@@ -490,8 +490,9 @@ async function accountSummary(user, currentHash) {
     freeUntil: free ? freeUntil : null,
     // Безлимитный аккаунт: всё открыто бессрочно, оплаты не нужны.
     unlimited,
-    // Переключатели из админки (резервный подбор кода и т.п.).
-    flags: { crackFallback: crackFallback === true, codeViaBot: codeViaBot === true },
+    // Переключатели из админки (резервный подбор кода и т.п.). codeViaBot — уже с учётом индивидуального
+    // исключения аккаунта (user_profiles.app_code_via_bot_off): программа по нему выбирает прямой путь или запрос владельцу.
+    flags: { crackFallback: crackFallback === true, codeViaBot: codeViaBot === true && profile.app_code_via_bot_off !== true },
     // Скидка участника клуба на «Про», в процентах (0 — нет). Применяется только к тарифу pro.
     clubDiscountPercent: clubDiscount ? CLUB_DISCOUNT_PERCENT : 0,
     ...(all ? { plan: 'pro' } : {}),

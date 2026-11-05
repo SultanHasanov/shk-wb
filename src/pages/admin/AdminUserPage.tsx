@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Ban, Eye, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { UseMutationResult } from '@tanstack/react-query';
-import { type AdminUserDetail, useAdminUser, useAdminUserAction } from '../../api/admin';
+import { type AdminUserDetail, useAdminAppCodeViaBot, useAdminUser, useAdminUserAction } from '../../api/admin';
 import { useAppPlans } from '../../api/app';
 import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
 import { dateTime, money } from '../../api/cabinet';
@@ -21,6 +21,7 @@ import {
   Select,
   Skeleton,
   Stat,
+  Switch,
   Table,
   Textarea,
   useToast,
@@ -96,6 +97,8 @@ export function AdminUserPage() {
   const [addonMonths, setAddonMonths] = useState(6);
   const [addonId, setAddonId] = useState('archive');
   const revokePoint = useAdminUserAction<{ userId: string; id: string }>('revokeAppPoint');
+  const codeViaBotUser = useAdminUserAction<{ userId: string; enabled: boolean }>('appCodeViaBot');
+  const codeViaBotGlobal = useAdminAppCodeViaBot();
   const appPlans = useAppPlans();
   const addonList = appPlans.data?.addons ?? [];
   const addonTerms = Object.keys(addonList.find(a => a.id === addonId)?.prices ?? { 6: 0, 12: 0 }).map(Number).sort((a, b) => a - b);
@@ -534,6 +537,30 @@ export function AdminUserPage() {
             </Table>
           </details>
         ) : null}
+      </Card>
+
+      <Card>
+        <h3>Помощник ПВЗ — код клиента</h3>
+        <Switch
+          checked={user.profile?.app_code_via_bot_off !== true}
+          disabled={codeViaBotUser.isPending}
+          onChange={e =>
+            run(
+              codeViaBotUser,
+              { userId, enabled: e.target.checked },
+              e.target.checked
+                ? 'Код клиента этому аккаунту — через подтверждение в боте (как у всех)'
+                : 'Код клиента этому аккаунту выдаётся напрямую, без бота',
+            )
+          }
+          description={
+            codeViaBotGlobal.data?.enabled === false
+              ? 'Сейчас общий переключатель «Код клиента только через Telegram-бот» (раздел «Программа») выключен — код у всех выдаётся напрямую. Это исключение сработает, когда общий переключатель включат.'
+              : 'Выключите для владельца без Telegram: при включённом общем переключателе его компьютеры получают код напрямую, без подтверждения в боте. Программа узнаёт об этом сама при следующем запросе, обновление не нужно.'
+          }
+        >
+          Подтверждение кода клиента через Telegram-бот
+        </Switch>
       </Card>
 
       <Card>

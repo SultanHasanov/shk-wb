@@ -336,6 +336,37 @@ describe('флаг app_code_via_bot', () => {
   });
 });
 
+describe('индивидуальное исключение user_profiles.app_code_via_bot_off', () => {
+  const offProfile = (url: string) =>
+    url.includes('user_profiles?user_id=') ? { body: [{ display_name: 'O', phone: '', app_code_via_bot_off: true }] } : undefined;
+
+  it('client-qr при включённом флаге выдаёт напрямую, code-request — 409 CODE_VIA_BOT_OFF', async () => {
+    mockNetwork(url =>
+      offProfile(url)
+      || (url.includes('rpc/app_code_once') ? { body: { qrText: '1_12345_123456_1', billing: { via: 'account' }, replayed: false } } : undefined));
+    const direct = response();
+    await handler(request('client-qr', { method: 'POST', body: { sid: '1', requestId: APPROVAL } }), direct);
+    expect(direct.statusCode).toBe(200);
+    expect(direct.body).toMatchObject({ code: 12345 });
+
+    const req = response();
+    await handler(request('code-request', { method: 'POST', body: { sid: '191607973', cell: '12' } }), req);
+    expect(req.statusCode).toBe(409);
+    expect(req.body).toMatchObject({ code: 'CODE_VIA_BOT_OFF' });
+  });
+
+  it('/me отдаёт flags.codeViaBot=false, хотя глобальный флаг включён', async () => {
+    mockNetwork(url =>
+      offProfile(url)
+      || (url.includes('user_telegram_identities?user_id=') || url.includes('license_keys') || url.includes('sticker_access_codes') || url.includes('app_points') ? { body: [] } : undefined));
+    expect(await flags.codeViaBotEnabled()).toBe(true);
+    const res = response();
+    await handler(request('me'), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ flags: { codeViaBot: false } });
+  });
+});
+
 describe('client-error (аварийный экран программы)', () => {
   it('принимает отчёт без входа и пишет в журнал без ПДн', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

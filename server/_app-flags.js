@@ -57,7 +57,34 @@ async function setCodeViaBot(enabled) {
   return { enabled: enabled === true };
 }
 
+// Индивидуальное исключение: user_profiles.app_code_via_bot_off = true → этому аккаунту код выдаётся напрямую
+// даже при включённом глобальном флаге (владелец без Telegram). Ставится из админки на странице пользователя.
+async function codeViaBotOffForUser(userId) {
+  if (!userId) return false;
+  try {
+    const rows = await supabaseFetch(`user_profiles?user_id=eq.${encodeURIComponent(userId)}&select=app_code_via_bot_off&limit=1`);
+    return rows.length ? rows[0].app_code_via_bot_off === true : false;
+  } catch {
+    return false;
+  }
+}
+
+/** Итог для конкретного аккаунта: глобальный флаг включён И у аккаунта нет индивидуального исключения. */
+async function codeViaBotEnabledFor(userId) {
+  if (!await codeViaBotEnabled()) return false;
+  return !(await codeViaBotOffForUser(userId));
+}
+
+async function setCodeViaBotOffForUser(userId, off) {
+  await supabaseFetch('user_profiles', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ user_id: userId, app_code_via_bot_off: off === true, updated_at: new Date().toISOString() }),
+  });
+  return { off: off === true };
+}
+
 /** Для тестов: забыть кэшированные значения. */
 function clearFlagCache() { cache.clear(); }
 
-module.exports = { readFlag, writeFlag, clearFlagCache, crackFallbackEnabled, crackFallbackState, setCrackFallback, codeViaBotEnabled, codeViaBotState, setCodeViaBot };
+module.exports = { readFlag, writeFlag, clearFlagCache, crackFallbackEnabled, crackFallbackState, setCrackFallback, codeViaBotEnabled, codeViaBotState, setCodeViaBot, codeViaBotOffForUser, codeViaBotEnabledFor, setCodeViaBotOffForUser };

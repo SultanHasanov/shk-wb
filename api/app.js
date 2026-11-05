@@ -13,7 +13,7 @@ const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
 const messages = require('../server/_app-messages');
 const { appFreeMode } = require('../server/_app-free');
-const { crackFallbackEnabled, codeViaBotEnabled } = require('../server/_app-flags');
+const { crackFallbackEnabled, codeViaBotEnabled, codeViaBotEnabledFor } = require('../server/_app-flags');
 const { buildClientQr } = require('../server/_wb-code');
 const { crackClientQr } = require('../server/_wb-crack');
 const wallet = require('../server/_wallet');
@@ -60,11 +60,13 @@ async function ownerAllows(req, key) {
 
 // Код клиента только через подтверждение владельца в боте (флаг app_code_via_bot): вошедшему аккаунту прямой
 // путь закрыт — 403 APPROVAL_REQUIRED (старые версии программы покажут этот текст тостом). Ключ WBPK без входа
-// владельца не имеет — работает как раньше. Возвращает false, если ответ уже отправлен.
+// владельца не имеет — работает как раньше. Аккаунт с индивидуальным исключением (user_profiles.app_code_via_bot_off,
+// ставится в админке) тоже идёт напрямую. Возвращает false, если ответ уже отправлен.
 async function approvalRequired(req, res) {
   if (!await codeViaBotEnabled()) return true;
   const user = await optionalUser(req).catch(() => null);
   if (!user) return true;
+  if (!await codeViaBotEnabledFor(user.id)) return true;
   res.status(403).json({ error: 'Код клиента выдаёт владелец через Telegram-бот. Обновите программу до версии 1.11 или новее.', code: 'APPROVAL_REQUIRED' });
   return false;
 }
@@ -446,7 +448,7 @@ module.exports = async function handler(req, res) {
     // --- Код клиента с подтверждением владельца в Telegram (server/_code-approvals.js) ---
     if (action === 'code-request' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-code-request', limit: 30, windowSeconds: 600, key: device.id })) return;
-      if (!await codeViaBotEnabled()) return res.status(409).json({ error: 'Подтверждение через бот выключено — код выдаётся напрямую', code: 'CODE_VIA_BOT_OFF' });
+      if (!await codeViaBotEnabledFor(user.id)) return res.status(409).json({ error: 'Подтверждение через бот выключено — код выдаётся напрямую', code: 'CODE_VIA_BOT_OFF' });
       if (permissions.isDenied(device, 'act.client_qr')) return res.status(403).json({ error: 'Владелец закрыл QR-код клиента на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.client_qr' });
       const b = body(req);
       const sid = String(b.sid || '').replace(/\D/g, '');

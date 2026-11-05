@@ -213,6 +213,8 @@ export type AdminUserDetail = {
     display_name: string | null;
     phone: string | null;
     payer_status: string | null;
+    /** Индивидуальное исключение: код клиента напрямую даже при включённом флаге app_code_via_bot. */
+    app_code_via_bot_off?: boolean | null;
   } | null;
   telegram: { username: string | null; first_name: string | null } | null;
   codes: AdminAccessCode[];

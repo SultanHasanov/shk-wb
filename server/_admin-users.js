@@ -7,6 +7,7 @@ const {
   createCellLicense, createProgramKey, createStickerAccessCode, isUuid, recordAdminAction,
 } = require('./_admin-grants');
 const { ADDONS, PLANS, TERMS, addonPrice, isAddon, isPlan, isTerm, orderSnapshot } = require('./_app-plans');
+const { setCodeViaBotOffForUser } = require('./_app-flags');
 
 /**
  * Раздел «Пользователи» админки.
@@ -448,6 +449,15 @@ module.exports = async function handler(req, res) {
       });
       await recordAdminAction(req, 'profile', userId, patch);
       return res.json(rows[0] || {});
+    }
+    // Индивидуальное исключение из подтверждения кода клиента через бот: {enabled:false} → код напрямую
+    // даже при включённом глобальном флаге app_code_via_bot (владелец без Telegram).
+    if (req.method === 'POST' && action === 'appCodeViaBot') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const off = req.body?.enabled === false;
+      await setCodeViaBotOffForUser(userId, off);
+      await recordAdminAction(req, 'appCodeViaBot', userId, { enabled: !off });
+      return res.json({ enabled: !off });
     }
     if (req.method === 'POST' && (action === 'block' || action === 'unblock')) {
       if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
