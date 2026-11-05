@@ -2457,6 +2457,11 @@ const BONUS_USAGE = [
   'Пример: <code>/bonus @ivanov 100 За помощь с тестом</code>',
 ].join('\n');
 
+// Подтверждения ждут в памяти процесса: state в telegram_generator_sessions ограничен CHECK-списком, а тут база
+// не нужна. Перезапуск бота просто делает кнопку устаревшей — денег это не касается.
+const BONUS_CONFIRM_TTL_MS = 15 * 60 * 1000;
+const pendingBonuses = new Map();
+
 function isBonusAdmin(telegramId) { return BONUS_ADMIN_IDS.has(String(telegramId)); }
 
 function parseBonusCommand(text) {
@@ -2506,7 +2511,8 @@ async function startBonus(from, chatId, parsed) {
   if (!targetUser) return sendMessage(chatId, `⚠️ У ${escapeHtml(bonusRecipientName(recipient))} ещё нет кабинета, начислять некуда. Пусть войдёт в боте через кнопку «🔐 Войти», затем повторите команду.`);
   const balance = await wallet.getBalanceKopecks(targetUser);
   const nonce = crypto.randomBytes(6).toString('hex');
-  await saveSession(from, chatId, 'bonus_confirm', { bonus: { nonce, targetUser, telegramId: recipient.telegram_user_id, chatId: recipient.chat_id, name: bonusRecipientName(recipient), kopecks: parsed.kopecks, note: parsed.note } });
+  for (const [key, item] of pendingBonuses) if (item.expiresAt <= Date.now()) pendingBonuses.delete(key);
+  pendingBonuses.set(nonce, { adminId: Number(from.id), expiresAt: Date.now() + BONUS_CONFIRM_TTL_MS, targetUser, telegramId: recipient.telegram_user_id, chatId: recipient.chat_id, name: bonusRecipientName(recipient), kopecks: parsed.kopecks, note: parsed.note });
   await sendMessage(chatId, [
     '<b>🎁 Начислить бонус?</b>',
     '',
@@ -2520,15 +2526,14 @@ async function startBonus(from, chatId, parsed) {
 }
 
 async function finishBonus(from, chatId, messageId, action, nonce) {
-  const session = await getSession(from.id);
-  const bonus = session?.state === 'bonus_confirm' ? session.draft?.bonus : null;
-  if (!bonus || bonus.nonce !== nonce) return showScreen(chatId, messageId, 'Это подтверждение устарело. Деньги не начислены, отправьте /bonus заново.', { reply_markup: MENU_KEYBOARD });
+  const bonus = pendingBonuses.get(nonce);
+  // Убираем сразу: второе нажатие не дойдёт до начисления, а при ошибке начисления команду отправляют заново.
+  pendingBonuses.delete(nonce);
+  if (!bonus || bonus.adminId !== Number(from.id) || bonus.expiresAt <= Date.now()) return showScreen(chatId, messageId, 'Это подтверждение устарело. Деньги не начислены, отправьте /bonus заново.', { reply_markup: MENU_KEYBOARD });
   if (action === 'no') {
-    await clearSession(from.id);
     return showScreen(chatId, messageId, 'Начисление отменено.', { reply_markup: MENU_KEYBOARD });
   }
   const result = await wallet.grantBonus({ userId: bonus.targetUser, kopecks: bonus.kopecks, eventKey: `admin_bonus:${nonce}`, note: bonus.note, adminTelegramId: from.id });
-  await clearSession(from.id);
   if (result.duplicate) return showScreen(chatId, messageId, 'Этот бонус уже начислен, повторно деньги не зачислялись.', { reply_markup: MENU_KEYBOARD });
   console.log(`bot bonus by ${from.id} to ${bonus.telegramId} ${bonus.kopecks} kopecks`);
   const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: MENU_KEYBOARD })
@@ -2880,4 +2885,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
