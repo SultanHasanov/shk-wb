@@ -7,6 +7,7 @@ const wallet = require('../../server/_wallet.js') as {
   affordableGenerations: (balanceRub: number) => number;
   topupBonus: (rub: number) => number;
   validTopup: (rub: number) => boolean;
+  grantBonus: (input: { userId: string; kopecks: number; eventKey: string }) => Promise<unknown>;
   formatRub: (rub: number) => string;
 };
 
@@ -37,6 +38,12 @@ describe('баланс в Telegram-боте', () => {
     expect(wallet.validTopup(25.5)).toBe(true);
     expect(wallet.validTopup(25.555)).toBe(false);
     expect(wallet.validTopup(50001)).toBe(false);
+  });
+
+  it('бонус нельзя начислить с неверной суммой или без ключа', async () => {
+    await expect(wallet.grantBonus({ userId: 'u', kopecks: 0, eventKey: 'k' })).rejects.toThrow('Неверные данные');
+    await expect(wallet.grantBonus({ userId: 'u', kopecks: -100, eventKey: 'k' })).rejects.toThrow('Неверные данные');
+    await expect(wallet.grantBonus({ userId: 'u', kopecks: 100, eventKey: '' })).rejects.toThrow('Неверные данные');
   });
 
   it('показывает, на сколько стикеров хватит, по лучшей цене', () => {

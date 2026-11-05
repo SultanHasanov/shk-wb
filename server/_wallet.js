@@ -86,6 +86,21 @@ async function walletSummary(userId, limit = 30) {
 }
 
 /**
+ * Бонус от администратора на баланс: запись журнала kind='bonus'. eventKey уникален —
+ * повторный вызов с тем же ключом денег не добавит (duplicate: true).
+ */
+async function grantBonus({ userId, kopecks, eventKey, note = '', adminTelegramId = null }) {
+  if (!userId || !eventKey || !Number.isSafeInteger(kopecks) || kopecks <= 0) throw new Error('Неверные данные бонуса');
+  const details = { ...(note ? { note } : {}), ...(adminTelegramId ? { by: Number(adminTelegramId) } : {}) };
+  const result = await supabaseFetch('rpc/wallet_move', {
+    method: 'POST',
+    body: JSON.stringify({ p_user: userId, p_kopecks: kopecks, p_kind: 'bonus', p_event_key: eventKey, p_details: details }),
+  });
+  if (!result?.ok) throw new Error('Бонус не начислен');
+  return { duplicate: Boolean(result.duplicate), balanceKopecks: Number(result.balance) };
+}
+
+/**
  * Купить с баланса. fields — колонки заказа для выдачи (range_quantity, renewal_target_key,
  * cell_print_*, license_iterations, app_plan…). Возвращает { ok:true, order, balanceKopecks }
  * или { ok:false, error:'INSUFFICIENT', balanceKopecks, missingKopecks }.
@@ -130,6 +145,6 @@ async function payWithWallet({ userId, productKind, fields = {}, priceRub, snaps
 
 module.exports = {
   MAX_TOPUP, MIN_TOPUP, TOPUP_AMOUNTS, TOPUP_BONUS_STEPS,
-  affordableGenerations, formatRub, generationCost, getBalanceKopecks, walletSummary, payWithWallet,
+  affordableGenerations, formatRub, generationCost, getBalanceKopecks, grantBonus, walletSummary, payWithWallet,
   topupBonus, topupBonusPercent, validTopup,
 };

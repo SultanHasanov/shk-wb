@@ -10,6 +10,9 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   mainMenuKeyboard: (signedIn: boolean) => {inline_keyboard: Array<Array<Record<string, any>>>};
   profileKeyboard: (options?: Record<string, boolean>) => {inline_keyboard: Array<Array<Record<string, any>>>};
   topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
+  isBonusAdmin: (telegramId: number) => boolean;
+  parseBonusCommand: (text: string) => Record<string, any> | null;
+  bonusNoticeText: (input: { kopecks: number; note?: string; balanceKopecks: number }) => string;
   topupAndBuyRow: (missing: number, then: string) => Array<Record<string, any>>;
   topupPurchaseLines: (input: { amount: number; bonus?: number; balance: number; missing: number }) => string[];
   noPointsView: (phone?: string) => { text: string; reply_markup: { inline_keyboard: Array<Array<Record<string, any>>> } };
@@ -161,6 +164,32 @@ describe('Telegram sticker generator bot', () => {
     const data = bot.topupAndBuyRow(1234.5, then)[0].callback_data;
     expect(Buffer.byteLength(data)).toBeLessThanOrEqual(64);
     expect(data).toBe(`tp:1235:${then}`);
+  });
+
+  it('бонус начисляет только админ по числовому ID', () => {
+    expect(bot.isBonusAdmin(439335621)).toBe(true);
+    expect(bot.isBonusAdmin(1751409240)).toBe(false);
+    expect(bot.isBonusAdmin(123)).toBe(false);
+  });
+
+  it('разбирает команду бонуса', () => {
+    expect(bot.parseBonusCommand('/menu')).toBeNull();
+    expect(bot.parseBonusCommand('/bonusx @ivanov 100')).toBeNull();
+    expect(bot.parseBonusCommand('/bonus')).toEqual({ ok: false, error: '' });
+    expect(bot.parseBonusCommand('/bonus @Ivan_ov 100 За тест')).toEqual({ ok: true, username: 'Ivan_ov', kopecks: 10000, note: 'За тест' });
+    expect(bot.parseBonusCommand('/bonus https://t.me/ivanov 99,50')).toEqual({ ok: true, username: 'ivanov', kopecks: 9950, note: '' });
+    expect(bot.parseBonusCommand('/bonus 439335621 1')).toEqual({ ok: true, telegramId: 439335621, kopecks: 100, note: '' });
+    for (const bad of ['/bonus @ivanov 0', '/bonus @ivanov 0.5', '/bonus @ivanov 10001', '/bonus @ivanov -5', '/bonus @ivanov сто', '/bonus @a! 100']) {
+      expect(bot.parseBonusCommand(bad)?.ok, bad).toBe(false);
+    }
+  });
+
+  it('уведомление о бонусе: сумма, баланс и экранированный комментарий', () => {
+    const text = bot.bonusNoticeText({ kopecks: 10000, note: '<b>тест</b>', balanceKopecks: 35050 }).replace(/\s/g, ' ');
+    expect(text).toContain('Вам начислен бонус');
+    expect(text).toContain('+100 ₽ зачислено на ваш счёт');
+    expect(text).toContain('350,50 ₽');
+    expect(text).toContain('&lt;b&gt;тест');
   });
 
   it('нет ПВЗ — понятный экран с повтором и входом под другим номером', () => {

@@ -2443,6 +2443,104 @@ async function handleMenu(from, chatId, item, messageId) {
   return showMainMenu(from, chatId, messageId);
 }
 
+// Начисление бонусов: /bonus <@ник | ссылка t.me | Telegram ID> <сумма> [комментарий]. Только эти Telegram ID.
+const BONUS_ADMIN_IDS = new Set(['439335621']);
+const MAX_BONUS_RUB = 10000;
+const BONUS_USAGE = [
+  '<b>🎁 Начислить бонус</b>',
+  '',
+  '<code>/bonus @ник сумма комментарий</code>',
+  '',
+  'Вместо ника можно указать ссылку t.me или Telegram ID. Комментарий необязателен, его увидит пользователь.',
+  `Сумма — от 1 до ${MAX_BONUS_RUB.toLocaleString('ru-RU')} ₽.`,
+  '',
+  'Пример: <code>/bonus @ivanov 100 За помощь с тестом</code>',
+].join('\n');
+
+function isBonusAdmin(telegramId) { return BONUS_ADMIN_IDS.has(String(telegramId)); }
+
+function parseBonusCommand(text) {
+  const match = /^\/bonus(?:@\w+)?(?:\s+(\S+))?(?:\s+(\S+))?(?:\s+([\s\S]+))?$/i.exec(String(text || '').trim());
+  if (!match) return null;
+  if (!match[1] || !match[2]) return { ok: false, error: '' };
+  const who = match[1].replace(/^https?:\/\//i, '').replace(/^t\.me\//i, '').replace(/^@/, '').replace(/\/+$/, '');
+  const target = /^\d{4,15}$/.test(who) ? { telegramId: Number(who) }
+    : /^[A-Za-z0-9_]{4,32}$/.test(who) ? { username: who } : null;
+  if (!target) return { ok: false, error: 'Не понял, кому начислить: нужен @ник, ссылка t.me или Telegram ID.' };
+  if (!/^\d{1,5}(?:[.,]\d{1,2})?$/.test(match[2])) return { ok: false, error: 'Сумма должна быть числом, например 100 или 99,50.' };
+  const kopecks = Math.round(Number(match[2].replace(',', '.')) * 100);
+  if (kopecks < 100 || kopecks > MAX_BONUS_RUB * 100) return { ok: false, error: `Сумма — от 1 до ${MAX_BONUS_RUB.toLocaleString('ru-RU')} ₽.` };
+  return { ok: true, ...target, kopecks, note: String(match[3] || '').trim().slice(0, 200) };
+}
+
+async function findBonusRecipient({ telegramId, username }) {
+  const fields = 'select=telegram_user_id,chat_id,username,first_name,last_name';
+  const rows = telegramId
+    ? await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${telegramId}&${fields}&limit=1`)
+    // В ilike символ _ — подстановочный, поэтому точное совпадение проверяем ещё раз здесь.
+    : (await supabaseFetch(`telegram_bot_subscribers?username=ilike.${encodeURIComponent(username)}&${fields}&limit=5`))
+      .filter(row => String(row.username || '').toLowerCase() === username.toLowerCase());
+  return rows[0] || null;
+}
+
+function bonusRecipientName(row) {
+  const name = [row.first_name, row.last_name].filter(Boolean).join(' ');
+  return [name, row.username ? `@${row.username}` : ''].filter(Boolean).join(' ') || `ID ${row.telegram_user_id}`;
+}
+
+function bonusNoticeText({ kopecks, note, balanceKopecks }) {
+  return [
+    '<b>🎁 Вам начислен бонус!</b>',
+    '',
+    `+${wallet.formatRub(kopecks / 100)} зачислено на ваш счёт.`,
+    ...(note ? [`Комментарий: ${escapeHtml(note)}`] : []),
+    `💰 На балансе: <b>${wallet.formatRub(balanceKopecks / 100)}</b>`,
+  ].join('\n');
+}
+
+async function startBonus(from, chatId, parsed) {
+  if (!parsed.ok) return sendMessage(chatId, parsed.error ? `⚠️ ${parsed.error}\n\n${BONUS_USAGE}` : BONUS_USAGE);
+  const recipient = await findBonusRecipient(parsed);
+  if (!recipient) return sendMessage(chatId, '⚠️ Такого пользователя нет среди тех, кто запускал бота. Проверьте ник или укажите Telegram ID.');
+  const targetUser = await findUser(recipient.telegram_user_id);
+  if (!targetUser) return sendMessage(chatId, `⚠️ У ${escapeHtml(bonusRecipientName(recipient))} ещё нет кабинета, начислять некуда. Пусть войдёт в боте через кнопку «🔐 Войти», затем повторите команду.`);
+  const balance = await wallet.getBalanceKopecks(targetUser);
+  const nonce = crypto.randomBytes(6).toString('hex');
+  await saveSession(from, chatId, 'bonus_confirm', { bonus: { nonce, targetUser, telegramId: recipient.telegram_user_id, chatId: recipient.chat_id, name: bonusRecipientName(recipient), kopecks: parsed.kopecks, note: parsed.note } });
+  await sendMessage(chatId, [
+    '<b>🎁 Начислить бонус?</b>',
+    '',
+    `Кому: ${escapeHtml(bonusRecipientName(recipient))} (ID <code>${recipient.telegram_user_id}</code>)`,
+    `Сумма: <b>+${wallet.formatRub(parsed.kopecks / 100)}</b>`,
+    `Сейчас на балансе: ${wallet.formatRub(balance / 100)}`,
+    ...(parsed.note ? [`Комментарий: ${escapeHtml(parsed.note)}`] : []),
+  ].join('\n'), { reply_markup: choiceKeyboard([
+    [{ text: '✅ Начислить', callback_data: `bn:ok:${nonce}` }, { text: 'Отмена', callback_data: `bn:no:${nonce}` }],
+  ]) });
+}
+
+async function finishBonus(from, chatId, messageId, action, nonce) {
+  const session = await getSession(from.id);
+  const bonus = session?.state === 'bonus_confirm' ? session.draft?.bonus : null;
+  if (!bonus || bonus.nonce !== nonce) return showScreen(chatId, messageId, 'Это подтверждение устарело. Деньги не начислены, отправьте /bonus заново.', { reply_markup: MENU_KEYBOARD });
+  if (action === 'no') {
+    await clearSession(from.id);
+    return showScreen(chatId, messageId, 'Начисление отменено.', { reply_markup: MENU_KEYBOARD });
+  }
+  const result = await wallet.grantBonus({ userId: bonus.targetUser, kopecks: bonus.kopecks, eventKey: `admin_bonus:${nonce}`, note: bonus.note, adminTelegramId: from.id });
+  await clearSession(from.id);
+  if (result.duplicate) return showScreen(chatId, messageId, 'Этот бонус уже начислен, повторно деньги не зачислялись.', { reply_markup: MENU_KEYBOARD });
+  console.log(`bot bonus by ${from.id} to ${bonus.telegramId} ${bonus.kopecks} kopecks`);
+  const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: MENU_KEYBOARD })
+    .then(() => true)
+    .catch(error => { console.warn('Бонус: уведомление не доставлено', error?.message || error); return false; });
+  return showScreen(chatId, messageId, [
+    `✅ Начислено <b>+${wallet.formatRub(bonus.kopecks / 100)}</b>: ${escapeHtml(bonus.name)}`,
+    `На балансе теперь: ${wallet.formatRub(result.balanceKopecks / 100)}`,
+    delivered ? 'Пользователь получил уведомление.' : '⚠️ Деньги начислены, но уведомление не доставлено: возможно, пользователь заблокировал бота.',
+  ].join('\n'), { reply_markup: MENU_KEYBOARD });
+}
+
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
   if (!chatId) return;
@@ -2451,6 +2549,12 @@ async function handleCallback(callback) {
   const data = String(callback.data || '');
   const messageId = callback.message?.message_id;
   if (data.startsWith('menu:')) { answerCallbackQuery(callback.id).catch(() => {}); await handleMenu(from, chatId, data.slice('menu:'.length), messageId); return; }
+  const bonusAction = /^bn:(ok|no):([0-9a-f]{12})$/.exec(data);
+  if (bonusAction) {
+    answerCallbackQuery(callback.id).catch(() => {});
+    if (isBonusAdmin(from.id)) await finishBonus(from, chatId, messageId, bonusAction[1], bonusAction[2]);
+    return;
+  }
   if (data === 'rvbuy:list') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewPaywall(from, chatId, undefined, messageId); return; }
   // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
   if (data === 'topup:home' || data === 'code:buy') { answerCallbackQuery(callback.id).catch(() => {}); await showTopup(from, chatId, messageId); return; }
@@ -2619,6 +2723,10 @@ async function handleMessage(message) {
     // Одно сообщение: приветствие + инлайн-меню. Постоянную клавиатуру не шлём — «☰ Меню» есть на каждом экране.
     return showMainMenu(from, chatId, undefined, { greet: true, invited });
   }
+  if (isBonusAdmin(from.id)) {
+    const bonusCommand = parseBonusCommand(text);
+    if (bonusCommand) return startBonus(from, chatId, bonusCommand);
+  }
   if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(chatId);
   if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
@@ -2772,4 +2880,4 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
