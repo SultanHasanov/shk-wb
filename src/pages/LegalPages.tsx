@@ -78,9 +78,7 @@ export function OfferPage() {
     >
       <h2>1. Исполнитель</h2>
       <p>
-        Самозанятый Хасанов Султан Ярагиевич, ИНН 200204858850. Почта:{' '}
-        <a href="mailto:sul987@mail.ru">sul987@mail.ru</a>, телефон:{' '}
-        <a href="tel:+79667283100">+7 966 728-31-00</a>.
+        Исполнитель: —, ИНН: —. Почта: —, телефон: —.
       </p>
 
       <h2>2. Предмет договора</h2>
@@ -127,7 +125,7 @@ export function OfferPage() {
 
       <h2>8. Возвраты</h2>
       <p>
-        Обращения направляются на <a href="mailto:sul987@mail.ru">sul987@mail.ru</a> или через{' '}
+        Обращения направляются через{' '}
         <Link className="accent" to="/contacts">
           форму на странице контактов
         </Link>{' '}
@@ -137,7 +135,7 @@ export function OfferPage() {
 
       <h2>9. Контакты</h2>
       <p>
-        Чеченская Республика, Ачхой-Мартановский район, село Давыденко. Telegram:{' '}
+        Адрес: —. Telegram:{' '}
         <a href="https://t.me/roma_denosov" target="_blank" rel="noopener noreferrer">
           @roma_denosov
         </a>
@@ -157,7 +155,7 @@ export function PrivacyPage() {
     <LegalLayout
       title="Политика конфиденциальности"
       updated="24 августа 2026 года"
-      intro="Оператор: Хасанов Султан Ярагиевич, ИНН 200204858850."
+      intro="Оператор: —, ИНН: —."
     >
       <h2>Данные и цели</h2>
       <p>
@@ -193,8 +191,7 @@ export function PrivacyPage() {
 
       <h2>Права пользователя</h2>
       <p>
-        Запрос об обработке или удалении данных можно направить на{' '}
-        <a href="mailto:sul987@mail.ru">sul987@mail.ru</a> либо через{' '}
+        Запрос об обработке или удалении данных можно направить через{' '}
         <Link className="accent" to="/contacts">
           форму обращения
         </Link>
