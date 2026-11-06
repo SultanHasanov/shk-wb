@@ -4,6 +4,7 @@ const { sendApiError, supabaseFetch } = require('../server/_supabase');
 const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
 const { sendMessage } = require('../server/_telegram-api');
 const { forgetSiteUser } = require('../server/_telegram-user-cache');
+const { callBot } = require('../server/_bot-rpc');
 const { identitiesForUser, unlinkIdentity } = require('../server/_oauth-login');
 const {
   deleteAuthUser,
@@ -1036,6 +1037,8 @@ module.exports = async function handler(req, res) {
         method: 'DELETE',
       });
       forgetSiteUser(user.id);
+      // Бот живёт отдельным процессом (узел в Германии) и держит связку в памяти до 10 минут.
+      await callBot('forgetSiteUser', user.id).catch(error => console.warn('bot cache reset after unlink failed', error.message));
       return res.status(204).end();
     }
     if (a === 'oauth' && req.method === 'DELETE') {

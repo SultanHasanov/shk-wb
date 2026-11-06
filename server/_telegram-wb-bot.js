@@ -1933,6 +1933,9 @@ async function showIndividualOrders(from, chatId) {
 }
 
 async function notifyMiniAppAuthorized(telegramId) {
+  // Связку записал сайт (другой процесс): узел бота мог только что закешировать «связки нет» —
+  // иначе меню и кнопки ещё минуту отвечают «Кабинет не подключён».
+  userCache.forgetTelegramUser(telegramId);
   // Пришёл по приглашению и только что создал кабинет — привязываем к пригласившему.
   await bindTelegramReferral(telegramId).catch(error => console.warn('Telegram referral bind failed', error.message));
   const session = await getSession(telegramId);
@@ -2290,6 +2293,8 @@ async function captureReferral(from, rawCode) {
  * что переход был до регистрации и не раньше 30 дней) и сообщаем пригласившему в бот.
  */
 async function bindTelegramReferral(telegramId, userId) {
+  // Вход виджетом на сайте: связка записана там, кеш узла бота об этом не знает.
+  userCache.forgetTelegramUser(telegramId);
   const uid = userId || await findUser(telegramId);
   if (!uid) return false;
   const rows = await supabaseFetch(`telegram_referral_captures?telegram_user_id=eq.${Number(telegramId)}&bound_user_id=is.null&select=referral_code,captured_at&limit=1`);
@@ -2885,4 +2890,8 @@ async function handleTelegramUpdate(req, res) {
   return res.status(200).json({ ok: true });
 }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+/** Сайт отвязал/перепривязал Telegram у аккаунта — узел бота держит связку в памяти до 10 минут, сбрасываем по RPC. */
+function forgetSiteUser(userId) { userCache.forgetSiteUser(userId); return true; }
+function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramId); return true; }
+
+module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
