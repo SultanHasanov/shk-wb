@@ -2503,8 +2503,8 @@ async function startBonus(from, chatId, parsed) {
   if (!parsed.ok) return sendMessage(chatId, parsed.error ? `⚠️ ${parsed.error}\n\n${BONUS_USAGE}` : BONUS_USAGE);
   const recipient = await findBonusRecipient(parsed);
   if (!recipient) return sendMessage(chatId, '⚠️ Такого пользователя нет среди тех, кто запускал бота. Проверьте ник или укажите Telegram ID.');
-  const targetUser = await findUser(recipient.telegram_user_id);
-  if (!targetUser) return sendMessage(chatId, `⚠️ У ${escapeHtml(bonusRecipientName(recipient))} ещё нет кабинета, начислять некуда. Пусть откроет в боте «👤 Профиль» (кабинет создастся сам), затем повторите команду.`);
+  // Кабинета ещё нет — создаём сам, как при первом действии в боте: подписчик известен из telegram_bot_subscribers.
+  const targetUser = await ensureUser({ id: recipient.telegram_user_id, username: recipient.username, first_name: recipient.first_name, last_name: recipient.last_name });
   const balance = await wallet.getBalanceKopecks(targetUser);
   const nonce = crypto.randomBytes(6).toString('hex');
   for (const [key, item] of pendingBonuses) if (item.expiresAt <= Date.now()) pendingBonuses.delete(key);
