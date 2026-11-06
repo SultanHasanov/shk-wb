@@ -116,7 +116,10 @@ describe('Telegram sticker generator bot', () => {
     expect(menu.find(button => button.web_app)?.web_app.url).toMatch(/^https:\/\//);
     expect(menu.some(button => button.callback_data === 'menu:profile')).toBe(true);
     expect(menu.some(button => button.callback_data === 'menu:ref')).toBe(true);
-    expect(bot.mainMenuKeyboard(false).inline_keyboard.flat().some(button => button.callback_data === 'menu:login')).toBe(true);
+    // Кабинет создаётся сам при первом действии — отдельной кнопки «Войти» нет даже без связки.
+    const guest = bot.mainMenuKeyboard(false).inline_keyboard.flat();
+    expect(guest.some(button => button.callback_data === 'menu:login')).toBe(false);
+    expect(guest.some(button => button.callback_data === 'menu:profile')).toBe(true);
     // Постоянная клавиатура — только быстрый возврат, всё остальное в инлайн-меню.
     expect(bot.HOME_KEYBOARD.keyboard.flat().map(button => button.text)).toEqual(['☰ Меню', '🏷 Стикеры и QR']);
   });

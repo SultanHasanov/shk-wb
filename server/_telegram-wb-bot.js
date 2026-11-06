@@ -10,7 +10,7 @@ const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENS
 const { buildClientQr } = require('./_wb-code');
 const approvals = require('./_code-approvals');
 const account = require('./_app-account');
-const { findIdentity, identityForUser, saveIdentity, telegramLabel } = require('./_telegram-identity');
+const { ensureTechnicalAccount, findIdentity, identityForUser, saveIdentity, telegramLabel } = require('./_telegram-identity');
 const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
@@ -119,6 +119,19 @@ async function findUser(telegramId) {
   if (cached) return cached.userId;
   const rows = await supabaseFetch(`user_telegram_identities?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=user_id&limit=1`);
   return userCache.remember(telegramId, rows[0]?.user_id || null);
+}
+
+/**
+ * Кабинет для этого Telegram — создаётся сам при первом действии (технический аккаунт, как через Mini App).
+ * Бот работает без входа на сайт; настоящий кабинет привязывается по желанию из профиля или «Вход в кабинет».
+ */
+async function ensureUser(from) {
+  const known = await findUser(from.id);
+  if (known) return known;
+  const { userId, created } = await ensureTechnicalAccount(from);
+  userCache.remember(from.id, userId);
+  if (created) await bindTelegramReferral(from.id, userId).catch(error => console.warn('Telegram referral bind failed', error.message));
+  return userId;
 }
 
 // Сессия мастера в памяти процесса: один процесс, все писатели — здесь же (afterWalletTopup тоже идёт
@@ -312,10 +325,9 @@ function mainMenuKeyboard(signedIn) {
     [{ text: '🏷 Стикеры и QR для коробок', callback_data: 'menu:stickers' }],
     [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
     [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
-    [signedIn
-      ? { text: '👤 Профиль', callback_data: 'menu:profile' }
-      : { text: '🔐 Войти', callback_data: 'menu:login' },
-    { text: '🎁 +10% за друга', callback_data: 'menu:ref' }],
+    // Кабинет создаётся сам при первом действии — отдельной кнопки «Войти» нет; привязка настоящего
+    // кабинета с сайта — в профиле («Подключить основной кабинет»). signedIn оставлен для совместимости.
+    [{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🎁 +10% за друга', callback_data: 'menu:ref' }],
     [{ text: '📣 Канал', url: CHANNEL_URL, style: 'success' }, { text: '🌐 Сайт', web_app: { url: publicUrl('/') }, style: 'primary' }],
     [{ text: '🛡 Наш VPN', url: VPN_URL }, { text: '🆘 Поддержка', callback_data: 'menu:support' }],
   ]);
@@ -359,7 +371,7 @@ async function showMainMenu(from, chatId, messageId, { greet = false, invited = 
       'Всё — в меню ниже.',
     ]
     : [notice || '<b>Главное меню</b>'];
-  if (invited) lines.push('', 'Вас пригласил коллега — нажмите «🔐 Войти».');
+  if (invited) lines.push('', 'Вас пригласил коллега — откройте «👤 Профиль», и приглашение засчитается.');
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
 }
 
@@ -569,8 +581,7 @@ async function handleClientCode(from, chatId, sid) {
     await sendPhoto(chatId, clientQrUrl(freeQr), { caption: unlimitedLine(from.id) });
     return;
   }
-  const userId = await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  const userId = await ensureUser(from);
   // Каждый ввод SID — новая платная операция, даже если этот SID уже вводили сегодня.
   const { qrText } = buildClientQr(sid);
   // 1) квота тарифа или пакет подборов — без ПК (p_device = null, via = 'bot'); нет → 2) баланс
@@ -675,8 +686,7 @@ async function afterWbReady(from, chatId) {
 
 /** «Найти ID в боте»: нужен вход в кабинет WB (как для отзывов), затем запрос телефона/ячейки. */
 async function startClientSearch(from, chatId, messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы получить QR после поиска, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  const userId = await ensureUser(from);
   const connection = await getWbConnection(from.id);
   if (connection?.session?.token && connection.state === 'ready') return promptClientQuery(from, chatId, messageId);
   await saveSession(from, chatId, 'await_wb_for_search', { userId });
@@ -907,7 +917,6 @@ async function wizardBack(from, chatId, session, messageId) {
 function miniAppKeyboard() {
   return choiceKeyboard([
     [{ text: 'У меня уже есть кабинет', web_app: { url: publicUrl('/telegram-account') } }],
-    [{ text: 'Создать кабинет через Telegram', web_app: { url: publicUrl('/?auth=login') } }],
     [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
     MENU_ROW,
   ]);
@@ -967,8 +976,7 @@ const OFFER_LINE = `Нажимая «Перейти к оплате», вы пр
  * then — что купить после зачисления (afterWalletTopup), screenId — экран, который после оплаты станет «Готово».
  */
 async function startTopupPayment(from, chatId, amount, then, screenId, missing = null) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const userId = await ensureUser(from);
   const bonus = wallet.topupBonus(amount);
   let payment;
   try {
@@ -1033,8 +1041,7 @@ async function consumeCodeAttempt(telegramId) {
  * чтобы после привязки кода сразу вернуться к подтверждению, а не начинать заново.
  */
 async function askAccessCode(from, chatId, draft = {}) {
-  const userId = draft.userId || await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App — код привяжется к вашему кабинету.'); return; }
+  const userId = draft.userId || await ensureUser(from);
   await saveSession(from, chatId, 'await_access_code', { ...draft, userId });
   await sendMessage(chatId, '<b>Введите код доступа</b>\n\nОтправьте код сообщением — например, <code>123456</code>. Генерации из кода добавятся к вашему остатку.', { reply_markup: choiceKeyboard([[{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
 }
@@ -1296,21 +1303,18 @@ function wizardNonce() { return String(crypto.randomInt(100000, 1000000)); }
 
 /** messageId — сообщение, которое превращается в мастер (например, главное меню). Без него — новое сообщение. */
 async function startGeneration(from, chatId, messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Этот Telegram ещё не привязан к аккаунту. Войдите через Mini App — после привязки эта кнопка исчезнет.'); return; }
+  const userId = await ensureUser(from);
   await renderWizard(from, chatId, 'choose_kind', { userId, nonce: wizardNonce() }, messageId);
 }
 
 async function startForCategory(from, chatId, category) {
-  const userId = await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Сначала войдите через Mini App — бот генерирует по вашим пакетам генераций.'); return; }
+  const userId = await ensureUser(from);
   await renderWizard(from, chatId, 'choose_mode', { userId, category, nonce: wizardNonce() });
 }
 
 /** Стикер по уже известному номеру (с фото или из сообщения): сразу на подтверждение. */
 async function startWithCode(from, chatId, code, messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) { await sendLoginPrompt(from, chatId, 'Чтобы сделать стикер, войдите через Telegram — баланс хранится в кабинете.'); return; }
+  const userId = await ensureUser(from);
   await requestConfirmation(from, chatId, { userId, category: 'product', mode: 'custom', code, nonce: wizardNonce() }, messageId);
 }
 
@@ -1430,11 +1434,7 @@ function dayMonthShort(value) {
 
 /** Профиль: деньги и что куплено — по строке на каждое. */
 async function showProfile(from, chatId, messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) {
-    await sendLoginPrompt(from, chatId, '<b>Кабинет не подключён</b>\nВойдите через Telegram — кабинет создастся сам.');
-    return;
-  }
+  const userId = await ensureUser(from);
   const id = encodeURIComponent(userId);
   const [codes, balance, ent, cellKeys, free, technical] = await Promise.all([
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${id}&active=eq.true&select=generation_limit,generation_used`),
@@ -1483,11 +1483,7 @@ function reviewFilterKeyboard() {
  * then — какой отзыв раскрыть сразу после пополнения ('rv:<фильтр>:<стр>:<№>').
  */
 async function showReviewPaywall(from, chatId, reason, messageId, then) {
-  const userId = await findUser(from.id);
-  if (!userId) {
-    await sendLoginPrompt(from, chatId, 'Чтобы узнать, кто поставил оценку, войдите через Telegram — кабинет создастся сам.');
-    return;
-  }
+  const userId = await ensureUser(from);
   const [balance, free, { price, club }] = await Promise.all([walletRub(userId), helperFreeText(), reviewPrice(from.id)]);
   const text = [
     `<b>👤 Кто поставил оценку — ${wallet.formatRub(price)}</b>`,
@@ -1949,8 +1945,7 @@ async function notifyMiniAppAuthorized(telegramId) {
 const LOGIN_FOR_WALLET = 'Баланс хранится в кабинете shk-wb.ru. Войдите через Telegram — это пара секунд, кабинет создастся сам.';
 
 async function showTopup(from, chatId, messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const userId = await ensureUser(from);
   const balance = await walletRub(userId);
   const text = [
     '<b>💰 Пополнение</b>',
@@ -1965,8 +1960,7 @@ async function showTopup(from, chatId, messageId) {
 }
 
 async function askTopupAmount(from, chatId, messageId, error) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const userId = await ensureUser(from);
   const id = await showScreen(chatId, messageId, `${error ? `⚠️ ${error}\n\n` : ''}<b>Своя сумма</b>\nОтправьте сумму сообщением: от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`, { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'topup:home' }]]) });
   await saveSession(from, chatId, 'await_topup_amount', { userId, msgId: id });
 }
@@ -2078,8 +2072,7 @@ async function resolveShopItem(userId, parts) {
 
 /** Экран магазина по callback_data `shop:…`. */
 async function showShop(from, chatId, messageId, parts) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const userId = await ensureUser(from);
   const balance = await walletRub(userId);
   const balanceLine = `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`;
   const back = data => [{ text: '⬅️ Назад', callback_data: data }];
@@ -2205,8 +2198,7 @@ async function showShopConfirm(from, chatId, messageId, userId, parts, error) {
 
 /** screenId — где показывать ход оплаты, если не там же, где кнопка (автопокупка после пополнения). */
 async function payShopItem(from, chatId, messageId, nonce, parts, screenId = messageId) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, LOGIN_FOR_WALLET);
+  const userId = await ensureUser(from);
   const item = await resolveShopItem(userId, parts);
   if (item.error) return showShopConfirm(from, chatId, screenId, userId, parts);
   // id экрана с кнопкой, а не screenId: повторное уведомление о том же пополнении не купит второй раз
@@ -2320,8 +2312,7 @@ async function bindTelegramReferral(telegramId, userId) {
 }
 
 async function showReferrals(from, chatId, messageId, notice) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendLoginPrompt(from, chatId, `<b>👥 Пригласить друга — ${REFERRAL_PERCENT}%</b>\nВойдите через Telegram — бот покажет вашу ссылку.`);
+  const userId = await ensureUser(from);
   const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
   const [invited, links] = await Promise.all([
     supabaseFetch(`referral_attributions?referrer_user_id=eq.${encodeURIComponent(userId)}&select=invited_user_id`).catch(() => []),
@@ -2444,7 +2435,7 @@ async function handleMenu(from, chatId, item, messageId) {
   if (item === 'support') return showSupport(chatId, messageId);
   if (item === 'ref') return showReferrals(from, chatId, messageId);
   if (item === 'help') return showHelp(chatId, messageId);
-  if (item === 'login') return sendLoginPrompt(from, chatId, '<b>Вход в кабинет</b>\n\nВойдите через Telegram — кабинет shk-wb.ru создастся сам. Если вы уже покупали на сайте, выберите «У меня уже есть кабинет».');
+  if (item === 'login') return sendLoginPrompt(from, chatId, '<b>Кабинет на сайте</b>\n\nБот работает и без сайта: баланс и покупки хранятся в кабинете, который создаётся сам. Уже покупали на shk-wb.ru? Подключите тот кабинет — «У меня уже есть кабинет».');
   return showMainMenu(from, chatId, messageId);
 }
 
@@ -2513,7 +2504,7 @@ async function startBonus(from, chatId, parsed) {
   const recipient = await findBonusRecipient(parsed);
   if (!recipient) return sendMessage(chatId, '⚠️ Такого пользователя нет среди тех, кто запускал бота. Проверьте ник или укажите Telegram ID.');
   const targetUser = await findUser(recipient.telegram_user_id);
-  if (!targetUser) return sendMessage(chatId, `⚠️ У ${escapeHtml(bonusRecipientName(recipient))} ещё нет кабинета, начислять некуда. Пусть войдёт в боте через кнопку «🔐 Войти», затем повторите команду.`);
+  if (!targetUser) return sendMessage(chatId, `⚠️ У ${escapeHtml(bonusRecipientName(recipient))} ещё нет кабинета, начислять некуда. Пусть откроет в боте «👤 Профиль» (кабинет создастся сам), затем повторите команду.`);
   const balance = await wallet.getBalanceKopecks(targetUser);
   const nonce = crypto.randomBytes(6).toString('hex');
   for (const [key, item] of pendingBonuses) if (item.expiresAt <= Date.now()) pendingBonuses.delete(key);
