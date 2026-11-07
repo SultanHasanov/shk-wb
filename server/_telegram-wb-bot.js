@@ -674,11 +674,16 @@ async function promptClientQuery(from, chatId, messageId) {
     'Например: <code>245</code> или <code>8898</code>.',
     '',
     'Ищу по текущим заказам в пункте.',
-  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
+  ].join('\n'), { reply_markup: choiceKeyboard([
+    [{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
+    [{ text: '⬅️ Назад', callback_data: 'menu:code' }],
+    MENU_ROW,
+  ]) });
 }
 
 /** После входа в кабинет WB: если ждали поиск клиента — к поиску, иначе к отзывам. */
 async function afterWbReady(from, chatId) {
+  localGoodsSnapshots.delete(Number(from.id)); // пункт мог смениться — товары старого ПВЗ не показывать
   const session = await getSession(from.id);
   if (session?.state === 'await_wb_for_search') { await clearSession(from.id); return promptClientQuery(from, chatId); }
   return showReviewFilters(from, chatId);
@@ -2575,8 +2580,17 @@ async function handleCallback(callback) {
   if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
   if (data === 'rv:start' || data === 'rv:filters') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId, messageId); return; }
   if (data === 'rv:relogin') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await showReviewFilters(from, chatId, messageId); return; }
-  if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
+  if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); localGoodsSnapshots.delete(Number(from.id)); await clearSession(from.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
   if (data === 'rv:cancel') { answerCallbackQuery(callback.id).catch(() => {}); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
+  if (data === 'cs:points') {
+    // Смена ПВЗ из поиска клиента: после выбора пункта вернуться к поиску, а не к отзывам.
+    answerCallbackQuery(callback.id).catch(() => {});
+    const connection = await getWbConnection(from.id);
+    if (!connection?.session?.token) return startClientSearch(from, chatId, messageId);
+    await saveSession(from, chatId, 'await_wb_for_search', { userId: await ensureUser(from) });
+    await beginPointSelection(from, chatId, connection);
+    return;
+  }
   if (data === 'rv:points') {
     answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
