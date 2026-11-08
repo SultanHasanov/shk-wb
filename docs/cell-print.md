@@ -35,6 +35,25 @@ login/poll,refresh,keys,claim,logout}` в api/cell-print.js (без регист
 CARGO_TARGET_DIR="$(pwd -W)/src-tauri/target" npx tauri build` → `src-tauri/target/release/bundle/nsis/Печать ячеек_X_x64-setup.exe`.
 Версия — Cargo.toml + tauri.conf.json + package.json.
 
+### 2.2.0: «ПВЗ Принт», пробный период, пауза, оплата и регистрация в программе
+Порядок выпуска: миграция `20261108_cell_print_trial_pause.sql` → сайт → проверка новых путей на боевом домене → программа.
+
+**Название.** Видимое имя — «ПВЗ Принт» (`productName`). НЕ менять: `identifier`, `%APPDATA%\shk_tools\cell_print`, хост `ru.shk.cell_print`,
+`/api/cell-print/*`, ключи `CP-…`. NSIS берёт папку и запись удаления из `productName`, поэтому 2.2.0 ставится в новую папку
+`%LOCALAPPDATA%\ПВЗ Принт`, а хук PREINSTALL тихо удаляет прежнюю «Печать ячеек» 2.x. Автозапуск и хост Ozon пишутся заново при старте.
+
+**Новые маршруты `/api/cell-print/`:** `signup`, `signup/poll`, `signup/resend`, `password/reset`, `prices` (без входа);
+`trial`, `pause`, `resume`, `pay`, `pay-status` (Bearer). `pay` подставляет заказ `cell_print_license` и вызывает `api/payments.js`:
+QR СБП отдаёт ссылку `qr`, программа сама рисует из неё картинку (крейт `qrcode`), `method:"card"` даёт `confirmationUrl`.
+
+**Пробный период:** ключ `source='trial'`, 7 дней, WB+Ozon, 1 ПК; один на ПК и один на аккаунт (`cell_print_trial_claims`), аккаунтам с ключами не выдаётся.
+Письмо после окончания — `notifyCellTrialEnded` в кроне `api/cabinet.js`, не уходит, если куплен ключ. Продление пробного ключа (из кабинета)
+делает его обычным; в программе у пробного только «Купить ключ», потому что площадку выбирают заново.
+
+**Пауза:** `paused_at`/`pause_until` у ключа, журнал `cell_print_pauses`. До 2 раз в календарный месяц по Москве, до 14 дней; `expires_at` сдвигается на
+фактическую длину паузы при снятии (`cell_print_settle_pause`: вручную, из `activate`/`keys` и кроном). Каждый запуск паузы расходует попытку, даже если сразу возобновить.
+`activate` на паузе отвечает 403 `code:"PAUSED"`: 2.2+ выключает печать сразу, а старые 2.1.x видят обычный отказ и могут печатать ещё до 24 часов по кэшу.
+
 ### Коды на этикетке WB (с 2.1.2)
 Кроме большого QR в центре, по четырём углам этикетки напечатаны мелкие QR с тем же ШК в сжатом виде:
 `*` + base64 от шести байт, где первые пять — ШК big-endian, шестой контрольный

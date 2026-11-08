@@ -826,6 +826,44 @@ async function notifyTelegramExpiry2d() {
   return sent;
 }
 
+// Пробный период «ПВЗ Принт» закончился за последние 3 дня, а ключ так и не купили —
+// одно письмо на пробный ключ (dedupe по id ключа: у каждого аккаунта он свой).
+async function notifyCellTrialEnded() {
+  const from = new Date(Date.now() - 3 * 86400000).toISOString();
+  const now = new Date().toISOString();
+  const trials = await supabaseFetch(
+    `cell_print_licenses?source=eq.trial&owner_user_id=not.is.null&expires_at=gte.${encodeURIComponent(from)}&expires_at=lte.${encodeURIComponent(now)}&select=id,key,owner_user_id,created_at,expires_at`,
+  );
+  let sent = 0;
+  for (const trial of trials) {
+    const paid = await supabaseFetch(
+      `cell_print_licenses?owner_user_id=eq.${encodeURIComponent(trial.owner_user_id)}&source=neq.trial&select=id&limit=1`,
+    );
+    if (paid.length) continue;
+    const orders = await supabaseFetch(
+      `payment_orders?user_id=eq.${encodeURIComponent(trial.owner_user_id)}&product_kind=eq.cell_print_license&status=eq.succeeded&created_at=gte.${encodeURIComponent(trial.created_at)}&select=id&limit=1`,
+    );
+    if (orders.length) continue;
+    const prefs = await supabaseFetch(
+      `user_preferences?user_id=eq.${encodeURIComponent(trial.owner_user_id)}&select=notify_key_expiry&limit=1`,
+    );
+    if (prefs[0]?.notify_key_expiry === false) continue;
+    const user = await getAuthUser(trial.owner_user_id);
+    await createNotification({
+      userId: trial.owner_user_id,
+      kind: 'key_expiry',
+      title: 'Пробный период «ПВЗ Принт» закончился',
+      body: 'Семь бесплатных дней прошли, и печать номеров ячеек остановилась. Купить ключ можно прямо в программе: Профиль → «Купить ключ», оплата по QR-коду СБП. Настройки и статистика сохранены.',
+      link: '/cabinet/keys',
+      dedupeKey: `cell-trial-ended:${trial.id}`,
+      email: user?.email?.endsWith('@users.invalid') ? null : user?.email,
+      emailEnabled: true,
+    });
+    sent++;
+  }
+  return sent;
+}
+
 async function cronNotifications(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
   const expected = process.env.CRON_SECRET;
@@ -919,6 +957,9 @@ async function cronNotifications(req, res) {
       });
       sent++;
     }
+    // «ПВЗ Принт»: снять истёкшие паузы ключей (срок сдвигается на длину паузы).
+    await supabaseFetch('rpc/cell_print_settle_expired_pauses', { method: 'POST', body: '{}' }).catch(error => console.error('cell pauses:', error.message));
+    sent += await notifyCellTrialEnded().catch(error => { console.error(error); return 0; });
     return res.json({ checked: licenses.length + subscriptions.length + addons.length, created: sent, releasedReservations, freeEnded: Boolean(freeEnded) });
   } catch (error) {
     console.error(error);

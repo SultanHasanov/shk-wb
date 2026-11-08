@@ -77,7 +77,10 @@
     ,{ "source": "/api/cell-print/update/download", "destination": "/api/cell-print?action=update-download" }
     ,{ "source": "/api/cell-print/login/start", "destination": "/api/cell-print?action=login-start" }
     ,{ "source": "/api/cell-print/login/poll", "destination": "/api/cell-print?action=login-poll" }
-    ,{ "source": "/api/cell-print/:action(login|refresh|keys|claim|logout)", "destination": "/api/cell-print?action=:action" }
+    ,{ "source": "/api/cell-print/signup/poll", "destination": "/api/cell-print?action=signup-poll" }
+    ,{ "source": "/api/cell-print/signup/resend", "destination": "/api/cell-print?action=signup-resend" }
+    ,{ "source": "/api/cell-print/password/reset", "destination": "/api/cell-print?action=password-reset" }
+    ,{ "source": "/api/cell-print/:action(login|refresh|keys|claim|logout|signup|prices|trial|pause|resume|pay|pay-status)", "destination": "/api/cell-print?action=:action" }
     ,{ "source": "/api/cell-print/account/:sub(link|devices|revoke)", "destination": "/api/cell-print?action=account&sub=:sub" }
     ,{ "source": "/cell-print", "destination": "/cell-print.html" }
     ,{ "source": "/program", "destination": "/program.html" }

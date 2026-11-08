@@ -14,9 +14,13 @@ function activationMessage(error){
   return detail||String(error.message||'');
 }
 // Ошибки, которые база подняла осмысленно. Всё остальное — сбой вызова, а не отказ.
-function isLicenseVerdict(msg){return /expired|Device limit|Invalid license|Invalid device/.test(msg);}
+function isLicenseVerdict(msg){return /expired|Device limit|Invalid license|Invalid device|paused/.test(msg);}
+function ruDate(iso){const d=new Date(iso);return Number.isNaN(d.getTime())?'':d.toLocaleDateString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit'});}
 function activationFailure(res,error){
   const msg=activationMessage(error);
+  // Пауза — отказ с кодом PAUSED: программа 2.2+ не работает по кэшу, пока ключ на паузе.
+  const paused=msg.match(/paused until (\S+)/);
+  if(paused)return res.status(403).json({error:`Ключ на паузе до ${ruDate(paused[1])}`,code:'PAUSED',pausedUntil:paused[1]});
   if(msg.includes('expired'))return res.status(403).json({error:'Срок ключа истёк'});
   if(msg.includes('Device limit'))return res.status(409).json({error:'Достигнут лимит устройств'});
   return res.status(403).json({error:'Ключ недействителен или отозван'});
@@ -25,6 +29,11 @@ function activationFailure(res,error){
 // подтверждения /app-login, что у «Помощника ПВЗ», но без регистрации ПК в подписке
 // Помощника: у ключей «Печати ячеек» свой учёт компьютеров (cell_print_activations).
 const HEX64=/^[0-9a-f]{64}$/;
+const { CELL_PRINT_PRICES } = require('../server/_payments');
+const BOTH_FACTOR=1.8;
+// Начало текущего месяца по Москве (UTC+3) — лимит «2 паузы в месяц».
+function moscowMonthStart(){const now=new Date(Date.now()+3*3600000);return Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)-3*3600000;}
+function rpc(name,payload){return supabaseFetch(`rpc/${name}`,{method:'POST',body:JSON.stringify(payload)});}
 function accountError(res,error){
   if(error.code&&error.status)return res.status(error.status).json({error:error.message,code:error.code});
   console.error(error);return res.status(502).json({error:'Сервис временно недоступен'});
@@ -74,20 +83,120 @@ async function accountAction(action,req,res){
     await registerLoginDevice(session,body);
     return res.json({session:account.sessionPayload(session)});
   }
+  // Регистрация прямо в программе: те же startSignup/pollSignup, что у «Помощника ПВЗ»,
+  // но ПК регистрируется в реестре «ПВЗ Принт» (cell_print_devices), а не в подписке Помощника.
+  if(action==='signup'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-signup',limit:5,windowSeconds:3600}))return;
+    const email=String(body.email||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Введите почту',code:'VALIDATION_ERROR'});
+    if(!await enforceRateLimit(req,res,{scope:'cell-signup-email',limit:3,windowSeconds:3600,key:email}))return;
+    const deviceHash=String(body.deviceHash||'').toLowerCase();
+    if(!HEX64.test(deviceHash))return res.status(400).json({error:'Обновите программу',code:'DEVICE_REQUIRED'});
+    const version=`cell-print/${String(body.appVersion||'').slice(0,16)}`;
+    const result=await account.startSignup({email,password:body.password,deviceHash,deviceName:body.deviceName,version,origin:publicOrigin(req)});
+    if(result.session){
+      await registerLoginDevice(result.session,body);
+      return res.json({status:'approved',session:account.sessionPayload(result.session)});
+    }
+    return res.status(201).json({status:'pending',id:result.id,secret:result.secret,email:result.email});
+  }
+  if(action==='signup-poll'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-signup-poll',limit:300,windowSeconds:3600}))return;
+    const result=await account.pollSignup(String(body.id||''),String(body.secret||''));
+    if(result.status==='pending')return res.status(202).json({status:'pending'});
+    await registerLoginDevice(result.session,{deviceHash:result.deviceHash,deviceName:result.deviceName,appVersion:String(result.appVersion||'').replace(/^cell-print\//,'')});
+    return res.json({status:'approved',session:account.sessionPayload(result.session)});
+  }
+  if(action==='signup-resend'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-signup-resend',limit:5,windowSeconds:3600}))return;
+    return res.json(await account.resendSignup(String(body.id||''),String(body.secret||''),publicOrigin(req)));
+  }
+  if(action==='password-reset'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-password-reset',limit:5,windowSeconds:3600}))return;
+    const email=String(body.email||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Введите почту',code:'VALIDATION_ERROR'});
+    if(!await enforceRateLimit(req,res,{scope:'cell-password-reset-email',limit:3,windowSeconds:3600,key:email}))return;
+    return res.json(await account.sendPasswordReset(email,publicOrigin(req)));
+  }
+  if(action==='prices'&&req.method==='GET')return res.json({prices:CELL_PRINT_PRICES,bothFactor:BOTH_FACTOR});
   const user=await requireUser(req,res);
   if(!user)return;
+  if(action==='trial'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-trial',limit:10,windowSeconds:3600,key:user.id}))return;
+    const deviceHash=String(body.deviceHash||'').toLowerCase();
+    if(!HEX64.test(deviceHash))return res.status(400).json({error:'Обновите программу',code:'DEVICE_REQUIRED'});
+    try{
+      return res.status(201).json(await rpc('cell_print_start_trial',{p_user:user.id,p_device_hash:deviceHash,p_device_name:String(body.deviceName||'').slice(0,80)}));
+    }catch(error){
+      const msg=activationMessage(error);
+      if(msg.includes('has keys'))return res.status(409).json({error:'Пробный период — только для новых аккаунтов. У вас уже есть ключ: активируйте его в профиле.',code:'TRIAL_USED'});
+      if(msg.includes('Trial used'))return res.status(409).json({error:'Пробный период уже использован на этом компьютере или в этом аккаунте',code:'TRIAL_USED'});
+      throw error;
+    }
+  }
+  if((action==='pause'||action==='resume')&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-pause',limit:20,windowSeconds:600,key:user.id}))return;
+    const key=String(body.key||'').trim().toUpperCase();
+    if(!/^CP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key))return res.status(400).json({error:'Проверьте ключ',code:'VALIDATION_ERROR'});
+    try{return res.json(await rpc(action==='pause'?'cell_print_pause':'cell_print_resume',{p_user:user.id,p_key:key}));}
+    catch(error){
+      const msg=activationMessage(error);
+      if(msg.includes('License not found'))return res.status(404).json({error:'Ключ не найден в вашем аккаунте',code:'KEY_NOT_FOUND'});
+      if(msg.includes('Pause limit'))return res.status(409).json({error:'В этом месяце подписку уже останавливали 2 раза',code:'PAUSE_LIMIT'});
+      if(msg.includes('trial'))return res.status(409).json({error:'Пробный период остановить нельзя',code:'NOT_PAUSABLE'});
+      if(msg.includes('not activated'))return res.status(409).json({error:'Ключ ещё не активирован — дни пока не идут',code:'NOT_PAUSABLE'});
+      if(msg.includes('expired'))return res.status(409).json({error:'Срок ключа истёк',code:'NOT_PAUSABLE'});
+      if(msg.includes('paused'))return res.status(409).json({error:'Ключ уже на паузе',code:'NOT_PAUSABLE'});
+      throw error;
+    }
+  }
+  // Оплата из программы: QR СБП (или ссылка ЮKassa для карты) — тот же заказ, что на сайте.
+  if(action==='pay'&&req.method==='POST'){
+    if(!await enforceRateLimit(req,res,{scope:'cell-pay',limit:20,windowSeconds:600,key:user.id}))return;
+    const renewal=body.renewalTargetKey?String(body.renewalTargetKey).trim().toUpperCase():'';
+    req.query.action='create';
+    req.body={
+      productKind:'cell_print_license',
+      durationDays:Number(body.days||0),
+      deviceLimit:Number(body.devices||0),
+      marketplaceScope:String(body.scope||'wb'),
+      ...(renewal?{renewalTargetKey:renewal}:{}),
+      accepted:body.accepted===true,
+      ...(body.method==='card'?{}:{paymentMethod:'sbp_qr'}),
+      returnTo:'cabinet',
+    };
+    return require('./payments')(req,res);
+  }
+  if(action==='pay-status'&&req.method==='GET'){
+    req.query.action='status';
+    return require('./payments')(req,res);
+  }
   if(action==='keys'&&req.method==='GET'){
     if(!await enforceRateLimit(req,res,{scope:'cell-keys',limit:120,windowSeconds:600,key:user.id}))return;
     const device=String(req.query.device||'').toLowerCase();
-    const rows=await supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(user.id)}&select=key,marketplace_scope,expires_at,duration_days,device_limit,active,activated_at,created_at,cell_print_activations(device_hash)&order=created_at.desc`);
+    const query=`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,key,marketplace_scope,expires_at,duration_days,device_limit,active,activated_at,created_at,source,paused_at,pause_until,cell_print_activations(device_hash,revoked_at),cell_print_pauses(started_at)&order=created_at.desc`;
+    let rows=await supabaseFetch(query);
+    // Истёкшие паузы снимаем сразу, чтобы срок в списке был уже сдвинутым.
+    const stale=rows.filter(r=>r.paused_at&&Date.parse(r.pause_until)<=Date.now());
+    if(stale.length){
+      await Promise.all(stale.map(r=>rpc('cell_print_settle_pause',{p_license:r.id}).catch(()=>null)));
+      rows=await supabaseFetch(query);
+    }
+    const monthStart=moscowMonthStart();
     const email=String(user.email||'');
     return res.json({
       email:email.endsWith('@users.invalid')?'Вход через Telegram':email,
-      items:rows.map(r=>({
-        key:r.key,scope:r.marketplace_scope||'legacy_unassigned',expiresAt:r.expires_at,durationDays:r.duration_days,
-        deviceLimit:r.device_limit,devicesUsed:(r.cell_print_activations||[]).length,active:r.active!==false,
-        thisDevice:HEX64.test(device)&&(r.cell_print_activations||[]).some(a=>a.device_hash===device),
-      })),
+      items:rows.map(r=>{
+        // Отозванные ПК место не занимают (до 2.2 они считались в devicesUsed).
+        const live=(r.cell_print_activations||[]).filter(a=>!a.revoked_at);
+        return {
+          key:r.key,scope:r.marketplace_scope||'legacy_unassigned',expiresAt:r.expires_at,durationDays:r.duration_days,
+          deviceLimit:r.device_limit,devicesUsed:live.length,active:r.active!==false,
+          thisDevice:HEX64.test(device)&&live.some(a=>a.device_hash===device),
+          trial:r.source==='trial',pausedAt:r.paused_at||null,pauseUntil:r.pause_until||null,
+          pausesLeft:Math.max(0,2-(r.cell_print_pauses||[]).filter(p=>Date.parse(p.started_at)>=monthStart).length),
+        };
+      }),
     });
   }
   if(action==='claim'&&req.method==='POST'){
@@ -148,7 +257,7 @@ module.exports = async function handler(req,res){
   const action=String(req.query.action||'');
   if(action==='update'&&req.method==='GET')return cellUpdate.updateResponse(req,res,publicOrigin(req));
   if(action==='update-download'&&req.method==='GET')return cellUpdate.downloadResponse(res);
-  if(['login','login-start','login-poll','refresh','keys','claim','logout'].includes(action)){
+  if(['login','login-start','login-poll','refresh','keys','claim','logout','signup','signup-poll','signup-resend','password-reset','prices','trial','pause','resume','pay','pay-status'].includes(action)){
     try{return await accountAction(action,req,res);}catch(error){return accountError(res,error);}
   }
   if(action==='account'){try{return await accountLinkAction(req,res);}catch(error){return accountError(res,error);}}
