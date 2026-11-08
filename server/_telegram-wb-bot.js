@@ -2725,11 +2725,16 @@ async function handleMessage(message) {
     // t.me/<бот>?start=r_<КОД> — переход по приглашению.
     const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
     const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;
-    // t.me/<бот>?start=club_code | club_reviews — кнопка «🛠 ШК и отзывы» из группы «Клуба вопросов» (zara-bot):
-    // запоминаем переход и сразу открываем нужный экран; скидку 20% экран покажет сам, если подписка на клуб активна.
-    const clubTarget = /^club_(code|reviews)$/.exec(startMatch[1] || '');
+    // t.me/<бот>?start=club — кнопка «🛠 Инструменты ПВЗ» из группы «Клуба вопросов» (zara-bot, с 09.11.2026):
+    // запоминаем переход (скидка 20% на 30 дней при активной подписке) и показываем главное меню;
+    // ?start=club_code | club_reviews — прежние кнопки: сразу нужный экран (скидку он покажет сам).
+    const clubTarget = /^club(?:_(code|reviews))?$/.exec(startMatch[1] || '');
     if (clubTarget) {
       await markClubRef(from.id).catch(error => console.warn('Скидка клуба: отметка перехода', error?.message || error));
+      if (!clubTarget[1]) {
+        const notice = await clubDiscount(from.id) ? clubLine : '';
+        return showMainMenu(from, chatId, undefined, { greet: true, invited, notice });
+      }
       // Экран кода клиента пишет про скидку сам; у отзывов первым может быть вход в кабинет WB — говорим здесь.
       const clubText = clubTarget[1] === 'reviews' && await clubDiscount(from.id) ? `\n${clubLine}` : '';
       await sendMessage(chatId, `${greetingTitle(from)}${clubText}`);
