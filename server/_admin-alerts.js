@@ -52,6 +52,7 @@ async function notifyAdminOrder(order) {
   const walletRub = Number(order.wallet_paid_kopecks || 0) / 100;
   const paidRub = Number(order.gross_amount || order.amount || 0);
   let title = PRODUCT_TITLES[order.product_kind] || order.product_kind || 'Заказ';
+  if (order.payment_shop) title += ` · магазин ${order.payment_shop}`;
   if (order.product_kind === 'app_subscription' && order.app_plan) title += ` · ${order.app_plan}${order.app_term_months ? `, ${order.app_term_months} мес.` : ''}`;
   if (order.product_kind === 'stickers') {
     const quantity = Number(order.range_quantity || 0) + Number(order.custom_quantity || 0);

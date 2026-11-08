@@ -245,7 +245,7 @@ async function handlePaymentAdmin(req, res) {
     if(req.method==='DELETE'&&operation==='tier'&&/^\d+$/.test(String(req.query.id||''))){await supabaseFetch(`payment_price_tiers?id=eq.${req.query.id}`,{method:'DELETE'});return res.status(204).end()}
     if(req.method==='POST'&&operation==='sync'){
       const rows=await supabaseFetch(`payment_orders?id=eq.${encodeURIComponent(req.body?.id)}&select=*&limit=1`);if(!rows[0]?.yookassa_payment_id)return res.status(404).json({error:'Платёж не найден'});
-      const payment=await yookassa(`payments/${encodeURIComponent(rows[0].yookassa_payment_id)}`);await supabaseFetch(`payment_orders?id=eq.${rows[0].id}`,{method:'PATCH',body:JSON.stringify({provider_status:payment.status,...(payment.status==='succeeded'?{}:{status:payment.status}),updated_at:new Date().toISOString()})});await completeOrder(rows[0],payment);return res.json({status:payment.status});
+      const payment=await yookassa(`payments/${encodeURIComponent(rows[0].yookassa_payment_id)}`,{},rows[0].payment_shop);await supabaseFetch(`payment_orders?id=eq.${rows[0].id}`,{method:'PATCH',body:JSON.stringify({provider_status:payment.status,...(payment.status==='succeeded'?{}:{status:payment.status}),updated_at:new Date().toISOString()})});await completeOrder(rows[0],payment);return res.json({status:payment.status});
     }
     return res.status(405).json({error:'Method not allowed'});
   }catch(error){return sendApiError(res,error)}

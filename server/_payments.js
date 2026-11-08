@@ -4,6 +4,7 @@ const { createNotification, sendEmail } = require('./_notifications');
 const { sendMessage } = require('./_telegram-api');
 const { notifyAdminOrder } = require('./_admin-alerts');
 const { ADDONS } = require('./_app-plans');
+const { shopCredentials } = require('./_sites');
 
 const PACKAGE_PRICES = Object.freeze({ 1:5, 20:12, 30:17, 40:22, 50:23, 100:36, 200:63, 500:135 });
 // Поштучная генерация по введённому пользователем номеру. Массовая пачка
@@ -17,15 +18,17 @@ const REVIEW_PRICE = 25;
 const CLIENT_CODE_PRICE = 50;
 const CELL_PRINT_PRICES = Object.freeze({7:{1:79,2:135,3:179,5:279,10:469,20:790},30:{1:249,2:419,3:569,5:869,10:1490,20:2490},90:{1:599,2:1019,3:1379,5:2090,10:3590,20:5990},180:{1:1090,2:1850,3:2490,5:3790,10:6490,20:10900},365:{1:1990,2:3390,3:4590,5:6990,10:11990,20:19900}});
 
-function hasYookassa() { return Boolean(process.env.YOOKASSA_SHOP_ID && process.env.YOOKASSA_SECRET_KEY); }
-function authHeader() {
-  return `Basic ${Buffer.from(`${process.env.YOOKASSA_SHOP_ID}:${process.env.YOOKASSA_SECRET_KEY}`).toString('base64')}`;
+function hasYookassa(shop) { return Boolean(shopCredentials(shop)); }
+function authHeader(shop) {
+  const { shopId, secretKey } = shopCredentials(shop);
+  return `Basic ${Buffer.from(`${shopId}:${secretKey}`).toString('base64')}`;
 }
-async function yookassa(path, options = {}) {
-  if (!hasYookassa()) throw new Error('YooKassa is not configured');
+/** shop: магазин заказа (payment_orders.payment_shop). Без него запрос идёт в магазин основного сайта. */
+async function yookassa(path, options = {}, shop) {
+  if (!hasYookassa(shop)) throw new Error('YooKassa is not configured');
   const response = await fetch(`https://api.yookassa.ru/v3/${path}`, {
     ...options,
-    headers: { Authorization: authHeader(), 'Content-Type':'application/json', ...(options.headers || {}) },
+    headers: { Authorization: authHeader(shop), 'Content-Type':'application/json', ...(options.headers || {}) },
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) { const error = new Error(data.description || 'YooKassa request failed'); error.status=response.status; error.details=data; throw error; }

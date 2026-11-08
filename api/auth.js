@@ -8,6 +8,7 @@ const { accountHasValuableData, accountMergePreview } = require('../server/_tele
 const { forgetTelegramUser } = require('../server/_telegram-user-cache');
 const { referralCookie } = require('../server/_user-auth');
 const { handleOAuth } = require('../server/_oauth-login');
+const { MAIN, siteForRequest } = require('../server/_sites');
 const crypto = require('crypto');
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT = 20;
@@ -197,7 +198,9 @@ module.exports = async function handler(req, res) {
     const { botToken } = config();
     const webAppUser = validateTelegramWebApp(input.webAppData, botToken);
     const telegram = webAppUser ? { ...webAppUser, mode: input.mode } : input;
-    if (!webAppUser && !validateTelegram(telegram, botToken)) return json(res, 401, { error: 'Не удалось подтвердить данные Telegram' });
+    // Виджет на отдельном сайте работает через его собственного бота, аккаунт ищется по id в Telegram как обычно.
+    const widgetToken = (siteForRequest(req).id !== MAIN && process.env.PVZPRINT_TELEGRAM_BOT_TOKEN) || botToken;
+    if (!webAppUser && !validateTelegram(telegram, widgetToken)) return json(res, 401, { error: 'Не удалось подтвердить данные Telegram' });
 
     if (telegram.mode === 'status') {
       const identity = await findIdentity(telegram.id);

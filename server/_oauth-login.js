@@ -18,6 +18,7 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, optionalUser } = require('./_user-auth');
+const { siteForRequest } = require('./_sites');
 
 const STATE_TTL_SEC = 10 * 60;
 const COOKIE = 'shk_oauth';
@@ -57,11 +58,11 @@ const PROVIDERS = {
     env: ['VKID_APP_ID', 'VKID_SERVICE_TOKEN'],
     pkce: true,
     viaProviders: ['mail_ru', 'ok_ru'],
-    async exchange({ code, deviceId, verifier, state }) {
+    async exchange({ code, deviceId, verifier, state, redirect }) {
       const { clientId, clientSecret } = credentials('vkid');
       const body = new URLSearchParams({
         grant_type: 'authorization_code', code, code_verifier: verifier, client_id: clientId, device_id: deviceId,
-        redirect_uri: redirectUri('vkid'), state, service_token: clientSecret,
+        redirect_uri: redirect, state, service_token: clientSecret,
       });
       const response = await fetch(this.token, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
       const data = await response.json().catch(() => ({}));
@@ -89,8 +90,8 @@ const PROVIDERS = {
   },
 };
 
-function origin() {
-  return String(process.env.PUBLIC_APP_URL || 'https://shk-wb.ru').replace(/\/$/, '');
+function origin(req) {
+  return siteForRequest(req).origin || String(process.env.PUBLIC_APP_URL || 'https://shk-wb.ru').replace(/\/$/, '');
 }
 
 function credentials(provider) {
@@ -106,8 +107,9 @@ function configuredProviders() {
   return Object.keys(PROVIDERS).filter(provider => credentials(provider));
 }
 
-function redirectUri(provider) {
-  return `${origin()}/api/auth/oauth/${provider}/callback`;
+/** Адрес возврата зависит от сайта: его нужно добавить в настройки приложений Яндекса и VK ID. */
+function redirectUri(provider, req) {
+  return `${origin(req)}/api/auth/oauth/${provider}/callback`;
 }
 
 function stateSecret() {
@@ -179,11 +181,11 @@ function failRedirect(res, reason, cookie) {
   redirect(res, `/?auth=login&oauth=error&reason=${encodeURIComponent(reason)}`, cookie);
 }
 
-async function exchangeCode(provider, code) {
+async function exchangeCode(provider, code, req) {
   const spec = PROVIDERS[provider];
   const { clientId, clientSecret } = credentials(provider);
   const body = new URLSearchParams({
-    grant_type: 'authorization_code', code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri(provider),
+    grant_type: 'authorization_code', code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri(provider, req),
   });
   const response = await fetch(spec.token, {
     method: 'POST',
@@ -306,7 +308,9 @@ async function magicLinkTokenHash(email) {
 
 function handleProviders(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  res.status(200).json({ providers: configuredProviders().map(id => ({ id, title: PROVIDERS[id].title })) });
+  // Telegram привязывает виджет входа к одному домену, поэтому у отдельного сайта свой бот для входа.
+  const telegramBot = siteForRequest(req).origin ? String(process.env.PVZPRINT_TELEGRAM_BOT_USERNAME || '').trim() : '';
+  res.status(200).json({ providers: configuredProviders().map(id => ({ id, title: PROVIDERS[id].title })), ...(telegramBot ? { telegramBot } : {}) });
 }
 
 async function handleStart(req, res, provider) {
@@ -326,7 +330,7 @@ async function handleStart(req, res, provider) {
   const url = new URL(spec.authorize);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', creds.clientId);
-  url.searchParams.set('redirect_uri', redirectUri(provider));
+  url.searchParams.set('redirect_uri', redirectUri(provider, req));
   url.searchParams.set('scope', spec.scope);
   url.searchParams.set('state', state);
   if (provider === 'yandex') url.searchParams.set('force_confirm', 'yes');
@@ -371,8 +375,8 @@ async function handleCallback(req, res, provider) {
   if (!code || (spec.pkce && !verifier)) return failRedirect(res, 'state', clear);
   try {
     const accessToken = spec.exchange
-      ? await spec.exchange({ code, deviceId: String(query.device_id || ''), verifier, state: String(query.state) })
-      : await exchangeCode(provider, code);
+      ? await spec.exchange({ code, deviceId: String(query.device_id || ''), verifier, state: String(query.state), redirect: redirectUri(provider, req) })
+      : await exchangeCode(provider, code, req);
     const profile = await PROVIDERS[provider].profile(accessToken);
     if (state.u) {
       await linkToAccount(provider, profile, String(state.u));

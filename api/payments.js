@@ -20,6 +20,7 @@ const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
+const { MAIN, normalizeShop, siteForRequest } = require('../server/_sites');
 const appUpdate = require('../server/_app-update');
 
 // Скачивание «Помощника ПВЗ» для статистики: вместо IP — хеш с секретом сервера,
@@ -91,6 +92,8 @@ async function maybeBindReferral(req, user) {
 }
 module.exports = async function handler(req, res) {
   const action = String(req.query.action || '');
+  // Домен запроса выбирает магазин ЮKassa: база и выдача ключей у сайтов общие.
+  const site = siteForRequest(req);
   try {
     if (action === 'config' && req.method === 'GET') {
       const [settings, kztPerRub] = await Promise.all([
@@ -100,7 +103,7 @@ module.exports = async function handler(req, res) {
       return res.json({
         // Курс только для показа цен в ₸ на сайте; списание всегда в рублях.
         kztPerRub,
-        enabled: Boolean(settings[0]?.enabled && hasYookassa()),
+        enabled: Boolean(settings[0]?.enabled && hasYookassa(site.id)),
         testMode: process.env.YOOKASSA_TEST_MODE !== 'false',
         packages: Object.entries(PACKAGE_PRICES).map(([quantity, total]) => ({
           quantity: Number(quantity),
@@ -127,6 +130,9 @@ module.exports = async function handler(req, res) {
       const user = req.internalUser || await optionalUser(req);
       await maybeBindReferral(req, user);
       const requestedKind = String(req.body?.productKind || '');
+      // Отдельный сайт продаёт только ключи «Печати ячеек». Остальное оформляется на основном.
+      if (site.id !== MAIN && requestedKind !== 'cell_print_license')
+        return res.status(400).json({ error: 'Этот товар на сайте не продаётся' });
       const cellKinds = ['cell_print_program', 'cell_print_license', 'cell_print_bundle'];
       const individualOrderId = String(req.body?.individualOrderId || '');
       // Саму программу больше не продаём — установщик отдаётся свободно через
@@ -316,7 +322,7 @@ module.exports = async function handler(req, res) {
       if (req.body?.accepted !== true)
         return res.status(400).json({ error: 'Необходимо принять оферту и политику' });
       const settings = await supabaseFetch('payment_settings?select=enabled&id=eq.true&limit=1');
-      if (!settings[0]?.enabled || !hasYookassa())
+      if (!settings[0]?.enabled || !hasYookassa(site.id))
         return res.status(503).json({ error: 'Оплата пока не подключена' });
       let calculated =
         productKind === 'individual_stickers'
@@ -426,6 +432,8 @@ module.exports = async function handler(req, res) {
         provider_status: 'pending',
         fulfillment_status: 'pending',
       };
+      // Основной сайт поле не передаёт, поэтому его заказы не зависят от этой колонки.
+      if (site.id !== MAIN) orderPayload.payment_shop = site.id;
       if (productKind === 'individual_stickers')
         orderPayload.individual_sticker_order_id = individualOrder.id;
       if (productKind === 'program_license') orderPayload.license_iterations = licenseIterations;
@@ -463,10 +471,17 @@ module.exports = async function handler(req, res) {
             `&status=eq.pending&amount=eq.${encodeURIComponent(calculated.total)}` +
             `&range_quantity=eq.${encodeURIComponent(orderPayload.range_quantity)}` +
             `&custom_quantity=eq.${encodeURIComponent(orderPayload.custom_quantity)}` +
+            // Ключи WB и Ozon стоят одинаково: без этих условий неоплаченный счёт на WB выдавался за покупку ключа Ozon.
+            (cellKinds.includes(productKind)
+              ? `&cell_print_duration_days=eq.${encodeURIComponent(orderPayload.cell_print_duration_days)}` +
+                `&cell_print_device_limit=eq.${encodeURIComponent(orderPayload.cell_print_device_limit)}` +
+                `&cell_print_marketplace_scope=eq.${encodeURIComponent(orderPayload.cell_print_marketplace_scope)}`
+              : '') +
             `&created_at=gte.${encodeURIComponent(recentSince)}` +
-            '&confirmation_url=not.is.null&select=public_token,confirmation_url&order=created_at.desc&limit=1',
+            '&confirmation_url=not.is.null&select=*&order=created_at.desc&limit=1',
         );
-        if (existing[0]?.confirmation_url)
+        // Счёт другого магазина не переиспользуем: он вернул бы покупателя на чужой сайт.
+        if (existing[0]?.confirmation_url && normalizeShop(existing[0].payment_shop) === site.id)
           return res.status(200).json({
             confirmationUrl: existing[0].confirmation_url,
             token: existing[0].public_token,
@@ -532,7 +547,7 @@ module.exports = async function handler(req, res) {
         // YooKassa всегда возвращает на обычный HTTPS URL. Прямой t.me здесь
         // ломает возврат из некоторых банковских приложений и WebView Telegram.
         const telegramMarker = returnTarget === 'telegram' ? '&from=telegram' : '';
-        const returnUrl = `${publicOrigin(req)}${resultPath}?token=${encodeURIComponent(token)}${telegramMarker}`;
+        const returnUrl = `${site.origin || publicOrigin(req)}${resultPath}?token=${encodeURIComponent(token)}${telegramMarker}`;
         const payment = await yookassa('payments', {
           method: 'POST',
           headers: { 'Idempotence-Key': idempotence },
@@ -545,7 +560,7 @@ module.exports = async function handler(req, res) {
             description,
             metadata: { order_id: order.id, product_kind: productKind },
           }),
-        });
+        }, site.id);
         await supabaseFetch(`payment_orders?id=eq.${order.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
@@ -621,7 +636,7 @@ module.exports = async function handler(req, res) {
         const payment =
           order.provider_status === 'succeeded'
             ? { status: 'succeeded', paid: true }
-            : await yookassa(`payments/${encodeURIComponent(order.yookassa_payment_id)}`);
+            : await yookassa(`payments/${encodeURIComponent(order.yookassa_payment_id)}`, {}, order.payment_shop);
         await supabaseFetch(`payment_orders?id=eq.${order.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
@@ -644,7 +659,7 @@ module.exports = async function handler(req, res) {
       )
         return res.status(404).end();
       if (order.fulfillment_status !== 'fulfilled' && order.yookassa_payment_id) {
-        const payment = await yookassa(`payments/${encodeURIComponent(order.yookassa_payment_id)}`);
+        const payment = await yookassa(`payments/${encodeURIComponent(order.yookassa_payment_id)}`, {}, order.payment_shop);
         order = await completeOrder(order, payment);
       }
       if (
@@ -730,13 +745,13 @@ module.exports = async function handler(req, res) {
       if (String(req.body?.event || '').startsWith('refund.')) {
         const refundId = String(req.body?.object?.id || '');
         if (!refundId) return res.status(400).end();
-        const refund = await yookassa(`refunds/${encodeURIComponent(refundId)}`);
+        const refund = await yookassa(`refunds/${encodeURIComponent(refundId)}`, {}, site.id);
         if (refund.status !== 'succeeded') return res.status(200).end();
         const refundedOrder = await getOrderBy(
           'yookassa_payment_id',
           String(refund.payment_id || ''),
         );
-        if (!refundedOrder) return res.status(200).end();
+        if (!refundedOrder || normalizeShop(refundedOrder.payment_shop) !== site.id) return res.status(200).end();
         const kopecks = Math.round(Number(refund.amount?.value || 0) * 100);
         await supabaseFetch('rpc/reverse_referral_reward', {
           method: 'POST',
@@ -758,9 +773,10 @@ module.exports = async function handler(req, res) {
       }
       const paymentId = String(req.body?.object?.id || '');
       if (!paymentId) return res.status(400).end();
-      const payment = await yookassa(`payments/${encodeURIComponent(paymentId)}`);
+      // Уведомление проверяется запросом в магазин своего домена: у каждого магазина свой адрес вебхука.
+      const payment = await yookassa(`payments/${encodeURIComponent(paymentId)}`, {}, site.id);
       const order = await getOrderBy('yookassa_payment_id', paymentId);
-      if (!order) return res.status(200).end();
+      if (!order || normalizeShop(order.payment_shop) !== site.id) return res.status(200).end();
       await supabaseFetch(`payment_orders?id=eq.${order.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
