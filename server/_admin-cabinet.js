@@ -3,7 +3,7 @@ const {requireAdmin}=require('./_admin-auth');
 const {supabaseFetch,supabaseFetchWithMeta}=require('./_supabase');
 const {getAuthUser}=require('./_user-auth');
 const {createNotification}=require('./_notifications');
-const {sendMessage}=require('./_telegram-api');
+const {sendMessage,deleteMessage}=require('./_telegram-api');
 
 function escapeHtml(value){return String(value==null?'':value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function personalize(template,subscriber){
@@ -20,15 +20,28 @@ function delay(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 // До этой даты бот слал постоянную (reply) клавиатуру; у активировавших бота раньше она висит до сих пор,
 // пока не придёт сообщение с remove_keyboard (семикнопочная ушла 20.10.2026, двухкнопочная — 26.10.2026).
 const LEGACY_KEYBOARD_BEFORE='2026-10-27T00:00:00Z';
-async function sendBroadcastMessage(subscriber,text,button,url,removeKeyboard=false){
-  // У сообщения один reply_markup: либо инлайн-кнопка, либо снятие старой клавиатуры.
-  const options=removeKeyboard?{reply_markup:{remove_keyboard:true}}:button&&url?{reply_markup:{inline_keyboard:[[{text:button,url}]]}}:{};
-  try{return await sendMessage(subscriber.chat_id,personalize(text,subscriber),options)}
+// Кнопка под рассылкой без ссылки — открыть главное меню бота (callback menu:home обрабатывает _telegram-wb-bot.js).
+const MENU_BUTTON={text:'☰ Открыть меню',callback_data:'menu:home'};
+async function sendWithRetry(chatId,text,options){
+  try{return await sendMessage(chatId,text,options)}
   catch(error){
     const retryAfter=Number(error.details?.parameters?.retry_after||0);
-    if(error.status===429&&retryAfter>0){await delay(Math.min(retryAfter,10)*1000);return sendMessage(subscriber.chat_id,personalize(text,subscriber),options)}
+    if(error.status===429&&retryAfter>0){await delay(Math.min(retryAfter,10)*1000);return sendMessage(chatId,text,options)}
     throw error;
   }
+}
+/**
+ * У сообщения один reply_markup, поэтому снятие старой клавиатуры и инлайн-кнопка в одном сообщении невозможны.
+ * При removeKeyboard сначала уходит служебное сообщение с remove_keyboard и тут же удаляется (клавиатура остаётся
+ * снятой), а затем — само сообщение с кнопкой: ссылкой, если задана, иначе «☰ Открыть меню».
+ */
+async function sendBroadcastMessage(subscriber,text,button,url,removeKeyboard=false){
+  if(removeKeyboard){
+    const service=await sendWithRetry(subscriber.chat_id,'Меню обновлено',{reply_markup:{remove_keyboard:true}});
+    if(service?.message_id)await deleteMessage(subscriber.chat_id,service.message_id).catch(()=>{});
+  }
+  const inline=button&&url?[[{text:button,url}]]:removeKeyboard?[[MENU_BUTTON]]:null;
+  return sendWithRetry(subscriber.chat_id,personalize(text,subscriber),inline?{reply_markup:{inline_keyboard:inline}}:{});
 }
 
 module.exports=async function handler(req,res){
@@ -75,7 +88,6 @@ module.exports=async function handler(req,res){
       if(url){try{const parsed=new URL(url);if(parsed.protocol!=='https:')throw new Error()}catch{return res.status(400).json({error:'Укажите корректную https-ссылку'})}}
       const removeKeyboard=req.body?.removeKeyboard===true;
       const onlyLegacy=req.body?.onlyLegacy===true;
-      if(removeKeyboard&&button)return res.status(400).json({error:'Снятие старой клавиатуры нельзя совместить с кнопкой: у сообщения один reply_markup'});
       const legacyFilter=onlyLegacy?`&activated_at=lt.${LEGACY_KEYBOARD_BEFORE}`:'';
       let sent=0,failed=0,blocked=0,total=0,lastTelegramId=null;
       while(true){

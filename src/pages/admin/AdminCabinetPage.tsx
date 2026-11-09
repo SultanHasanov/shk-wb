@@ -26,7 +26,7 @@ export function AdminCabinetPage() {
   const news = useAdminNews();
   const telegramAudience = useAdminTelegramAudience();
   const telegramBroadcast = useAdminTelegramBroadcast();
-  // Снятие старой нижней клавиатуры несовместимо с кнопкой-ссылкой: у сообщения один reply_markup.
+  // Снятие старой нижней клавиатуры уходит отдельным служебным сообщением (сервер), кнопка остаётся под основным.
   const [removeKeyboard, setRemoveKeyboard] = useState(false);
   const [onlyLegacy, setOnlyLegacy] = useState(false);
   const legacyDate = telegramAudience.data?.legacyBefore
@@ -101,8 +101,8 @@ export function AdminCabinetPage() {
             if (!window.confirm(`Отправить персональную рассылку ${available} получателям${extra}?`)) return;
             telegramBroadcast.mutate({
               text: String(form.get('text') || ''),
-              button: removeKeyboard ? '' : String(form.get('button') || ''),
-              url: removeKeyboard ? '' : String(form.get('url') || ''),
+              button: String(form.get('button') || ''),
+              url: String(form.get('url') || ''),
               removeKeyboard,
               onlyLegacy,
             }, {
@@ -117,10 +117,10 @@ export function AdminCabinetPage() {
           <Field label="Текст" help="Переменные: {name}, {first_name}, {last_name}, {username}">
             <Textarea name="text" rows={5} maxLength={3500} placeholder="Здравствуйте, {name}!" required />
           </Field>
-          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} disabled={removeKeyboard} /></Field>
-          <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" disabled={removeKeyboard} /></Field>
+          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} /></Field>
+          <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" /></Field>
           <Checkbox checked={removeKeyboard} onChange={event => setRemoveKeyboard(event.currentTarget.checked)}>
-            Убрать у получателей старую нижнюю клавиатуру (кнопку-ссылку в такое сообщение добавить нельзя — напишите в тексте /menu)
+            Убрать у получателей старую нижнюю клавиатуру. Если кнопка-ссылка не задана, под сообщением будет «☰ Открыть меню»
           </Checkbox>
           <Checkbox checked={onlyLegacy} onChange={event => setOnlyLegacy(event.currentTarget.checked)}>
             Только активировавшим бота до {legacyDate || '…'} — у них ещё старая клавиатура
