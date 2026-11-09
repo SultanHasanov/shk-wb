@@ -670,7 +670,8 @@ export function useAdminNews() {
   });
 }
 
-export type AdminTelegramAudience = { activated: number; available: number; blocked: number };
+/** legacy — активировали бота до legacyBefore: у них ещё висит старая нижняя клавиатура. */
+export type AdminTelegramAudience = { activated: number; available: number; blocked: number; legacy: number; legacyBefore: string };
 export type AdminTelegramBroadcastResult = { sent: number; failed: number; blocked: number; total: number };
 
 export function useAdminTelegramAudience() {
@@ -684,7 +685,7 @@ export function useAdminTelegramAudience() {
 export function useAdminTelegramBroadcast() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { text: string; button?: string; url?: string }) =>
+    mutationFn: (body: { text: string; button?: string; url?: string; removeKeyboard?: boolean; onlyLegacy?: boolean }) =>
       adminApi<AdminTelegramBroadcastResult>('/api/admin/cabinet/telegram-broadcast', {
         method: 'POST', body: JSON.stringify(body),
       }),

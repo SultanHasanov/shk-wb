@@ -53,12 +53,15 @@ function persistLocalConnections() {
   fs.writeFileSync(temporary, JSON.stringify([...localWbConnections.values()]), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(temporary, file);
 }
-// Старая постоянная клавиатура: больше не отправляется, но её кнопки ещё есть у людей — тексты принимаем.
-const HOME_KEYBOARD = {
-  keyboard: [[{ text: '☰ Меню' }, { text: '🏷 Стикеры и QR' }]],
-  resize_keyboard: true,
-  is_persistent: false,
-};
+// Подписи старых постоянных (reply) клавиатур: семикнопочной (до 20.10.2026) и двухкнопочной (до 26.10.2026).
+// Бот их больше не отправляет, но Telegram держит такую клавиатуру у человека, пока бот не пришлёт
+// remove_keyboard — инлайн-меню её не заменяет. Текст с такой подписью приходит только с той клавиатуры
+// (инлайн-кнопки — это callback), поэтому он же и сигнал снять её: см. dropLegacyKeyboard.
+const LEGACY_BUTTONS = new Set([
+  '☰ Меню', '🏷 Стикеры и QR', '🆘 Помощь', '🌐 Открыть сайт', '➕ Создать ШК',
+  '🏷 Стикеры для товаров', '📦 QR для коробок', '💳 Остаток', '👤 Аккаунт', '⭐ Отзывы ПВЗ',
+  '📦 Мои индивидуальные заказы',
+]);
 
 // Ссылки на программы показываем текстом, а не кнопкой: их копируют и открывают на ПК пункта.
 const PROGRAM_URL = 'https://shk-wb.ru/program';
@@ -793,6 +796,20 @@ async function showScreen(chatId, messageId, text, options = {}) {
   }
   const message = await sendMessage(chatId, text, options);
   return message?.message_id || null;
+}
+
+/**
+ * Снять у человека старую постоянную клавиатуру: Telegram убирает её только по remove_keyboard
+ * в сообщении, поэтому шлём короткое служебное сообщение и тут же удаляем — клавиатура остаётся
+ * снятой, а в чате ничего лишнего. Ошибки не мешают основному ответу.
+ */
+async function dropLegacyKeyboard(chatId) {
+  try {
+    const message = await sendMessage(chatId, 'Меню обновлено', { reply_markup: { remove_keyboard: true } });
+    if (message?.message_id) await deleteMessage(chatId, message.message_id).catch(() => {});
+  } catch (error) {
+    console.warn('Не удалось снять старую клавиатуру', error?.message || error);
+  }
 }
 
 // ── Мастер стикеров: одно сообщение, шаги сменяют друг друга, «⬅️ Назад» — на шаг раньше ──
@@ -2747,6 +2764,7 @@ async function handleMessage(message) {
     const bonusCommand = parseBonusCommand(text);
     if (bonusCommand) return startBonus(from, chatId, bonusCommand);
   }
+  if (LEGACY_BUTTONS.has(text)) await dropLegacyKeyboard(chatId);
   if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(chatId);
   if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
@@ -2904,4 +2922,4 @@ async function handleTelegramUpdate(req, res) {
 function forgetSiteUser(userId) { userCache.forgetSiteUser(userId); return true; }
 function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramId); return true; }
 
-module.exports = { BOT_COMMANDS, HOME_KEYBOARD, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

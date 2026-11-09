@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useAdminNews, useAdminTelegramAudience, useAdminTelegramBroadcast,
@@ -5,7 +6,7 @@ import {
 } from '../../api/admin';
 import { dateTime, money } from '../../api/cabinet';
 import {
-  Alert, Badge, Button, Card, EmptyState, Field, Input, Skeleton, Table, Textarea, useToast,
+  Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Input, Skeleton, Table, Textarea, useToast,
 } from '../../ui';
 import s from '../../layout/AdminShell.module.css';
 
@@ -25,6 +26,12 @@ export function AdminCabinetPage() {
   const news = useAdminNews();
   const telegramAudience = useAdminTelegramAudience();
   const telegramBroadcast = useAdminTelegramBroadcast();
+  // Снятие старой нижней клавиатуры несовместимо с кнопкой-ссылкой: у сообщения один reply_markup.
+  const [removeKeyboard, setRemoveKeyboard] = useState(false);
+  const [onlyLegacy, setOnlyLegacy] = useState(false);
+  const legacyDate = telegramAudience.data?.legacyBefore
+    ? new Date(telegramAudience.data.legacyBefore).toLocaleDateString('ru-RU')
+    : '';
 
   const act = (id: string, status: 'approved' | 'paid' | 'rejected') =>
     update.mutate({ id, status }, {
@@ -89,16 +96,19 @@ export function AdminCabinetPage() {
             event.preventDefault();
             const formElement = event.currentTarget;
             const form = new FormData(formElement);
-            const available = telegramAudience.data?.available ?? 0;
-            if (!window.confirm(`Отправить персональную рассылку ${available} получателям?`)) return;
+            const available = (onlyLegacy ? telegramAudience.data?.legacy : telegramAudience.data?.available) ?? 0;
+            const extra = removeKeyboard ? ' и убрать у них старую нижнюю клавиатуру' : '';
+            if (!window.confirm(`Отправить персональную рассылку ${available} получателям${extra}?`)) return;
             telegramBroadcast.mutate({
               text: String(form.get('text') || ''),
-              button: String(form.get('button') || ''),
-              url: String(form.get('url') || ''),
+              button: removeKeyboard ? '' : String(form.get('button') || ''),
+              url: removeKeyboard ? '' : String(form.get('url') || ''),
+              removeKeyboard,
+              onlyLegacy,
             }, {
               onSuccess: result => {
                 toast(`Отправлено: ${result.sent}. Ошибок: ${result.failed}. Недоступны: ${result.blocked}.`, result.failed ? 'default' : 'success');
-                if (!result.failed) formElement.reset();
+                if (!result.failed) { formElement.reset(); setRemoveKeyboard(false); setOnlyLegacy(false); }
               },
               onError: (error: Error) => toast(error.message, 'error'),
             });
@@ -107,8 +117,15 @@ export function AdminCabinetPage() {
           <Field label="Текст" help="Переменные: {name}, {first_name}, {last_name}, {username}">
             <Textarea name="text" rows={5} maxLength={3500} placeholder="Здравствуйте, {name}!" required />
           </Field>
-          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} /></Field>
-          <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" /></Field>
+          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} disabled={removeKeyboard} /></Field>
+          <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" disabled={removeKeyboard} /></Field>
+          <Checkbox checked={removeKeyboard} onChange={event => setRemoveKeyboard(event.currentTarget.checked)}>
+            Убрать у получателей старую нижнюю клавиатуру (кнопку-ссылку в такое сообщение добавить нельзя — напишите в тексте /menu)
+          </Checkbox>
+          <Checkbox checked={onlyLegacy} onChange={event => setOnlyLegacy(event.currentTarget.checked)}>
+            Только активировавшим бота до {legacyDate || '…'} — у них ещё старая клавиатура
+            {telegramAudience.data ? ` (${telegramAudience.data.legacy} чел.)` : ''}
+          </Checkbox>
           <Button type="submit" loading={telegramBroadcast.isPending} disabled={!telegramAudience.data?.available}>
             Отправить в Telegram
           </Button>

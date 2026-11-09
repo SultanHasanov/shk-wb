@@ -6,7 +6,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   escapeHtml: (value: unknown) => string;
   publicUrl: (path: string) => string;
   validWebhookSecret: (req: {headers: Record<string, string>}) => boolean;
-  HOME_KEYBOARD: {keyboard: Array<Array<Record<string, any>>>};
+  LEGACY_BUTTONS: Set<string>;
   mainMenuKeyboard: (signedIn: boolean) => {inline_keyboard: Array<Array<Record<string, any>>>};
   profileKeyboard: (options?: Record<string, boolean>) => {inline_keyboard: Array<Array<Record<string, any>>>};
   topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
@@ -120,8 +120,9 @@ describe('Telegram sticker generator bot', () => {
     const guest = bot.mainMenuKeyboard(false).inline_keyboard.flat();
     expect(guest.some(button => button.callback_data === 'menu:login')).toBe(false);
     expect(guest.some(button => button.callback_data === 'menu:profile')).toBe(true);
-    // Постоянная клавиатура — только быстрый возврат, всё остальное в инлайн-меню.
-    expect(bot.HOME_KEYBOARD.keyboard.flat().map(button => button.text)).toEqual(['☰ Меню', '🏷 Стикеры и QR']);
+    // Постоянной клавиатуры больше нет; подписи старых reply-кнопок известны — по ним бот снимает её у человека.
+    for (const label of ['☰ Меню', '🏷 Стикеры и QR', '🆘 Помощь', '🌐 Открыть сайт', '📦 QR для коробок']) expect(bot.LEGACY_BUTTONS.has(label)).toBe(true);
+    expect(bot.LEGACY_BUTTONS.has('/menu')).toBe(false);
   });
 
   it('валидирует префикс коробки и экранирует HTML', () => {

@@ -17,8 +17,12 @@ function personalize(template,subscriber){
   return template.replace(/[&<>]|\{(name|first_name|last_name|username)\}/g,(match,key)=>key?escapeHtml(values[key]):escapeHtml(match));
 }
 function delay(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
-async function sendBroadcastMessage(subscriber,text,button,url){
-  const options=button&&url?{reply_markup:{inline_keyboard:[[{text:button,url}]]}}:{};
+// До этой даты бот слал постоянную (reply) клавиатуру; у активировавших бота раньше она висит до сих пор,
+// пока не придёт сообщение с remove_keyboard (семикнопочная ушла 20.10.2026, двухкнопочная — 26.10.2026).
+const LEGACY_KEYBOARD_BEFORE='2026-10-27T00:00:00Z';
+async function sendBroadcastMessage(subscriber,text,button,url,removeKeyboard=false){
+  // У сообщения один reply_markup: либо инлайн-кнопка, либо снятие старой клавиатуры.
+  const options=removeKeyboard?{reply_markup:{remove_keyboard:true}}:button&&url?{reply_markup:{inline_keyboard:[[{text:button,url}]]}}:{};
   try{return await sendMessage(subscriber.chat_id,personalize(text,subscriber),options)}
   catch(error){
     const retryAfter=Number(error.details?.parameters?.retry_after||0);
@@ -54,12 +58,13 @@ module.exports=async function handler(req,res){
       return res.status(201).json({sent,campaign});
     }
     if(action==='telegram-audience'&&req.method==='GET'){
-      const [all,active]=await Promise.all([
+      const [all,active,legacyRows]=await Promise.all([
         supabaseFetchWithMeta('telegram_bot_subscribers?select=telegram_user_id&limit=1',{headers:{Range:'0-0'}}),
         supabaseFetchWithMeta('telegram_bot_subscribers?blocked_at=is.null&select=telegram_user_id&limit=1',{headers:{Range:'0-0'}}),
+        supabaseFetchWithMeta(`telegram_bot_subscribers?blocked_at=is.null&activated_at=lt.${LEGACY_KEYBOARD_BEFORE}&select=telegram_user_id&limit=1`,{headers:{Range:'0-0'}}),
       ]);
-      const activated=all.count||0,available=active.count||0;
-      return res.json({activated,available,blocked:activated-available});
+      const activated=all.count||0,available=active.count||0,legacy=legacyRows.count||0;
+      return res.json({activated,available,blocked:activated-available,legacy,legacyBefore:LEGACY_KEYBOARD_BEFORE});
     }
     if(action==='telegram-broadcast'&&req.method==='POST'){
       const text=String(req.body?.text||'').trim();
@@ -68,17 +73,21 @@ module.exports=async function handler(req,res){
       if(!text||text.length>3500)return res.status(400).json({error:'Введите текст до 3500 символов'});
       if((button&&!url)||(!button&&url)||button.length>64)return res.status(400).json({error:'Для кнопки нужны подпись и ссылка'});
       if(url){try{const parsed=new URL(url);if(parsed.protocol!=='https:')throw new Error()}catch{return res.status(400).json({error:'Укажите корректную https-ссылку'})}}
+      const removeKeyboard=req.body?.removeKeyboard===true;
+      const onlyLegacy=req.body?.onlyLegacy===true;
+      if(removeKeyboard&&button)return res.status(400).json({error:'Снятие старой клавиатуры нельзя совместить с кнопкой: у сообщения один reply_markup'});
+      const legacyFilter=onlyLegacy?`&activated_at=lt.${LEGACY_KEYBOARD_BEFORE}`:'';
       let sent=0,failed=0,blocked=0,total=0,lastTelegramId=null;
       while(true){
         const cursor=lastTelegramId==null?'':`&telegram_user_id=gt.${lastTelegramId}`;
-        const subscribers=await supabaseFetch(`telegram_bot_subscribers?blocked_at=is.null${cursor}&select=telegram_user_id,chat_id,username,first_name,last_name&order=telegram_user_id.asc&limit=200`);
+        const subscribers=await supabaseFetch(`telegram_bot_subscribers?blocked_at=is.null${legacyFilter}${cursor}&select=telegram_user_id,chat_id,username,first_name,last_name&order=telegram_user_id.asc&limit=200`);
         if(!subscribers.length)break;
         total+=subscribers.length;
         lastTelegramId=subscribers[subscribers.length-1].telegram_user_id;
         for(let offset=0;offset<subscribers.length;offset+=20){
           const results=await Promise.all(subscribers.slice(offset,offset+20).map(async subscriber=>{
           try{
-            await sendBroadcastMessage(subscriber,text,button,url);
+            await sendBroadcastMessage(subscriber,text,button,url,removeKeyboard);
             await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${subscriber.telegram_user_id}`,{method:'PATCH',body:JSON.stringify({last_broadcast_at:new Date().toISOString()})});
             return 'sent';
           }catch(error){
