@@ -280,6 +280,7 @@ describe('зеркало — услуга «Пункт с любого ПК»', 
     await handler(request('points'), res);
     expect((res.body as { points: { mirrorAt: string | null }[] }).points.map(p => p.mirrorAt)).toEqual([created, created]);
 
+    (require('../../server/_app-device-cache.js') as { forgetUserData: (u: null) => void }).forgetUserData(null); // оплата сбрасывает права (_supabase.js), здесь она подменена
     mockSupabase(route, { plan: 'standard', device_limit: 2, addons: { mirror_1: future } });
     res = response();
     await handler(request('points'), res);

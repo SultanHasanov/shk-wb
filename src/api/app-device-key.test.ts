@@ -275,6 +275,77 @@ describe('память о ПК и токенах', () => {
   });
 });
 
+describe('память о пунктах, документах и правах', () => {
+  const cache = require('../../server/_app-device-cache.js') as {
+    DATA_TTL_MS: number; currentDataEpoch: () => number; forgetUserData: (u: string | null) => void;
+    getUserData: (u: string, p: string) => unknown; putUserData: (u: string, p: string, v: unknown, e: number) => void;
+  };
+  const { supabaseFetch } = require('../../server/_supabase.js') as { supabaseFetch: (p: string, o?: Record<string, unknown>) => Promise<unknown> };
+  const OTHER = '22222222-2222-4222-8222-222222222222';
+  const count = (part: string) => calls.filter(c => c.url.includes(part)).length;
+  const poll = (action: string) => call(action, { device: WORK });
+  const seed = (u: string) => cache.putUserData(u, 'points', [{ id: 'x' }], cache.currentDataEpoch());
+
+  it('points: строки и права читаются один раз за срок; права для me — всегда свежие', async () => {
+    await poll('points');
+    await poll('points');
+    expect(count('select=id,wb_point_id,name,last_sync_at')).toBe(1);
+    expect(count('rpc/app_entitlements')).toBe(1);
+    await call('me', { device: WORK });
+    expect(count('rpc/app_entitlements')).toBeGreaterThan(1);
+    const after = count('select=id,wb_point_id,name,last_sync_at');
+    await vi.advanceTimersByTimeAsync(cache.DATA_TTL_MS);
+    await poll('points');
+    expect(count('select=id,wb_point_id,name,last_sync_at')).toBe(after + 1);
+  });
+
+  it('docs читаются один раз за срок, секреты — каждый раз', async () => {
+    await poll('docs');
+    await poll('docs');
+    expect(count('secret=eq.false')).toBe(1);
+    await poll('secrets');
+    await poll('secrets');
+    expect(count('secret=eq.true')).toBe(2);
+  });
+
+  it('запись пункта или документа забывает только этого пользователя', async () => {
+    for (const [path, options] of [
+      ['app_points?id=eq.p1&user_id=eq.' + USER, { method: 'PATCH', body: '{}' }],
+      ['rpc/app_doc_put', { method: 'POST', body: JSON.stringify({ p_user: USER }) }],
+      ['rpc/app_register_point', { method: 'POST', body: JSON.stringify({ p_user: USER }) }],
+    ] as [string, Record<string, unknown>][]) {
+      seed(USER); seed(OTHER);
+      await supabaseFetch(path, options).catch(() => {});
+      expect(cache.getUserData(USER, 'points')).toBeNull();
+      expect(cache.getUserData(OTHER, 'points')).not.toBeNull();
+    }
+  });
+
+  it('оплата и выдача подписки сбрасывают права сразу, в том числе при сбое запроса', async () => {
+    for (const path of ['rpc/complete_app_addon_order', 'rpc/complete_app_subscription_order', 'rpc/admin_grant_app_addon', 'rpc/admin_revoke_app_subscription', 'app_subscriptions?id=eq.1']) {
+      seed(USER);
+      await supabaseFetch(path, { method: path.startsWith('rpc') ? 'POST' : 'PATCH', body: '{}' }).catch(() => {});
+      expect(cache.getUserData(USER, 'points')).toBeNull();
+    }
+  });
+
+  it('служебная отметка и чтение память не сбрасывают; запись без пользователя сбрасывает всем', async () => {
+    seed(USER);
+    await supabaseFetch('app_points?id=eq.p1', { method: 'PATCH', keepCache: true, body: '{}' }).catch(() => {});
+    await supabaseFetch('app_points?user_id=eq.' + USER, {}).catch(() => {});
+    expect(cache.getUserData(USER, 'points')).not.toBeNull();
+    await supabaseFetch('app_points?id=eq.p1', { method: 'PATCH', body: '{}' }).catch(() => {});
+    expect(cache.getUserData(USER, 'points')).toBeNull();
+  });
+
+  it('чтение, начатое до записи, не сохраняется', () => {
+    const epoch = cache.currentDataEpoch();
+    cache.forgetUserData(USER);
+    cache.putUserData(USER, 'points', [], epoch);
+    expect(cache.getUserData(USER, 'points')).toBeNull();
+  });
+});
+
 describe('лимиты частоты', () => {
   const req = { headers: {}, socket: { remoteAddress: '127.0.0.1' } };
 

@@ -12,6 +12,7 @@ const { supabaseFetch } = require('./_supabase');
 const { open, seal } = require('./_app-crypto');
 const { appError, dbErrorCode, entitlementsFor } = require('./_app-account');
 const archive = require('./_archive-db');
+const deviceCache = require('./_app-device-cache');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PUSH_ROWS = 1000;
@@ -47,10 +48,15 @@ async function requireArchive(userId) {
 // ---------- пункты ----------
 
 async function listPoints(userId) {
-  const rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,created_at,last_device_id&order=created_at.asc`);
-  // сбой отметок зеркала не должен ломать список пунктов
+  let rows = deviceCache.getUserData(userId, 'points');
+  if (!rows) {
+    const epoch = deviceCache.currentDataEpoch();
+    rows = await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,wb_point_id,name,last_sync_at,created_at,last_device_id&order=created_at.asc`);
+    deviceCache.putUserData(userId, 'points', rows, epoch);
+  }
+  // сбой отметок зеркала не должен ломать список пунктов; meta — всегда свежая (см. _app-device-cache.js)
   const [allowed, meta] = await Promise.all([
-    mirrorAllowedSet(userId, rows).catch(() => new Set()),
+    mirrorAllowedSet(userId, rows, { cachedPlan: true }).catch(() => new Set()),
     archive.mirrorMeta(rows.map(p => p.id)).catch(error => { console.error('mirror meta:', error.message); return {}; }),
   ]);
   return rows.map(p => ({
@@ -161,6 +167,7 @@ async function archivePush(userId, pointId, body) {
   if (process.env.ARCHIVE_DATABASE_URL) {
     await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}`, {
       method: 'PATCH',
+      keepCache: true, // служебная отметка каждые 5 минут: сбрасывать из-за неё список пунктов незачем
       body: JSON.stringify({ last_sync_at: new Date().toISOString() }),
     }).catch(error => console.error('last_sync_at:', error.message));
   }
@@ -216,9 +223,9 @@ function mirrorDisabled() {
 }
 
 // Пункты, у которых хранится зеркало. points — уже загруженные пункты аккаунта по порядку подключения.
-async function mirrorAllowedSet(userId, points) {
+async function mirrorAllowedSet(userId, points, { cachedPlan = false } = {}) {
   if (mirrorDisabled()) return new Set();
-  const { mirror } = await entitlementsFor(userId);
+  const { mirror } = await entitlementsFor(userId, { cached: cachedPlan });
   if (mirror <= 0) return new Set();
   const rows = points || await supabaseFetch(`app_points?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id&order=created_at.asc&limit=${mirror}`);
   return new Set(rows.slice(0, mirror).map(r => r.id));
@@ -279,9 +286,16 @@ async function scopeFor(userId, kind, pointId) {
 
 async function docsGet(userId, deviceId, { point, secret = false }) {
   const keys = secret ? SECRET_KEYS : DOC_KEYS;
-  const scopes = ['account'];
-  if (point) scopes.push((await ownPoint(userId, point)).id);
-  const rows = await supabaseFetch(`app_docs?user_id=eq.${encodeURIComponent(userId)}&secret=eq.${secret}&scope=in.(${scopes.map(s => `"${s}"`).join(',')})&select=scope,key,version,data_enc,updated_at`);
+  // Секреты не кэшируем: их мало, а каждое чтение пишется в журнал доступа.
+  const part = `docs:${point || ''}`;
+  let rows = secret ? null : deviceCache.getUserData(userId, part);
+  if (!rows) {
+    const epoch = deviceCache.currentDataEpoch();
+    const scopes = ['account'];
+    if (point) scopes.push((await ownPoint(userId, point)).id);
+    rows = await supabaseFetch(`app_docs?user_id=eq.${encodeURIComponent(userId)}&secret=eq.${secret}&scope=in.(${scopes.map(s => `"${s}"`).join(',')})&select=scope,key,version,data_enc,updated_at`);
+    if (!secret) deviceCache.putUserData(userId, part, rows, epoch);
+  }
   const out = {};
   for (const row of rows) {
     const kind = keys[row.key];

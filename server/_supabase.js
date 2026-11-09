@@ -21,17 +21,33 @@ function retriesFor(path, options) {
   return 0;
 }
 
-// Любая запись о ПК очищает их память (server/_app-device-cache.js) — здесь, а не у каждого вызова, чтобы новое
-// место записи нельзя было забыть. keepDeviceCache — только для отметки «был в сети», она прав не меняет.
-function changesDevices(path, options) {
+// Любая запись очищает память о ней (server/_app-device-cache.js) — здесь, а не у каждого вызова, чтобы новое
+// место записи нельзя было забыть. keepCache — только для служебных отметок («был в сети», время синхронизации).
+const DEVICE_WRITE = /^(app_devices([?/]|$)|rpc\/app_register_device\b)/;
+const USER_DATA_WRITE = /^(app_points|app_docs)([?/]|$)|^rpc\/(app_register_point|app_doc_put)\b/;
+const PLAN_WRITE = /^(app_subscriptions|app_addons)([?/]|$)|^rpc\/(complete_app_|admin_grant_app_|admin_revoke_app_|app_apply_)/;
+
+function userOfWrite(path, body) {
+  const match = /[?&]user_id=eq\.([0-9a-f-]{36})/i.exec(path);
+  if (match) return match[1];
+  try {
+    return JSON.parse(body).p_user || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function dropCaches(path, options) {
   const method = String(options.method || 'GET').toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || options.keepDeviceCache) return false;
-  return /^(app_devices([?/]|$)|rpc\/app_register_device\b)/.test(path);
+  if (method === 'GET' || method === 'HEAD' || options.keepCache) return;
+  if (DEVICE_WRITE.test(path)) deviceCache.clearDevices();
+  if (USER_DATA_WRITE.test(path)) deviceCache.forgetUserData(userOfWrite(path, options.body));
+  if (PLAN_WRITE.test(path)) deviceCache.forgetUserData(null);
 }
 
 async function request(path, options, extraHeaders) {
   const { url, key } = getConfig();
-  const { keepDeviceCache: _keep, ...fetchOptions } = options;
+  const { keepCache: _keep, ...fetchOptions } = options;
   const headers = {
     apikey: key,
     'Content-Type': 'application/json',
@@ -43,7 +59,7 @@ async function request(path, options, extraHeaders) {
     response = await fetchWithRetry(`${url}/rest/v1/${path}`, { ...fetchOptions, headers }, { retries: retriesFor(path, options), label: 'supabase' });
   } finally {
     // и при ошибке: ответ мог потеряться, а запись — пройти
-    if (changesDevices(path, options)) deviceCache.clearDevices();
+    dropCaches(path, options);
   }
   const text = await response.text();
   let data = null;

@@ -58,6 +58,37 @@ function forgetToken(hash) {
   tokens.delete(hash);
 }
 
+// Опросы points, docs и права для /points: их пишет только этот процесс, запись сбрасывает их сразу (_supabase.js),
+// поэтому срок длиннее — он важен лишь для изменений с узла бота (покупка услуги там дойдёт не позже него).
+// data_enc хранится зашифрованным: расшифровка — на каждый ответ. Метка зеркала сюда не попадает никогда:
+// устаревшее пустое значение заставляет программу слать зеркало целиком.
+const DATA_TTL_MS = 5 * 60_000;
+const userData = new Map(); // `${userId}|${часть}`
+let dataEpoch = 0;
+
+function currentDataEpoch() {
+  return dataEpoch;
+}
+
+function getUserData(userId, part) {
+  return read(userData, `${userId}|${part}`);
+}
+
+function putUserData(userId, part, value, seenEpoch) {
+  if (seenEpoch === dataEpoch) write(userData, `${userId}|${part}`, value, Date.now() + DATA_TTL_MS);
+}
+
+/** userId = null — всем (оплата, выдача подписки или запись, по которой пользователя не определить). */
+function forgetUserData(userId) {
+  dataEpoch += 1;
+  if (!userId) {
+    userData.clear();
+    return;
+  }
+  const prefix = `${userId}|`;
+  for (const key of userData.keys()) if (key.startsWith(prefix)) userData.delete(key);
+}
+
 // Когда ПК последний раз отмечен «в сети»: в строке из памяти last_seen_at не меняется, и без этого ПК отмечался бы на каждый запрос.
 const touched = new Map();
 
@@ -74,6 +105,7 @@ function resetForTests() {
   devices.clear();
   tokens.clear();
   touched.clear();
+  userData.clear();
 }
 
-module.exports = { TTL_MS, clearDevices, currentEpoch, forgetToken, getDevice, getToken, lastTouched, markTouched, putDevice, putToken, resetForTests };
+module.exports = { DATA_TTL_MS, TTL_MS, clearDevices, currentDataEpoch, currentEpoch, forgetToken, forgetUserData, getDevice, getToken, getUserData, lastTouched, markTouched, putDevice, putToken, putUserData, resetForTests };

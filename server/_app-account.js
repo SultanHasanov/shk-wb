@@ -55,9 +55,21 @@ function withMirror(features, mirror) {
 }
 
 // Права аккаунта целиком: тариф, услуги, фичи и лимиты ПК/пунктов.
-async function entitlementsFor(userId) {
+async function loadEntitlements(userId, cached) {
+  const load = () => supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) });
+  if (!cached) return load();
+  const hit = deviceCache.getUserData(userId, 'plan');
+  if (hit) return hit;
+  const epoch = deviceCache.currentDataEpoch();
+  const ent = await load();
+  deviceCache.putUserData(userId, 'plan', ent, epoch);
+  return ent;
+}
+
+// cached — только для фонового /points, где нужен лишь признак зеркала: счётчики кодов в этом ответе могут устареть.
+async function entitlementsFor(userId, { cached = false } = {}) {
   const [ent, free] = await Promise.all([
-    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }),
+    loadEntitlements(userId, cached),
     appFreeMode(),
   ]);
   const unlimited = isUnlimited(userId);
@@ -301,7 +313,7 @@ async function touchDevice(device, req) {
   deviceCache.markTouched(device.id);
   await supabaseFetch(`app_devices?id=eq.${device.id}`, {
     method: 'PATCH',
-    keepDeviceCache: true,
+    keepCache: true,
     body: JSON.stringify({ last_seen_at: new Date().toISOString(), app_version: String(req.headers['x-app-version'] || '').slice(0, 32) }),
   }).catch(() => {});
 }
