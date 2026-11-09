@@ -17,6 +17,18 @@ const MAX_OPEN = 20;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ANSWERS = Object.freeze({ ok: 'Хорошо', done: 'Сделано', cannot: 'Не могу', closed: 'Закрыл окно', reply: 'Ответ' });
 
+// inbox каждого ПК спрашивал базу дважды за цикл (PATCH + SELECT), почти всегда впустую — это была треть всех
+// запросов к Supabase. Теперь «сообщений нет» помним в памяти: сообщения пишет только этот процесс (send).
+// Срок — подстраховка на случай строки, добавленной мимо send (руками в SQL): ПК увидит её не позже, чем через него.
+const EMPTY_TTL_MS = 10 * 60_000;
+const knownEmpty = new Map(); // deviceId → до какого времени считать, что непрочитанных нет
+let sendEpoch = 0; // растёт с каждой отправкой: чтение, начатое до неё, не имеет права запомнить «пусто»
+
+function forgetEmpty(deviceId) {
+  sendEpoch += 1;
+  knownEmpty.delete(deviceId);
+}
+
 function cleanText(value, max = MAX_TEXT) {
   return String(value ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim().slice(0, max);
 }
@@ -57,11 +69,17 @@ async function send({ userId, deviceId, text }) {
   if (!devices.length) throw appError(404, 'NOT_FOUND', 'Компьютер не найден или отключён');
   const open = await supabaseFetch(`app_device_messages?device_id=eq.${enc(deviceId)}&answered_at=is.null&expires_at=gt.${enc(new Date().toISOString())}&select=id&limit=${MAX_OPEN}`);
   if (open.length >= MAX_OPEN) throw appError(409, 'TOO_MANY_OPEN', `На этом компьютере уже ${MAX_OPEN} сообщений без ответа — дождитесь ответа`);
-  const rows = await supabaseFetch('app_device_messages', {
-    method: 'POST',
-    headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({ user_id: userId, device_id: deviceId, text: clean }),
-  });
+  let rows;
+  try {
+    rows = await supabaseFetch('app_device_messages', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ user_id: userId, device_id: deviceId, text: clean }),
+    });
+  } finally {
+    // и при ошибке: ответ мог потеряться, а строка — записаться
+    forgetEmpty(deviceId);
+  }
   relay.wake(userId, deviceId);
   return mapMessage(rows[0]);
 }
@@ -81,10 +99,14 @@ async function list(userId, { deviceId, limit = 50 } = {}) {
  * чтобы потерянный ответ inbox не терял сообщение — ПК дедуплицирует по id.
  */
 async function pull(userId, deviceId) {
+  if ((knownEmpty.get(deviceId) || 0) > Date.now()) return [];
+  const epoch = sendEpoch;
   const now = new Date().toISOString();
   const base = `app_device_messages?user_id=eq.${enc(userId)}&device_id=eq.${enc(deviceId)}&expires_at=gt.${enc(now)}`;
   await supabaseFetch(`${base}&delivered_at=is.null`, { method: 'PATCH', body: JSON.stringify({ delivered_at: now }) }).catch(() => {});
   const rows = await supabaseFetch(`${base}&read_at=is.null&select=id,text,created_at&order=created_at.asc&limit=${MAX_OPEN}`);
+  if (rows.length) knownEmpty.delete(deviceId);
+  else if (epoch === sendEpoch) knownEmpty.set(deviceId, Date.now() + EMPTY_TTL_MS);
   return rows.map(row => ({ id: row.id, text: row.text, createdAt: row.created_at }));
 }
 
@@ -147,4 +169,8 @@ async function cleanup(days = 30) {
   await supabaseFetch(`app_device_messages?created_at=lt.${enc(before)}`, { method: 'DELETE' });
 }
 
-module.exports = { ANSWERS, MAX_OPEN, MAX_TEXT, ack, cleanup, list, mapMessage, pull, send };
+function resetForTests() {
+  knownEmpty.clear();
+}
+
+module.exports = { ANSWERS, EMPTY_TTL_MS, MAX_OPEN, MAX_TEXT, ack, cleanup, list, mapMessage, pull, resetForTests, send };

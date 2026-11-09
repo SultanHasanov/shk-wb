@@ -9,6 +9,15 @@ type Handler = (req: unknown, res: unknown) => Promise<unknown>;
 const handler = require('../../api/app.js') as Handler;
 const relay = require('../../server/_app-relay.js') as { resetForTests: () => void; onlineIds: (u: string) => Set<string> };
 const account = require('../../server/_app-account.js') as { leaseRights: (req: unknown) => Promise<{ features: string[]; via?: string; user: string | null }> };
+const messages = require('../../server/_app-messages.js') as {
+  EMPTY_TTL_MS: number;
+  pull: (userId: string, deviceId: string) => Promise<{ id: string }[]>;
+  send: (args: { userId: string; deviceId: string; text: string }) => Promise<unknown>;
+  resetForTests: () => void;
+};
+const { enforceRateLimit } = require('../../server/_rate-limit.js') as {
+  enforceRateLimit: (req: unknown, res: unknown, opts: { scope: string; limit: number; windowSeconds: number; key?: string }) => Promise<boolean>;
+};
 
 const USER = '11111111-1111-4111-8111-111111111111';
 const WORK = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -97,6 +106,7 @@ beforeEach(() => {
   delete process.env.APP_UNLIMITED_USER_IDS;
   state = { keyHash: null, revoked: false, alertSound: null, messages: [] };
   relay.resetForTests();
+  messages.resetForTests();
   mockSupabase();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 });
@@ -161,6 +171,25 @@ describe('ключ устройства', () => {
   });
 });
 
+describe('лимиты частоты', () => {
+  const req = { headers: {}, socket: { remoteAddress: '127.0.0.1' } };
+
+  it('фоновые потолки считаются в памяти, без запроса к базе, и соблюдаются', async () => {
+    const opts = { scope: 'app-relay', limit: 2, windowSeconds: 600, key: `memory-${Math.random()}` };
+    expect(await enforceRateLimit(req, response(), opts)).toBe(true);
+    expect(await enforceRateLimit(req, response(), opts)).toBe(true);
+    const blocked = response();
+    expect(await enforceRateLimit(req, blocked, opts)).toBe(false);
+    expect(blocked.statusCode).toBe(429);
+    expect(calls.some(c => c.url.includes('consume_api_rate_limit'))).toBe(false);
+  });
+
+  it('лимиты входа по-прежнему в базе', async () => {
+    expect(await enforceRateLimit(req, response(), { scope: 'app-login', limit: 10, windowSeconds: 600 })).toBe(true);
+    expect(calls.some(c => c.url.includes('consume_api_rate_limit'))).toBe(true);
+  });
+});
+
 describe('сообщения владельца на ПК', () => {
   it('кабинет шлёт — спящий inbox ПК просыпается с сообщением, доставка отмечена', async () => {
     const key = await loginKey();
@@ -175,6 +204,58 @@ describe('сообщения владельца на ПК', () => {
     expect(state.messages[0].delivered_at).toBeTruthy();
     const list = await call('messages', { query: { device: WORK } });
     expect((list.body as { items: { status: string }[] }).items[0].status).toBe('delivered');
+  });
+
+  it('пустой inbox не спрашивает базу о сообщениях, пока не истёк срок отметки', async () => {
+    const key = await loginKey();
+    const inbox = async () => {
+      const pending = call('relay-inbox', { method: 'POST', device: WORK, auth: false, headers: { 'x-device-key': key }, body: { name: 'Рабочий', points: [] } });
+      await vi.advanceTimersByTimeAsync(26_000);
+      expect((await pending).statusCode).toBe(200);
+    };
+    const asked = () => calls.filter(c => c.url.includes('app_device_messages')).length;
+    await inbox();
+    expect(asked()).toBe(2); // один PATCH и один SELECT за весь цикл вместо двух пар
+    await inbox();
+    expect(asked()).toBe(2);
+    await vi.advanceTimersByTimeAsync(messages.EMPTY_TTL_MS);
+    await inbox();
+    expect(asked()).toBe(4);
+  });
+
+  it('сообщение после отметки «пусто» доходит сразу', async () => {
+    expect(await messages.pull(USER, WORK)).toEqual([]);
+    await messages.send({ userId: USER, deviceId: WORK, text: 'Новое' });
+    expect(await messages.pull(USER, WORK)).toMatchObject([{ id: MSG }]);
+  });
+
+  it('отправка во время чтения: устаревшее «пусто» не запоминается', async () => {
+    const base = globalThis.fetch;
+    let raced = false;
+    vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) => {
+      const response = await base(url, init as RequestInit);
+      if (!raced && url.includes('app_device_messages') && (init?.method || 'GET') === 'GET') {
+        raced = true;
+        await messages.send({ userId: USER, deviceId: WORK, text: 'В гонке' });
+      }
+      return response;
+    });
+    expect(await messages.pull(USER, WORK)).toEqual([]); // чтение прошло раньше вставки
+    expect(await messages.pull(USER, WORK)).toMatchObject([{ id: MSG }]);
+  });
+
+  it('сбой записи сообщения снимает отметку: строка могла записаться', async () => {
+    expect(await messages.pull(USER, WORK)).toEqual([]);
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('app_device_messages') && init?.method === 'POST') throw new Error('response lost');
+      return base(url, init as RequestInit);
+    });
+    await expect(messages.send({ userId: USER, deviceId: WORK, text: 'Потеря ответа' })).rejects.toThrow();
+    vi.stubGlobal('fetch', base);
+    const before = calls.length;
+    await messages.pull(USER, WORK);
+    expect(calls.length).toBeGreaterThan(before);
   });
 
   it('ack read → показано; ack done → ответ и уведомление владельцу', async () => {
