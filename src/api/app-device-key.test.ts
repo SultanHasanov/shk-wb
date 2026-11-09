@@ -51,12 +51,12 @@ async function call(action: string, opts: Opts = {}) {
 }
 
 // Состояние «базы» одного рабочего ПК: его строка app_devices и сообщения ему.
-type State = { keyHash: string | null; revoked: boolean; alertSound: string | null; messages: Record<string, unknown>[] };
+type State = { keyHash: string | null; revoked: boolean; alertSound: string | null; messages: Record<string, unknown>[]; lastSeen?: string };
 let state: State;
 let calls: { method: string; url: string; body: unknown }[];
 
 function deviceRow() {
-  return { id: WORK, user_id: USER, device_hash: HASH[WORK], name: 'Рабочий', last_seen_at: new Date().toISOString(), denied: [], point_wb: '900001', role: 'work', key_hash: state.keyHash, alert_sound: state.alertSound };
+  return { id: WORK, user_id: USER, device_hash: HASH[WORK], name: 'Рабочий', last_seen_at: state.lastSeen || new Date().toISOString(), denied: [], point_wb: '900001', role: 'work', key_hash: state.keyHash, alert_sound: state.alertSound };
 }
 
 function mockSupabase() {
@@ -168,6 +168,110 @@ describe('ключ устройства', () => {
     const second = (res.body as { deviceKey: string }).deviceKey;
     expect(second).not.toBe(first);
     expect(state.keyHash).toBe(sha256(second));
+  });
+});
+
+describe('память о ПК и токенах', () => {
+  const cache = require('../../server/_app-device-cache.js') as {
+    TTL_MS: number; currentEpoch: () => number; clearDevices: () => void;
+    getDevice: (k: string) => unknown; putDevice: (k: string, v: unknown, e: number) => void;
+  };
+  const jwt = (expSeconds: number) => `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + expSeconds })).toString('base64url')}.s`;
+  const bearer = (token: string) => ({ auth: false, device: WORK, headers: { authorization: `Bearer ${token}` } });
+  const authCalls = () => calls.filter(c => c.url.includes('/auth/v1/user')).length;
+  const inboxByKey = async (key: string) => {
+    const pending = call('relay-inbox', { method: 'POST', device: WORK, auth: false, headers: { 'x-device-key': key }, body: { name: 'Рабочий', points: [] } });
+    await vi.advanceTimersByTimeAsync(26_000);
+    return pending;
+  };
+  const deviceReads = () => calls.filter(c => c.method === 'GET' && c.url.includes('key_hash=not.is.null')).length;
+
+  it('поиск ПК по ключу: повторные запросы не читают базу, по истечении срока — читают', async () => {
+    const key = await loginKey();
+    await inboxByKey(key);
+    await inboxByKey(key);
+    expect(deviceReads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(cache.TTL_MS);
+    await inboxByKey(key);
+    expect(deviceReads()).toBe(2);
+  });
+
+  it('отключение ПК действует сразу, несмотря на память', async () => {
+    const key = await loginKey();
+    expect((await inboxByKey(key)).statusCode).toBe(200);
+    const off = await call('device', { method: 'DELETE', query: { id: WORK } });
+    expect(off.statusCode).toBe(204);
+    const res = await call('relay-inbox', { method: 'POST', device: WORK, auth: false, headers: { 'x-device-key': key }, body: {} });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toMatchObject({ code: 'DEVICE_REVOKED' });
+  });
+
+  it('смена запретов доходит сразу и по сессии', async () => {
+    await loginKey();
+    const before = await call('docs', { device: WORK });
+    expect(before.statusCode).toBe(200);
+    const reads = () => calls.filter(c => c.method === 'GET' && c.url.includes(`device_hash=eq.${HASH[WORK]}`) && !c.url.includes('key_hash')).length;
+    const seen = reads();
+    await call('docs', { device: WORK });
+    expect(reads()).toBe(seen);
+    await call('device', { method: 'PATCH', query: { id: WORK }, body: { alertSound: 'bell' } });
+    await call('docs', { device: WORK });
+    expect(reads()).toBe(seen + 1);
+  });
+
+  it('отметка «был в сети» не очищает память и не повторяется на каждый запрос', async () => {
+    state.lastSeen = '2026-01-01T00:00:00Z';
+    const key = await loginKey();
+    const touches = () => calls.filter(c => c.method === 'PATCH' && c.url.includes('app_devices') && (c.body as { last_seen_at?: string })?.last_seen_at && !c.url.includes('device_hash=eq')).length;
+    await inboxByKey(key);
+    await inboxByKey(key);
+    expect(touches()).toBe(1);
+    expect(deviceReads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    await inboxByKey(key);
+    expect(touches()).toBe(2);
+  });
+
+  it('чтение, начатое до записи, не сохраняется', () => {
+    const epoch = cache.currentEpoch();
+    cache.clearDevices();
+    cache.putDevice('race', { old: true }, epoch);
+    expect(cache.getDevice('race')).toBeNull();
+  });
+
+  it('токен помнится только для фоновых опросов и только его срок', async () => {
+    const token = jwt(3600);
+    await call('docs', bearer(token));
+    await call('docs', bearer(token));
+    expect(authCalls()).toBe(1);
+    await call('me', bearer(token));
+    await call('me', bearer(token));
+    expect(authCalls()).toBe(3);
+    await vi.advanceTimersByTimeAsync(cache.TTL_MS);
+    await call('docs', bearer(token));
+    expect(authCalls()).toBe(4);
+
+    const short = jwt(5);
+    await call('docs', bearer(short));
+    await vi.advanceTimersByTimeAsync(6_000);
+    await call('docs', bearer(short));
+    expect(authCalls()).toBe(6);
+  });
+
+  it('выход забывает токен сразу; отказ Auth не запоминается', async () => {
+    const token = jwt(3600);
+    await call('docs', bearer(token));
+    await call('logout', { method: 'POST', ...bearer(token) });
+    const after = authCalls();
+    await call('docs', bearer(token));
+    expect(authCalls()).toBe(after + 1);
+
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => (url.includes('/auth/v1/user') ? new Response('{}', { status: 401 }) : base(url, init)));
+    const bad = jwt(3000);
+    expect((await call('docs', bearer(bad))).statusCode).toBe(401);
+    vi.stubGlobal('fetch', base);
+    expect((await call('docs', bearer(bad))).statusCode).toBe(200);
   });
 });
 

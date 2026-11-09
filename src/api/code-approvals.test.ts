@@ -305,7 +305,7 @@ describe('api/app.js: прямой путь закрыт, запрос и при
     expect(work.statusCode).toBe(403);
     expect(work.body).toMatchObject({ code: 'WORK_PC' });
 
-    vi.unstubAllGlobals();
+    vi.unstubAllGlobals(); (require('../../server/_app-device-cache.js') as { resetForTests: () => void }).resetForTests(); // «база» подменена мимо сервера
     const calls = mockNetwork(url =>
       url.includes('app_devices?user_id=') ? { body: [{ id: DEV_ID, name: 'Дом', last_seen_at: new Date().toISOString(), denied: [], point_wb: null, role: 'owner' }] }
       : url === 'https://relay.test/api/getMe' ? { body: { ok: true, result: { username: 'shkwb_bot' } } }

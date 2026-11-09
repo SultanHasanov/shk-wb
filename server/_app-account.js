@@ -9,6 +9,7 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
+const deviceCache = require('./_app-device-cache');
 const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, mirrorLimit } = require('./_app-plans');
 const { createNotification } = require('./_notifications');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
@@ -295,9 +296,12 @@ const DEVICE_KEY_RE = /^[A-Za-z0-9_-]{40,64}$/;
 
 // last_seen_at / версия — не чаще раза в 10 минут.
 async function touchDevice(device, req) {
-  if (Date.now() - new Date(device.last_seen_at).getTime() <= 10 * 60 * 1000) return;
+  const seenAt = Math.max(new Date(device.last_seen_at).getTime() || 0, deviceCache.lastTouched(device.id));
+  if (Date.now() - seenAt <= 10 * 60 * 1000) return;
+  deviceCache.markTouched(device.id);
   await supabaseFetch(`app_devices?id=eq.${device.id}`, {
     method: 'PATCH',
+    keepDeviceCache: true,
     body: JSON.stringify({ last_seen_at: new Date().toISOString(), app_version: String(req.headers['x-app-version'] || '').slice(0, 32) }),
   }).catch(() => {});
 }
@@ -306,11 +310,17 @@ async function touchDevice(device, req) {
 async function requireDevice(req, userId) {
   const hash = deviceHashFrom(req);
   if (!hash) throw appError(400, 'DEVICE_REQUIRED', 'Обновите программу');
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=${DEVICE_SELECT}&limit=1`);
-  if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
-  const device = rows[0];
+  const cacheKey = `session:${userId}:${hash}`;
+  let device = deviceCache.getDevice(cacheKey);
+  if (!device) {
+    const epoch = deviceCache.currentEpoch();
+    const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${hash}&revoked_at=is.null&select=${DEVICE_SELECT}&limit=1`);
+    if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
+    device = rows[0];
+    deviceCache.putDevice(cacheKey, device, epoch);
+  }
   await touchDevice(device, req);
-  return device;
+  return { ...device };
 }
 
 // --- Ключ устройства (1.12+): ПК ходит в передатчик и за сообщениями владельца без сессии ---
@@ -344,15 +354,23 @@ async function requireDeviceByKey(req) {
   const hash = deviceHashFrom(req);
   const key = deviceKeyFrom(req);
   if (!hash || !key) throw appError(401, 'DEVICE_KEY_REQUIRED', 'Войдите в аккаунт');
-  const rows = await supabaseFetch(`app_devices?device_hash=eq.${hash}&revoked_at=is.null&key_hash=not.is.null&select=user_id,key_hash,${DEVICE_SELECT}`);
-  if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
   const given = Buffer.from(hashSecret(key));
   // один ПК мог входить в разные аккаунты — строк с этим хэшем несколько, ключ выбирает свою
-  const row = rows.find(r => {
+  const matching = list => list.find(r => {
     const expected = Buffer.from(String(r.key_hash || ''));
     return expected.length === given.length && crypto.timingSafeEqual(expected, given);
   });
-  if (!row) throw appError(401, 'DEVICE_KEY_INVALID', 'Ключ компьютера устарел');
+  const cacheKey = `key:${hash}`;
+  // в память попадают только строки, к которым подошёл ключ; не подошёл — решает база, а не память
+  let row = matching(deviceCache.getDevice(cacheKey) || []);
+  if (!row) {
+    const epoch = deviceCache.currentEpoch();
+    const rows = await supabaseFetch(`app_devices?device_hash=eq.${hash}&revoked_at=is.null&key_hash=not.is.null&select=user_id,key_hash,${DEVICE_SELECT}`);
+    if (!rows.length) throw appError(401, 'DEVICE_REVOKED', 'Этот компьютер отключён от аккаунта. Войдите снова.');
+    row = matching(rows);
+    if (!row) throw appError(401, 'DEVICE_KEY_INVALID', 'Ключ компьютера устарел');
+    deviceCache.putDevice(cacheKey, rows, epoch);
+  }
   await touchDevice(row, req);
   const { user_id: userId, key_hash: _hash, ...device } = row;
   return { userId, device };

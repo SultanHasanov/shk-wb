@@ -4,7 +4,7 @@ const approvals = require('../server/_code-approvals');
 const { telegramRequest } = require('../server/_telegram-api');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { enforceProgramVersion } = require('../server/_program-version');
-const { requireUser, optionalUser } = require('../server/_user-auth');
+const { forgetUserToken, requireUser, optionalUser } = require('../server/_user-auth');
 const { publicOrigin } = require('../server/_origin');
 const { publicPlans } = require('../server/_app-plans');
 const account = require('../server/_app-account');
@@ -127,6 +127,11 @@ async function deviceActions(req, res, action, userId, device) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 const KEYED_ACTIONS = new Set(['relay-inbox', 'relay-put', 'messages-ack', 'device-settings']);
+// Фоновые опросы программы: ответ Supabase Auth о токене можно помнить до 2 минут (_app-device-cache.js).
+function isBackgroundPoll(action, method) {
+  return (method === 'POST' && action === 'relay-inbox')
+    || (method === 'GET' && ['points', 'docs', 'secrets', 'relay-peers'].includes(action));
+}
 
 // Общие документы (server/_app-sync.js) → какой доступ нужен ПК, чтобы их менять или получать.
 const DOC_WRITE_PERMS = Object.freeze({
@@ -386,7 +391,7 @@ module.exports = async function handler(req, res) {
       return await deviceActions(req, res, action, userId, device);
     }
 
-    const user = await requireUser(req, res);
+    const user = await requireUser(req, res, { cached: isBackgroundPoll(action, req.method) });
     if (!user) return;
 
     if (action === 'register-device' && req.method === 'POST') {
@@ -649,6 +654,7 @@ module.exports = async function handler(req, res) {
     if (action === 'logout' && req.method === 'POST') {
       // ПК остаётся в аккаунте (ключ устройства жив: отдаёт базу и получает сообщения владельца);
       // отключает его только «Отключить» в кабинете или в списке компьютеров.
+      forgetUserToken(user._accessToken);
       await account.logout(user._accessToken);
       return res.status(204).end();
     }

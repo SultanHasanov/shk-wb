@@ -1,4 +1,22 @@
 const crypto = require('crypto');
+const deviceCache = require('./_app-device-cache');
+
+function tokenHash(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function tokenExpiryMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return Number(payload.exp) * 1000 || 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function forgetUserToken(token) {
+  if (token) deviceCache.forgetToken(tokenHash(token));
+}
 
 function authConfig() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
@@ -8,21 +26,29 @@ function authConfig() {
   return { url, publishableKey, serviceKey };
 }
 
-async function optionalUser(req) {
+// cached — только для фоновых опросов программы: ответ Auth можно помнить до 2 минут (_app-device-cache.js).
+// Хранится по хэшу и без самого токена. Сайт, кабинет, вход и оплаты всегда спрашивают Supabase.
+async function optionalUser(req, { cached = false } = {}) {
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return null;
+  const hash = cached ? tokenHash(token) : null;
+  if (cached) {
+    const hit = deviceCache.getToken(hash);
+    if (hit) return { ...hit, _accessToken: token };
+  }
   const { url, publishableKey } = authConfig();
   const response = await fetch(`${url}/auth/v1/user`, {
     headers: { apikey: publishableKey, Authorization: `Bearer ${token}` },
   });
   if (!response.ok) return null;
   const user = await response.json();
+  if (cached) deviceCache.putToken(hash, { ...user }, tokenExpiryMs(token));
   user._accessToken = token;
   return user;
 }
 
-async function requireUser(req, res) {
-  const user = await optionalUser(req);
+async function requireUser(req, res, options) {
+  const user = await optionalUser(req, options);
   if (!user) {
     res.status(401).json({ error: 'Требуется авторизация', code: 'AUTH_REQUIRED' });
     return null;
@@ -83,4 +109,4 @@ function readReferralCookieDetails(req) {
   return { code, capturedAt:Number(capturedAt) };
 }
 
-module.exports = { authConfig, deleteAuthUser, getAuthUser, optionalUser, readReferralCookie, readReferralCookieDetails, referralCookie, requireUser, sessionIssuedRecently };
+module.exports = { authConfig, deleteAuthUser, forgetUserToken, getAuthUser, optionalUser, readReferralCookie, readReferralCookieDetails, referralCookie, requireUser, sessionIssuedRecently };

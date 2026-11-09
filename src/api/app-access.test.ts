@@ -205,7 +205,7 @@ describe('роли компьютеров: владелец и сотрудни�
   it('аренда несёт роль ПК; роль не назначена — null', async () => {
     mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [work()] }; });
     expect((await account.leaseRights(request('lease', { method: 'POST' }))).role).toBe('work');
-    vi.unstubAllGlobals();
+    vi.unstubAllGlobals(); (require('../../server/_app-device-cache.js') as { resetForTests: () => void }).resetForTests(); // «база» подменена мимо сервера
     mockSupabase(url => { if (url.includes('app_devices?user_id=')) return { body: [deviceRow([])] }; });
     expect((await account.leaseRights(request('lease', { method: 'POST' }))).role).toBeNull();
   });

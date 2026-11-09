@@ -1,4 +1,5 @@
 const { fetchWithRetry } = require('./_fetch-retry');
+const deviceCache = require('./_app-device-cache');
 
 let cachedConfig = null;
 
@@ -20,15 +21,30 @@ function retriesFor(path, options) {
   return 0;
 }
 
+// Любая запись о ПК очищает их память (server/_app-device-cache.js) — здесь, а не у каждого вызова, чтобы новое
+// место записи нельзя было забыть. keepDeviceCache — только для отметки «был в сети», она прав не меняет.
+function changesDevices(path, options) {
+  const method = String(options.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || options.keepDeviceCache) return false;
+  return /^(app_devices([?/]|$)|rpc\/app_register_device\b)/.test(path);
+}
+
 async function request(path, options, extraHeaders) {
   const { url, key } = getConfig();
+  const { keepDeviceCache: _keep, ...fetchOptions } = options;
   const headers = {
     apikey: key,
     'Content-Type': 'application/json',
     ...extraHeaders,
     ...(options.headers || {}),
   };
-  const response = await fetchWithRetry(`${url}/rest/v1/${path}`, { ...options, headers }, { retries: retriesFor(path, options), label: 'supabase' });
+  let response;
+  try {
+    response = await fetchWithRetry(`${url}/rest/v1/${path}`, { ...fetchOptions, headers }, { retries: retriesFor(path, options), label: 'supabase' });
+  } finally {
+    // и при ошибке: ответ мог потеряться, а запись — пройти
+    if (changesDevices(path, options)) deviceCache.clearDevices();
+  }
   const text = await response.text();
   let data = null;
   if (text) {
