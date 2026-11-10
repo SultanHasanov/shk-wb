@@ -9,7 +9,7 @@ const appCrypto = require('../../server/_app-crypto.js') as {
   open: (user: string, value: string | null, purpose?: string) => string | null;
 };
 const plans = require('../../server/_app-plans.js') as {
-  accountLimits: (plan: string | null, addons: Record<string, { ends_at: string }>, sub: number, unlimited: boolean) => { devices: number; points: number };
+  accountLimits: (plan: string | null, addons: Record<string, { ends_at: string }>, sub: number, unlimited: boolean, deviceBonus?: number | null) => { devices: number; points: number };
 };
 
 const DEVICE = 'a'.repeat(64);
