@@ -1,5 +1,6 @@
 export { AdminAccessCodesPage } from './AdminAccessCodesPage';
 export { AdminAnnouncementsPage } from './AdminAnnouncementsPage';
+export { AdminAuditPage } from './AdminAuditPage';
 export { AdminCabinetPage } from './AdminCabinetPage';
 export { AdminCellPrintPage } from './AdminCellPrintPage';
 export { AdminLoginPage } from './AdminLoginPage';
@@ -9,6 +10,7 @@ export { AdminPartnersPage } from './AdminPartnersPage';
 export { AdminPaymentsPage } from './AdminPaymentsPage';
 export { AdminPoolPage } from './AdminPoolPage';
 export { AdminProgramPage } from './AdminProgramPage';
+export { AdminSystemPage } from './AdminSystemPage';
 export { AdminUserPage } from './AdminUserPage';
 export { AdminUserPreviewPage } from './AdminUserPreviewPage';
 export { AdminUsersPage } from './AdminUsersPage';

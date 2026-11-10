@@ -1,0 +1,1053 @@
+/* Карточка пользователя в админке (макеты User / M-User, Limits, Restrict, Message).
+   Токены — из src/styles/tokens.css; нажимаемое — не ниже 44 px (--tap). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.crumbs a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--tap);
+  color: var(--accent-dark);
+  text-decoration: none;
+  font-weight: var(--fw-semibold);
+}
+
+/* ============ Шапка ============ */
+.head {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-start;
+  padding: var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+.avatar {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-18);
+}
+
+.headMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.nameRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.name {
+  margin: 0;
+  font-size: var(--fs-20);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.idChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.idChip:hover {
+  color: var(--text);
+}
+
+.contacts,
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.contacts b {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.ok {
+  color: var(--success);
+}
+
+.dot::before {
+  content: '·';
+  margin-right: var(--sp-2);
+  color: var(--text-tertiary);
+}
+
+/* ============ Плашка ограничения ============ */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-lg);
+  background: var(--danger-soft);
+  border: 1px solid #f1c4bf;
+  color: var(--text);
+}
+
+.bannerExpired {
+  background: var(--warning-soft);
+  border-color: #efd9a0;
+}
+
+.bannerIcon {
+  flex: none;
+  color: var(--danger);
+}
+
+.bannerExpired .bannerIcon {
+  color: var(--warning);
+}
+
+.bannerText {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bannerText strong {
+  font-size: var(--fs-14);
+}
+
+.bannerText span {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.bannerActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ============ Панель действий ============ */
+.actionBar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.actionBar a,
+.actionBar button {
+  min-height: var(--tap);
+}
+
+.actionSpacer {
+  flex: 1;
+}
+
+.mobileBar {
+  display: none;
+}
+
+/* ============ Вкладки ============ */
+.tabs [role='tablist'] {
+  background: transparent;
+  padding: 0;
+  gap: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs [role='tab'] {
+  min-height: var(--tap);
+  padding: 0 var(--sp-4);
+  margin-bottom: -1px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  flex: none;
+  font-weight: var(--fw-medium);
+}
+
+.tabs [role='tab'][aria-selected='true'] {
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-semibold);
+}
+
+.tabs [role='tab'][id$='-danger-tab'] {
+  color: var(--danger);
+}
+
+.tabs [role='tab'][id$='-danger-tab'][aria-selected='true'] {
+  border-bottom-color: var(--danger);
+}
+
+.tabBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* ============ Плитки и карточки ============ */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--sp-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+
+.tileLabel {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.tileValue {
+  font-size: var(--fs-18);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tileSub {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.cardTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-16);
+}
+
+.cardSub {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  font-weight: var(--fw-normal);
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.cardActions button,
+.cardActions a {
+  min-height: var(--tap);
+}
+
+.muted {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.kv > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kv dt,
+.kvLabel {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.kv dd,
+.kvValue {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.kvNote {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.listRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-height: 52px;
+  padding: var(--sp-2) 0;
+}
+
+.listRow + .listRow {
+  border-top: 1px solid var(--border);
+}
+
+.listMain {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.listMain small {
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.toolbar > * {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.toolbar > button {
+  flex: 0 0 auto;
+  min-height: var(--tap);
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.formActions button {
+  min-height: var(--tap);
+}
+
+.overrideGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+
+.overrideItem {
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.overrideItem strong {
+  font-size: var(--fs-14);
+}
+
+.overrideItem span {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.overrideOn {
+  background: var(--accent-soft);
+}
+
+.overrideOn strong {
+  color: var(--accent-dark);
+}
+
+/* ============ Опасная зона ============ */
+.dangerCard {
+  border: 1px solid #f1c4bf;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--sp-5);
+}
+
+.dangerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) 0;
+}
+
+.dangerRow + .dangerRow {
+  border-top: 1px solid var(--border);
+}
+
+.dangerRow > div {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.dangerRow strong {
+  display: block;
+}
+
+.dangerRow p {
+  margin: 2px 0 0;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.dangerRow button {
+  min-height: var(--tap);
+}
+
+/* ============ Сообщения ============ */
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+}
+
+.msg + .msg {
+  border-top: 1px solid var(--border);
+}
+
+.msgHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.msgHead strong {
+  overflow-wrap: anywhere;
+}
+
+.msgHead span {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.chans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* ============ Окна ============ */
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.modalTabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.modalTab {
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modalTab[aria-selected='true'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-semibold);
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.boxHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+}
+
+.boxHead h3 {
+  margin: 0;
+  font-size: var(--fs-14);
+}
+
+.boxHead span {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  background: var(--surface-sunken);
+  border-radius: var(--r-md);
+}
+
+.segBtn {
+  flex: 1 0 auto;
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.segBtn[aria-pressed='true'],
+.segBtn[aria-checked='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--shadow-xs);
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.stepBtn {
+  width: var(--tap);
+  height: var(--tap);
+  flex: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.stepBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.stepInput {
+  width: 96px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.places {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.placeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-height: 52px;
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-4);
+}
+
+.placeRow + .placeRow {
+  border-top: 1px solid var(--border);
+}
+
+.placeLabel {
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.placeLabel small {
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.prev {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+}
+
+.prev h3 {
+  margin: 0;
+  font-size: var(--fs-14);
+}
+
+.prevNote {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.prevRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: var(--sp-2);
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+.prevRow > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.prevFrom {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.prevArrow {
+  color: var(--text-tertiary);
+}
+
+.prevTo {
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.prevChanged {
+  font-weight: var(--fw-bold);
+  color: var(--accent-dark);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  width: 100%;
+}
+
+.footHint {
+  flex: 1 1 200px;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.foot button {
+  min-height: var(--tap);
+}
+
+.counter {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.counterWarn {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
+}
+
+.counterError {
+  color: var(--danger);
+  font-weight: var(--fw-semibold);
+}
+
+/* Выбор «Полностью / Частично» и каналов — карточки с галочкой/радио */
+.choiceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-2);
+}
+
+.choice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-height: var(--tap);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.choice input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.choice label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: inherit;
+}
+
+.choice label::after {
+  /* вся карточка — зона нажатия поля */
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.choice small {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.choiceOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.choiceDanger {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.choiceOff {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.choiceOff small {
+  color: var(--warning);
+}
+
+.effects {
+  margin: 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-13);
+}
+
+.effects strong {
+  font-weight: var(--fw-semibold);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-13);
+}
+
+.dl dt {
+  color: var(--text-muted);
+}
+
+.dl dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* Предпросмотр сообщения */
+.previewTg,
+.previewMail,
+.previewPc {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  font-size: var(--fs-13);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.previewTg {
+  background: #eef4fb;
+}
+
+.previewMail {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.previewPc {
+  background: #1d1d27;
+  color: #f5f5f7;
+}
+
+.previewMeta {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-1);
+  white-space: normal;
+}
+
+.previewPc .previewMeta {
+  color: #b9b9c6;
+}
+
+.previewLink {
+  display: inline-block;
+  margin-top: var(--sp-2);
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.resultRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.resultBad {
+  background: var(--danger-soft);
+  border-color: #f1c4bf;
+}
+
+.resultRow > div {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resultRow small {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.summary strong {
+  font-size: var(--fs-18);
+}
+
+.summary span {
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+/* ============ Телефон ============ */
+@media (max-width: 768px) {
+  .head {
+    padding: var(--sp-4);
+    gap: var(--sp-3);
+  }
+
+  .avatar {
+    width: 44px;
+    height: 44px;
+    font-size: var(--fs-16);
+  }
+
+  .actionBar {
+    display: none;
+  }
+
+  /* Место под нижнюю панель — в конце карточки, после вкладок: иначе последние строки
+     вкладки (например «Удалить аккаунт») уходят под фиксированную панель. */
+  .page {
+    padding-bottom: calc(72px + var(--safe-b));
+  }
+
+  /* На карточке у админки нижней навигации нет (AdminShell её прячет) — панель у самого низа. */
+  .mobileBar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-topbar);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) var(--tap);
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + var(--safe-b));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 18px rgba(29, 29, 39, 0.06);
+  }
+
+  .mobileBar button,
+  .mobileBar a {
+    min-height: var(--tap);
+    padding: 0 var(--sp-2);
+    width: 100%;
+  }
+
+  .tabs [role='tab'] {
+    padding: 0 var(--sp-3);
+  }
+
+  .dl {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .dl dd {
+    margin-bottom: var(--sp-2);
+  }
+
+  .prevRow {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    font-size: var(--fs-13);
+  }
+}

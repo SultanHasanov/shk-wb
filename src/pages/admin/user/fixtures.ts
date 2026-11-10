@@ -1,0 +1,162 @@
+import type { AdminRestriction, AdminUserDetail } from '../../../api/admin';
+
+/** Карточка пользователя для тестов (src/lib/admin-controls.test.ts, user-card.test.tsx). */
+
+export const USER_ID = '11111111-1111-4111-8111-111111111111';
+export const DEVICE_ID = '44444444-4444-4444-8444-444444444444';
+
+export function makeDetail(overrides: Partial<AdminUserDetail> = {}): AdminUserDetail {
+  return {
+    userId: USER_ID,
+    email: 'anna.s@example.ru',
+    telegramOnly: false,
+    emailConfirmed: true,
+    banned: false,
+    createdAt: '2026-03-14T10:00:00Z',
+    lastSignInAt: '2026-11-10T11:02:00Z',
+    confirmValue: 'anna.s@example.ru',
+    profile: { display_name: 'Анна Смирнова', phone: '+79180004512', payer_status: 'individual' },
+    telegram: { username: 'anna_pvz', first_name: 'Анна' },
+    codes: [
+      { id: 7, code: 'STK-7F3A-K29Q', name: 'Пакет', active: true, limit: 100, used: 63, createdAt: '2026-08-01T10:00:00Z' },
+      { id: 8, code: 'STK-21BC-M04D', name: 'Старый', active: false, limit: 50, used: 50, createdAt: '2026-07-01T10:00:00Z' },
+    ],
+    programKeys: [{ id: 3, key: 'WBPK-TEST', limit: 300, used: 180, active: true, note: null, createdAt: '2026-08-01T10:00:00Z' }],
+    cellLicenses: [
+      {
+        id: 5,
+        key: 'PRN-4K8D-Q7XA',
+        durationDays: 90,
+        deviceLimit: 2,
+        marketplaceScope: 'both',
+        active: true,
+        activatedAt: '2026-11-01T10:00:00Z',
+        expiresAt: '2027-02-01T10:00:00Z',
+        note: null,
+        createdAt: '2026-11-01T10:00:00Z',
+        devices: [],
+      },
+    ],
+    orders: [
+      {
+        id: 'o1',
+        created_at: '2026-10-12T09:31:00Z',
+        paid_at: '2026-10-12T09:32:00Z',
+        status: 'succeeded',
+        product_kind: 'app_subscription',
+        amount: 399,
+        gross_amount: 399,
+        access_code: null,
+        program_license_key: null,
+        cell_print_license_key: null,
+        yookassa_payment_id: '2e71d03b-77c2',
+      },
+    ],
+    customOrders: [],
+    referral: { code: 'ADE1CB', availableKopecks: 86000, earnedKopecks: 41000, paidKopecks: 0, invited: 3, referrals: [] },
+    notifications: [],
+    historyEntries: 0,
+    actions: [],
+    app: {
+      entitlements: {
+        plan: 'standard',
+        ends_at: '2026-12-12T10:00:00Z',
+        codes_limit: 700,
+        codes_used: 214,
+        stickers_limit: 0,
+        stickers_used: 0,
+        device_limit: 3,
+        packs_left: 0,
+        codes_base: 500,
+        device_bonus: 2,
+      },
+      subscriptions: [
+        {
+          id: 'sub-1',
+          plan: 'standard',
+          startsAt: '2026-10-12T10:00:00Z',
+          endsAt: '2099-12-12T10:00:00Z',
+          canceled: false,
+          source: 'payment',
+          monthlyPrice: 399,
+          codes: 500,
+          stickers: 0,
+          deviceLimit: 3,
+          createdAt: '2026-10-12T10:00:00Z',
+        },
+      ],
+      devices: [
+        {
+          id: DEVICE_ID,
+          name: 'Касса-1',
+          appVersion: '1.12.0',
+          lastSeenAt: '2026-11-10T11:00:00Z',
+          createdAt: '2026-03-15T10:00:00Z',
+          revokedAt: null,
+          role: 'owner',
+          online: true,
+          pointWb: '10234',
+        },
+        {
+          id: '55555555-5555-4555-8555-555555555555',
+          name: 'Склад-2',
+          appVersion: '1.12.0',
+          lastSeenAt: '2026-11-10T08:00:00Z',
+          createdAt: '2026-04-15T10:00:00Z',
+          revokedAt: null,
+          role: 'work',
+          online: false,
+          pointWb: null,
+        },
+      ],
+      limits: { devices: 5, points: 2, mirror: 1, codesLimit: 700, codesUsed: 214, base: { devices: 3, points: 2, mirror: 1, codes: 500 } },
+      usage: [],
+      addons: [],
+      points: [
+        { id: 'p1', wbPointId: '10234', name: 'Краснодар, ул. Северная 5', createdAt: '2026-03-15T10:00:00Z', lastSyncAt: null, mirrorAt: null, revokedAt: null },
+      ],
+    },
+    overrides: {
+      codes: { mode: 'add', monthly: 200, until: null, active: true },
+      slots: { devices: 2, points: 0, mirror: 0, until: '2026-12-10T20:59:59.000Z', active: true },
+      unlimited: null,
+      note: 'второй пункт, на месяц',
+      updatedAt: '2026-11-10T11:12:00Z',
+      updatedBy: 'a1f3',
+    },
+    legacyDeviceBonus: 0,
+    restriction: null,
+    protected: false,
+    partner: null,
+    unlimited: { active: false, source: null, until: null },
+    wallet: { balanceKopecks: 124000, updatedAt: '2026-11-08T10:00:00Z' },
+    loginMethods: {
+      email: { address: 'anna.s@example.ru', confirmed: true, technical: false },
+      telegram: { username: 'anna_pvz', telegramUserId: 777, linkedAt: '2026-03-20T10:00:00Z', bot: { started: true, blockedAt: null } },
+      oauth: [{ provider: 'yandex', email: 'anna.s@example.ru', displayName: null, linkedAt: '2026-11-02T10:00:00Z' }],
+    },
+    ...overrides,
+  };
+}
+
+export function makeRestriction(overrides: Partial<AdminRestriction> = {}): AdminRestriction {
+  return {
+    id: 'r-1',
+    userId: USER_ID,
+    scopes: ['app', 'purchases'],
+    full: false,
+    until: '2026-11-17T15:00:00.000Z',
+    expired: false,
+    reason: 'спор по возврату',
+    publicMessage: null,
+    message: 'Доступ ограничен администратором. До 17.11',
+    createdAt: '2026-11-10T10:40:00Z',
+    createdBy: 'a1f3',
+    updatedAt: '2026-11-10T10:40:00Z',
+    liftedAt: null,
+    liftedBy: null,
+    liftedReason: null,
+    disabledItems: { stickerCodes: [], programKeys: [3], cellLicenses: [], legacy: false },
+    ...overrides,
+  };
+}

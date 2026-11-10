@@ -1,14 +1,36 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  type AdminUserRow, useAdminPartnerAction, useAdminPartnerSettings, useAdminPartners, useAdminUsers,
+  type AdminPartnerRow, type AdminUserRow, useAdminPartnerAction, useAdminPartnerSettings, useAdminPartners, useAdminUsers,
 } from '../../api/admin';
 import { userLabel } from '../../lib/admin-users';
 import { formatRub, poolLeft, type Partner } from '../../lib/partner';
 import {
-  Alert, Badge, Button, Card, EmptyState, Field, Input, Skeleton, Table, useToast,
+  Badge, Button, Card, Field, Input, Skeleton, useToast,
 } from '../../ui';
+import { DataState, EmptyBlock, ResponsiveTable } from './kit';
+import type { ResponsiveColumn } from './kit';
 import s from '../../layout/AdminShell.module.css';
+import p from './admin-pages.module.css';
+
+const partnerColumns: ResponsiveColumn<AdminPartnerRow>[] = [
+  { key: 'name', header: 'Партнёр', primary: true, cell: partner => partner.name },
+  { key: 'account', header: 'Аккаунт', cell: partner => partner.account || '—' },
+  {
+    key: 'sticker',
+    header: 'Остаток генераций',
+    label: 'Генерации',
+    cell: partner => `${poolLeft(partner.pool.sticker)} из ${partner.pool.sticker.granted}`,
+  },
+  { key: 'program', header: 'Итераций', cell: partner => `${poolLeft(partner.pool.program)} из ${partner.pool.program.granted}` },
+  { key: 'cell', header: 'Дней·ПК', cell: partner => `${poolLeft(partner.pool.cell)} из ${partner.pool.cell.granted}` },
+  { key: 'due', header: 'Долг', align: 'end', cell: partner => <strong className={p.num}>{formatRub(partner.balance.dueRub)}</strong> },
+  {
+    key: 'status',
+    header: 'Статус',
+    cell: partner => <Badge tone={partner.active ? 'success' : 'error'}>{partner.active ? 'Активен' : 'Отключён'}</Badge>,
+  },
+];
 
 /**
  * Партнёры: аккаунты сайта, которые сами выпускают коды и ключи из выданного
@@ -23,35 +45,20 @@ export function AdminPartnersPage() {
       <RateCard />
       <CreatePartnerCard onCreated={id => navigate(`/panel/partners/${id}`)} />
 
-      {partners.isPending ? (
-        <Skeleton height={200} />
-      ) : partners.isError ? (
-        <Alert tone="error">{partners.error.message}</Alert>
-      ) : partners.data.length ? (
-        <Table>
-          <thead>
-            <tr>
-              <th>Партнёр</th><th>Аккаунт</th><th>Остаток генераций</th><th>Итераций</th>
-              <th>Дней·ПК</th><th>Долг</th><th>Статус</th>
-            </tr>
-          </thead>
-          <tbody>
-            {partners.data.map(partner => (
-              <tr key={partner.id} className={s.clickable} onClick={() => navigate(`/panel/partners/${partner.id}`)}>
-                <td><Link to={`/panel/partners/${partner.id}`}>{partner.name}</Link></td>
-                <td>{partner.account || '—'}</td>
-                <td>{poolLeft(partner.pool.sticker)} из {partner.pool.sticker.granted}</td>
-                <td>{poolLeft(partner.pool.program)} из {partner.pool.program.granted}</td>
-                <td>{poolLeft(partner.pool.cell)} из {partner.pool.cell.granted}</td>
-                <td><strong>{formatRub(partner.balance.dueRub)}</strong></td>
-                <td><Badge tone={partner.active ? 'success' : 'error'}>{partner.active ? 'Активен' : 'Отключён'}</Badge></td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      ) : (
-        <Card><EmptyState title="Партнёров пока нет" text="Назначьте партнёром зарегистрированный аккаунт выше." /></Card>
-      )}
+      <DataState
+        query={partners}
+        isEmpty={rows => rows.length === 0}
+        empty={<EmptyBlock title="Партнёров пока нет" text="Назначьте партнёром зарегистрированный аккаунт выше." />}
+      >
+        {rows => (
+          <ResponsiveTable
+            rows={rows}
+            columns={partnerColumns}
+            rowKey={partner => partner.id}
+            rowHref={partner => `/panel/partners/${partner.id}`}
+          />
+        )}
+      </DataState>
     </div>
   );
 }
@@ -73,7 +80,7 @@ function RateCard() {
         Долг партнёра за уже выпущенное не пересчитывается: курс фиксируется в момент выпуска.
       </p>
       <form
-        className={s.toolbar}
+        className={`${s.toolbar} ${p.formRow}`}
         onSubmit={event => {
           event.preventDefault();
           save.mutate({ kztPerRub: Number(rate.replace(',', '.')) }, {
@@ -85,7 +92,7 @@ function RateCard() {
         <Field label="₸ за 1 ₽">
           <Input value={rate} onChange={e => setRate(e.target.value)} inputMode="decimal" required />
         </Field>
-        <Button type="submit" loading={save.isPending}>Сохранить</Button>
+        <Button type="submit" className={p.tap} loading={save.isPending}>Сохранить</Button>
       </form>
     </Card>
   );
@@ -110,10 +117,10 @@ function CreatePartnerCard({ onCreated }: { onCreated: (id: string) => void }) {
         <div className="stack">
           <div className={s.row}>
             <Badge tone="accent">{userLabel(picked)}</Badge>
-            <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>Другой аккаунт</Button>
+            <Button variant="ghost" size="sm" className={p.tap} onClick={() => setPicked(null)}>Другой аккаунт</Button>
           </div>
           <form
-            className={s.toolbar}
+            className={`${s.toolbar} ${p.formRow}`}
             onSubmit={event => {
               event.preventDefault();
               create.mutate({ userId: picked.userId, name }, {
@@ -125,7 +132,7 @@ function CreatePartnerCard({ onCreated }: { onCreated: (id: string) => void }) {
             <Field label="Название (видно только вам)">
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Например, Алматы — Айдар" required maxLength={120} />
             </Field>
-            <Button type="submit" loading={create.isPending}>Сделать партнёром</Button>
+            <Button type="submit" className={p.tap} loading={create.isPending}>Сделать партнёром</Button>
           </form>
         </div>
       ) : (
@@ -141,7 +148,7 @@ function CreatePartnerCard({ onCreated }: { onCreated: (id: string) => void }) {
                 {users.data.items.map(user => (
                   <div key={user.userId} className={s.spread}>
                     <span>{userLabel(user)}</span>
-                    <Button size="sm" variant="secondary" onClick={() => { setPicked(user); setName(user.displayName || ''); }}>
+                    <Button size="sm" variant="secondary" className={p.tap} onClick={() => { setPicked(user); setName(user.displayName || ''); }}>
                       Выбрать
                     </Button>
                   </div>

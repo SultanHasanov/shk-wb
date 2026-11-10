@@ -1,0 +1,696 @@
+/* Общие компоненты админки (src/pages/admin/kit). Токены — из src/styles/tokens.css.
+   Все нажимаемые элементы не ниже 44 px (--tap): админкой пользуются и с телефона. */
+
+/* ============ Кнопки окон ============ */
+.tap {
+  min-height: var(--tap);
+}
+
+/* Сплошная «опасная» кнопка: в ките сайта есть только контурная .danger.
+   Двойной класс — чтобы перебить её фон без !important. */
+.dangerSolid.dangerSolid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.dangerSolid.dangerSolid:hover:not(:disabled) {
+  background: #a63125;
+  border-color: #a63125;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.confirmLabel {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  word-break: break-all;
+}
+
+.help {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.counter {
+  font-size: var(--fs-12);
+  color: var(--text-tertiary);
+  text-align: right;
+  margin: calc(-1 * var(--sp-2)) 0 0;
+}
+
+.preview {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.preview b {
+  color: var(--text);
+}
+
+/* ============ Чипы (ChipFilter, пресеты NumberDialog и TermPicker) ============ */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.chipsScroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  /* Тень прокрутки не нужна: последний чип и так обрезан краем. */
+  padding-bottom: 2px;
+}
+
+.chipsScroll::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 769px) {
+  .chipsScroll {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  min-height: var(--tap);
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+  transition: var(--dur) var(--ease);
+}
+
+.chip:hover:not(.chipActive) {
+  background: var(--surface-muted);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.chipActive {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.chipCount {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
+}
+
+.chipActive .chipCount {
+  color: var(--accent-dark);
+}
+
+.chipSelect {
+  display: none;
+}
+
+@media (max-width: 479px) {
+  .chipsCollapsible {
+    display: none;
+  }
+
+  .chipSelect {
+    display: block;
+  }
+}
+
+/* ============ StatusDot ============ */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+
+.pulse .dot {
+  animation: dotPulse 1.6s var(--ease) infinite;
+}
+
+@keyframes dotPulse {
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.toneOk {
+  color: var(--success);
+}
+
+.toneWarning {
+  color: var(--warning);
+}
+
+.toneError {
+  color: var(--danger);
+}
+
+.toneMuted {
+  color: var(--text-muted);
+}
+
+.toneAccent {
+  color: var(--accent-dark);
+}
+
+/* ============ DataState ============ */
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+.skeletonRow {
+  display: grid;
+  grid-template-columns: 36px 1fr 80px;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.emptyBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--sp-2);
+  padding: var(--sp-10) var(--sp-5);
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+}
+
+.emptyBox strong {
+  color: var(--text);
+  font-size: var(--fs-16);
+}
+
+.errorBox {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid #f3c4bd;
+  border-radius: var(--r-lg);
+  background: var(--danger-soft);
+  color: var(--text);
+  font-size: var(--fs-13);
+}
+
+.errorTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--danger);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-14);
+}
+
+.errorMeta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.staleNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-13);
+  color: var(--danger);
+}
+
+/* ============ ResponsiveTable ============ */
+.rt {
+  /* место под «растянутую» ссылку строки */
+  position: relative;
+}
+
+.rt tbody tr {
+  position: relative;
+}
+
+.rowSelected {
+  background: var(--accent-soft);
+}
+
+.rt.rt td {
+  vertical-align: middle;
+}
+
+.rt.rt .alignEnd {
+  text-align: right;
+}
+
+/* Ссылка строки растянута на всю строку псевдоэлементом: вся строка кликается,
+   но это настоящая <a> — работают Tab, Enter, средняя кнопка и «открыть в новой вкладке». */
+.rowLink {
+  color: inherit;
+  text-decoration: none;
+  font-weight: var(--fw-semibold);
+}
+
+.rowLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.rowLink:focus-visible {
+  outline: none;
+}
+
+.rt tbody tr:has(.rowLink:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Кнопки действий — поверх растянутой ссылки. */
+.actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.actions :is(button, a) {
+  min-height: var(--tap);
+}
+
+.rtCaption {
+  caption-side: top;
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  font-weight: var(--fw-bold);
+}
+
+@media (max-width: 768px) {
+  /* Обёртка таблицы из ui: на телефоне карточки идут отдельно, без общей рамки. */
+  .rtRoot > div {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .rt.rt,
+  .rt.rt tbody {
+    display: block;
+    font-size: var(--fs-14);
+  }
+
+  .rt.rt thead {
+    display: none;
+  }
+
+  .rt.rt tbody {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .rt.rt tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .rt.rt tbody tr.rowSelected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .rt.rt td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--sp-3);
+    padding: 0;
+    border: 0;
+    white-space: normal;
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .rt.rt td[data-label]::before {
+    content: attr(data-label);
+    flex: none;
+    max-width: 45%;
+    color: var(--text-muted);
+    font-size: var(--fs-12);
+    text-align: left;
+  }
+
+  /* Главная ячейка — заголовок карточки, без подписи. */
+  .rt.rt td.primaryCell {
+    order: -1;
+    justify-content: flex-start;
+    text-align: left;
+    font-size: var(--fs-15, 15px);
+    margin-bottom: var(--sp-1);
+  }
+
+  .rt.rt td.primaryCell::before {
+    display: none;
+  }
+
+  .rt.rt td.actionsCell {
+    justify-content: stretch;
+    margin-top: var(--sp-2);
+  }
+
+  .rt.rt td.actionsCell::before {
+    display: none;
+  }
+
+  .actionsCell .actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .rt.rt td.hideOnMobile {
+    display: none;
+  }
+}
+
+/* ============ AuditEntry ============ */
+.entry {
+  border-top: 1px solid var(--border);
+}
+
+.entryHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+.entryTime {
+  flex: none;
+  width: 44px;
+  padding-top: 1px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.entryDot {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  flex: none;
+  border-radius: var(--r-full);
+  background: var(--text-muted);
+}
+
+.entryDot[data-category='limits'] {
+  background: var(--accent);
+}
+
+.entryDot[data-category='restrict'],
+.entryDot[data-category='deletions'] {
+  background: var(--danger);
+}
+
+.entryDot[data-category='messages'] {
+  background: var(--success);
+}
+
+.entryDot[data-category='money'] {
+  background: var(--warning);
+}
+
+.entryDot[data-category='keys'] {
+  background: var(--text);
+}
+
+.entryMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.entryTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.entryTitle b {
+  font-weight: var(--fw-semibold);
+}
+
+.entryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  justify-content: space-between;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.entryMeta a {
+  color: var(--accent-dark);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+}
+
+.entryAdmin {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-12);
+}
+
+.entryToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--tap);
+  padding: 0 var(--sp-3);
+  margin: -10px calc(-1 * var(--sp-2)) -10px 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--accent-dark);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+
+.entryToggle:hover {
+  background: var(--accent-soft);
+}
+
+.entryToggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.entryDetails {
+  margin: 0 var(--sp-5) var(--sp-4) calc(var(--sp-5) + 44px + 8px + 2 * var(--sp-3));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.diffCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  min-width: 0;
+}
+
+.diffCol + .diffCol {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.diffHead {
+  font-size: var(--fs-11);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-tertiary);
+}
+
+.diffRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-13);
+}
+
+.diffRow span:first-child {
+  color: var(--text-muted);
+}
+
+.diffRow span:last-child {
+  font-weight: var(--fw-semibold);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.payloadList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.entryFoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+/* Короткая запись (обзор, карточка): точка, заголовок, вторая строка. */
+.entryCompact {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-14);
+}
+
+.entryCompact .entryMain {
+  gap: 2px;
+}
+
+.entryCompactSub {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .entryHead {
+    padding: var(--sp-3) var(--sp-4);
+    flex-wrap: wrap;
+  }
+
+  .entryTime {
+    width: auto;
+  }
+
+  .entryToggle {
+    margin: 0;
+  }
+
+  .entryDetails {
+    margin: 0 var(--sp-4) var(--sp-3);
+  }
+
+  .entryCompact {
+    padding: var(--sp-3) var(--sp-4);
+  }
+}
+
+@media (max-width: 479px) {
+  .diff {
+    grid-template-columns: 1fr;
+  }
+
+  .diffCol + .diffCol {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* ============ TermPicker ============ */
+.term {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.term legend {
+  padding: 0;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+
+.dateInput {
+  max-width: 220px;
+  min-height: var(--tap);
+}

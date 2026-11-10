@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LockKeyhole } from 'lucide-react';
 import { useAdminLogin } from '../../api/admin';
 import { Alert, Button, Card, Field, Input } from '../../ui';
+import p from './admin-pages.module.css';
 
 /**
  * Пароль и одноразовый код вводятся одной строкой через двоеточие — так устроен
@@ -41,7 +42,7 @@ export function AdminLoginPage() {
 
             {login.isError && <Alert tone="error">{login.error.message}</Alert>}
 
-            <Button type="submit" block loading={login.isPending} disabled={!password}>
+            <Button type="submit" block className={p.tap} loading={login.isPending} disabled={!password}>
               Войти
             </Button>
           </form>

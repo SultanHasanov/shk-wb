@@ -1,1026 +1,178 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, Eye, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import type { UseMutationResult } from '@tanstack/react-query';
-import { type AdminUserDetail, useAdminAppCodeViaBot, useAdminUser, useAdminUserAction } from '../../api/admin';
-import { useAppPlans } from '../../api/app';
-import { MarketplaceScopeToggle } from '../../components/MarketplaceScopeToggle';
-import { dateTime, money } from '../../api/cabinet';
-import type { CellPrintMarketplaceScope } from '../../lib/pricing';
-import { orderStatusLabel, payerLabel, productLabel, shortDate } from '../../lib/admin-users';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  Modal,
-  Progress,
-  Select,
-  Skeleton,
-  Stat,
-  Switch,
-  Table,
-  Textarea,
-  useToast,
-} from '../../ui';
-import s from '../../layout/AdminShell.module.css';
+import { useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
+import { type AdminUserDetail, type MessageChannel, useAdminUser, useAdminUserAction } from '../../api/admin';
+import { Alert, Button, Skeleton, Tabs } from '../../ui';
+import { ConfirmDialog, ErrorBlock } from './kit';
+import { UserHeader } from './user/UserHeader';
+import { RestrictionBanner } from './user/RestrictionBanner';
+import { UserActionBar } from './user/UserActionBar';
+import { OverviewTab } from './user/tabs/OverviewTab';
+import { AccessTab } from './user/tabs/AccessTab';
+import { DevicesTab } from './user/tabs/DevicesTab';
+import { MoneyTab } from './user/tabs/MoneyTab';
+import { MessagesTab } from './user/tabs/MessagesTab';
+import { LogTab } from './user/tabs/LogTab';
+import { DangerTab } from './user/tabs/DangerTab';
+import { LimitsModal, type LimitsTab } from './user/modals/LimitsModal';
+import { RestrictModal } from './user/modals/RestrictModal';
+import { LiftRestrictionModal } from './user/modals/LiftRestrictionModal';
+import { MessageComposer } from './user/modals/MessageComposer';
+import { USER_TABS, type UserTab, parseUserTab, useRunner } from './user/shared';
+import u from './user/user.module.css';
 
-const PLAN_LABEL: Record<string, string> = { basic: 'Базовый', standard: 'Стандарт', pro: 'Про' };
-const CELL_DURATIONS = [3, 7, 30, 90, 180, 365];
-const CELL_DEVICES = [1, 2, 3, 5, 10, 20];
+type MessageState = { open: boolean; channels?: MessageChannel[]; deviceIds?: string[] };
 
+/**
+ * Карточка пользователя: контейнер. Данные — useAdminUser, вкладка — в адресе
+ * (?tab=, replace), шапка, плашка ограничения, панель действий, вкладки, окна.
+ * Сами разделы — в src/pages/admin/user/.
+ */
 export function AdminUserPage() {
   const { userId = '' } = useParams();
-  const navigate = useNavigate();
-  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab = parseUserTab(params.get('tab'));
   const query = useAdminUser(userId);
 
-  const [grantOpen, setGrantOpen] = useState(false);
-  const [individualOpen, setIndividualOpen] = useState(false);
-  const [cellOpen, setCellOpen] = useState(false);
-  const [newCellMarketplaceScope, setNewCellMarketplaceScope] = useState<CellPrintMarketplaceScope>('wb');
-  const [programOpen, setProgramOpen] = useState(false);
-  const [notifyOpen, setNotifyOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [confirm, setConfirm] = useState('');
+  const [limits, setLimits] = useState<{ open: boolean; tab: LimitsTab }>({ open: false, tab: 'pvz' });
+  const [restrictMode, setRestrictMode] = useState<'create' | 'edit' | null>(null);
+  const [liftOpen, setLiftOpen] = useState(false);
+  const [message, setMessage] = useState<MessageState>({ open: false });
+  const [unblockOpen, setUnblockOpen] = useState(false);
+  const unblock = useAdminUserAction<{ userId: string; reason?: string }>('unblock');
+  const run = useRunner();
 
-  const grantSticker = useAdminUserAction<{ userId: string; name: string; limit: number }>(
-    'grantSticker',
-  );
-  const createIndividual = useAdminUserAction<{userId:string;title:string;codes:string;totalAmount:number;creditUnits:number}>('createIndividualStickerOrder');
-  const topup = useAdminUserAction<{ userId: string; codeId: number; add: number }>('topupSticker');
-  const patchCode = useAdminUserAction<{
-    userId: string;
-    codeId: number;
-    limit?: number;
-    active?: boolean;
-  }>('code', 'PATCH');
-  const grantProgram = useAdminUserAction<{
-    userId: string;
-    key: string;
-    limit: number;
-    note: string;
-  }>('grantProgramKey');
-  const grantCell = useAdminUserAction<{
-    userId: string;
-    durationDays: number;
-    deviceLimit: number;
-    marketplaceScope: 'wb' | 'ozon' | 'both';
-    note: string;
-  }>('grantCellLicense');
-  const patchCell = useAdminUserAction<{
-    userId: string;
-    id: number;
-    extendDays?: number;
-    deviceLimit?: number;
-    marketplaceScope?: 'wb' | 'ozon' | 'both';
-    active?: boolean;
-  }>('cellLicense', 'PATCH');
-  const notify = useAdminUserAction<{ userId: string; title: string; body: string }>('notify');
-  const profile = useAdminUserAction<{
-    userId: string;
-    displayName?: string;
-    phone?: string;
-    payerStatus?: string;
-  }>('profile');
-  const block = useAdminUserAction<{ userId: string }>('block');
-  const unblock = useAdminUserAction<{ userId: string }>('unblock');
-  const remove = useAdminUserAction<{ userId: string; confirm: string }>('account', 'DELETE');
-  const grantApp = useAdminUserAction<{ userId: string; plan: string; months: number }>('grantAppSubscription');
-  const revokeApp = useAdminUserAction<{ userId: string; id: string }>('revokeAppSubscription');
-  const revokeDevice = useAdminUserAction<{ userId: string; id: string }>('revokeAppDevice');
-  const grantAddon = useAdminUserAction<{ userId: string; addon: string; months: number }>('grantAppAddon');
-  const revokeAddon = useAdminUserAction<{ userId: string; id: string }>('revokeAppAddon');
-  const [addonMonths, setAddonMonths] = useState(6);
-  const [addonId, setAddonId] = useState('archive');
-  const revokePoint = useAdminUserAction<{ userId: string; id: string }>('revokeAppPoint');
-  const codeViaBotUser = useAdminUserAction<{ userId: string; enabled: boolean }>('appCodeViaBot');
-  const codeViaBotGlobal = useAdminAppCodeViaBot();
-  const appPlans = useAppPlans();
-  const addonList = appPlans.data?.addons ?? [];
-  const addonTerms = Object.keys(addonList.find(a => a.id === addonId)?.prices ?? { 6: 0, 12: 0 }).map(Number).sort((a, b) => a - b);
-  const [appPlan, setAppPlan] = useState('standard');
-  const [appMonths, setAppMonths] = useState(1);
+  // Список подсвечивает последнего открытого (FE-3 читает этот ключ).
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      sessionStorage.setItem('admin.lastUserId', userId);
+    } catch {
+      /* приватный режим или запрет хранилища — подсветки просто не будет */
+    }
+  }, [userId]);
 
-  /** Одинаковый хвост у всех действий: тост об успехе, тост об ошибке, закрытие модалки. */
-  const run = <TBody,>(
-    mutation: UseMutationResult<unknown, Error, TBody, unknown>,
-    body: TBody,
-    message: string,
-    done?: () => void,
-  ) =>
-    mutation.mutate(body, {
-      onSuccess: () => {
-        toast(message, 'success');
-        done?.();
+  const selectTab = (next: UserTab) =>
+    setParams(
+      prev => {
+        const copy = new URLSearchParams(prev);
+        copy.set('tab', next);
+        return copy;
       },
-      onError: error => toast(error.message, 'error'),
-    });
-
-  if (query.isPending)
-    return (
-      <div className="page">
-        <Skeleton height={320} />
-      </div>
-    );
-  if (query.isError)
-    return (
-      <div className="page">
-        <Alert tone="error">{query.error.message}</Alert>
-      </div>
+      { replace: true },
     );
 
-  const user: AdminUserDetail = query.data;
+  if (query.isPending) {
+    return (
+      <div className="page" role="status" aria-busy="true">
+        <span className="sr-only">Загрузка карточки…</span>
+        <div className={u.page}>
+          <Skeleton height={120} />
+          <Skeleton height={48} />
+          <Skeleton height={320} />
+        </div>
+      </div>
+    );
+  }
+  if (query.isError) {
+    return (
+      <div className="page">
+        <div className={u.page}>
+          <div className={u.crumbs}>
+            <Link to="/panel/users">
+              <ArrowLeft size={16} aria-hidden="true" />
+              Пользователи
+            </Link>
+          </div>
+          <ErrorBlock error={query.error} onRetry={query.refetch} />
+        </div>
+      </div>
+    );
+  }
+
+  const detail: AdminUserDetail = query.data;
+  const restriction = detail.restriction ?? null;
+  const openLimits = (limitsTab: LimitsTab = 'pvz') => setLimits({ open: true, tab: limitsTab });
+  const onRestrict = () => (restriction ? setRestrictMode('edit') : setRestrictMode('create'));
+  const openMessage = (channels?: MessageChannel[], deviceIds?: string[]) => setMessage({ open: true, channels, deviceIds });
+
+  const content: Record<UserTab, ReactElement> = {
+    overview: <OverviewTab detail={detail} onOpenLog={() => selectTab('audit')} />,
+    access: <AccessTab detail={detail} onLimits={() => openLimits('pvz')} />,
+    devices: <DevicesTab detail={detail} onMessageDevice={deviceId => openMessage(['pc'], [deviceId])} />,
+    money: <MoneyTab detail={detail} onWallet={() => openLimits('wallet')} />,
+    messages: <MessagesTab userId={userId} onCompose={() => openMessage()} notifications={detail.notifications ?? []} />,
+    audit: <LogTab userId={userId} />,
+    danger: <DangerTab detail={detail} />,
+  };
 
   return (
-    <div className="page stack-lg">
-      <div className={s.row}>
-        <Link to="/panel/users">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft size={16} />К списку
-          </Button>
-        </Link>
-      </div>
+    <div className="page">
+      <div className={u.page}>
+        <nav className={u.crumbs} aria-label="Навигация">
+          <Link to="/panel/users">
+            <ArrowLeft size={16} aria-hidden="true" />
+            Пользователи
+          </Link>
+        </nav>
 
-      <Card accent>
-        <div className={s.spread}>
-          <div>
-            <h2 style={{ margin: 0 }}>
-              {user.email ?? user.telegram?.username ?? user.userId.slice(0, 8)}
-            </h2>
-            <div className={s.row}>
-              {user.telegramOnly && <Badge>Только Telegram</Badge>}
-              {user.emailConfirmed && <Badge tone="success">Почта подтверждена</Badge>}
-              {user.banned && <Badge tone="error">Заблокирован</Badge>}
-              <span className="mono">{user.userId}</span>
-            </div>
-          </div>
-          <div className={s.row}>
-            <Link to={`/panel/users/${userId}/preview`} target="_blank" rel="noreferrer">
-              <Button variant="secondary">
-                <Eye size={16} />
-                Предпросмотр кабинета
-              </Button>
-            </Link>
-            {user.banned ? (
-              <Button
-                variant="secondary"
-                loading={unblock.isPending}
-                onClick={() => run(unblock, { userId }, 'Пользователь разблокирован')}
-              >
+        <UserHeader detail={detail} />
+
+        {restriction && <RestrictionBanner restriction={restriction} onEdit={() => setRestrictMode('edit')} onLift={() => setLiftOpen(true)} />}
+        {!restriction && detail.banned && (
+          <Alert tone="error">
+            <div className={u.nameRow}>
+              <span>Вход закрыт старой блокировкой (без записи об ограничении).</span>
+              <Button variant="secondary" size="sm" style={{ minHeight: 'var(--tap)' }} onClick={() => setUnblockOpen(true)}>
                 Разблокировать
               </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                loading={block.isPending}
-                onClick={() => run(block, { userId }, 'Пользователь заблокирован')}
-              >
-                <Ban size={16} />
-                Заблокировать
-              </Button>
-            )}
-          </div>
-        </div>
+            </div>
+          </Alert>
+        )}
 
-        <div className={`${s.tiles} section`}>
-          <Stat value={shortDate(user.createdAt)} label="регистрация" />
-          <Stat value={shortDate(user.lastSignInAt)} label="последний вход" />
-          <Stat
-            value={user.orders.filter(order => order.status === 'succeeded').length}
-            label="оплаченных заказов"
+        <UserActionBar
+          onMessage={() => openMessage()}
+          onLimits={() => openLimits('pvz')}
+          onRestrict={onRestrict}
+          previewHref={`/panel/users/${userId}/preview`}
+          restricted={Boolean(restriction)}
+        />
+
+        <div className={u.tabs}>
+          <Tabs<UserTab>
+            label="Разделы карточки"
+            value={tab}
+            onChange={selectTab}
+            items={USER_TABS.map(item => ({ ...item, content: content[item.value] }))}
           />
-          <Stat value={money(user.referral.availableKopecks)} label="реферальный баланс" />
         </div>
-      </Card>
-
-      <Card>
-        <h3>Профиль</h3>
-        <form
-          className={s.toolbar}
-          onSubmit={event => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            run(
-              profile,
-              {
-                userId,
-                displayName: String(form.get('displayName') || ''),
-                phone: String(form.get('phone') || ''),
-                payerStatus: String(form.get('payerStatus') || 'individual'),
-              },
-              'Профиль обновлён',
-            );
-          }}
-        >
-          <Field label="Имя">
-            <Input name="displayName" defaultValue={user.profile?.display_name ?? ''} />
-          </Field>
-          <Field label="Телефон">
-            <Input name="phone" defaultValue={user.profile?.phone ?? ''} />
-          </Field>
-          <Field label="Статус плательщика">
-            <Select name="payerStatus" defaultValue={user.profile?.payer_status ?? 'individual'}>
-              <option value="individual">{payerLabel('individual')}</option>
-              <option value="self_employed">{payerLabel('self_employed')}</option>
-              <option value="entrepreneur">{payerLabel('entrepreneur')}</option>
-            </Select>
-          </Field>
-          <Button type="submit" variant="secondary" loading={profile.isPending}>
-            Сохранить
-          </Button>
-        </form>
-      </Card>
-
-      <Card>
-        <div className={s.spread}>
-          <h3>Индивидуальные заказы стикеров</h3>
-          <Button size="sm" onClick={() => setIndividualOpen(true)}><Plus size={16}/>Создать заказ</Button>
-        </div>
-        {user.customOrders?.length ? <Table><thead><tr><th>Заказ</th><th>Стикеры</th><th>Зачтено</th><th>К оплате</th><th>Статус</th></tr></thead><tbody>{user.customOrders.map(order=><tr key={order.id}><td>{order.title}</td><td>{order.quantity}</td><td>{order.credited_units} шт.</td><td>{money(Math.round(Number(order.amount_due)*100))}</td><td><Badge tone={order.status==='paid'?'success':'warning'}>{order.status==='paid'?'Оплачен':'Ожидает оплаты'}</Badge></td></tr>)}</tbody></Table>:<p className={s.mutedNote}>Индивидуальных заказов нет.</p>}
-      </Card>
-
-      <Card>
-        <div className={s.spread}>
-          <h3>Коды доступа к генератору</h3>
-          <Button size="sm" onClick={() => setGrantOpen(true)}>
-            <Plus size={16} />
-            Выдать код
-          </Button>
-        </div>
-        {user.codes.length ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Код</th>
-                <th>Имя</th>
-                <th>Генерации</th>
-                <th>Статус</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {user.codes.map(code => (
-                <tr key={code.id}>
-                  <td className="mono">{code.code}</td>
-                  <td>{code.name || '—'}</td>
-                  <td className={s.actionsCell}>
-                    <Progress
-                      value={code.used}
-                      max={Math.max(1, code.limit)}
-                      label={
-                        <span>
-                          {code.used} из {code.limit}
-                        </span>
-                      }
-                    />
-                  </td>
-                  <td>
-                    <Badge tone={code.active ? 'success' : 'error'}>
-                      {code.active ? 'Активен' : 'Отключён'}
-                    </Badge>
-                  </td>
-                  <td>
-                    <div className={s.row}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        loading={topup.isPending}
-                        onClick={() => {
-                          const add = Number(window.prompt('Сколько генераций добавить?', '100'));
-                          if (Number.isInteger(add) && add > 0)
-                            run(topup, { userId, codeId: code.id, add }, 'Генерации добавлены');
-                        }}
-                      >
-                        <Plus size={16} />
-                        Генерации
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          run(
-                            patchCode,
-                            { userId, codeId: code.id, active: !code.active },
-                            code.active ? 'Код отключён' : 'Код включён',
-                          )
-                        }
-                      >
-                        {code.active ? 'Отключить' : 'Включить'}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <EmptyState
-            title="Кодов нет"
-            text="Выдайте код доступа — он сразу появится у человека в кабинете."
-          />
-        )}
-      </Card>
-
-      <Card>
-        <h3>Помощник ПВЗ — подписка</h3>
-        {(() => {
-          const ent = user.app?.entitlements;
-          const planName = PLAN_LABEL[ent?.plan ?? ''] ?? 'без тарифа';
-          return (
-            <>
-              <div className={`${s.tiles} section`}>
-                <Stat label="Тариф сейчас" value={planName} />
-                <Stat label="Действует до" value={ent?.ends_at ? shortDate(ent.ends_at) : '—'} />
-                <Stat
-                  label="Подборы за месяц"
-                  value={ent?.codes_limit != null ? `${ent.codes_used ?? 0} из ${ent.codes_limit}` : '—'}
-                />
-                <Stat label="Пакеты подборов (ключи)" value={String(ent?.packs_left ?? 0)} />
-              </div>
-
-              <div className={s.toolbar} style={{ marginTop: 12 }}>
-                <Field label="Тариф">
-                  <Select value={appPlan} onChange={e => setAppPlan(e.target.value)}>
-                    <option value="basic">Базовый</option>
-                    <option value="standard">Стандарт</option>
-                    <option value="pro">Про</option>
-                  </Select>
-                </Field>
-                <Field label="Срок">
-                  <Select value={String(appMonths)} onChange={e => setAppMonths(Number(e.target.value))}>
-                    <option value="1">1 месяц</option>
-                    <option value="3">3 месяца</option>
-                    <option value="6">6 месяцев</option>
-                    <option value="12">12 месяцев</option>
-                  </Select>
-                </Field>
-                <Button
-                  loading={grantApp.isPending}
-                  onClick={() =>
-                    run(grantApp, { userId, plan: appPlan, months: appMonths }, 'Подписка выдана')
-                  }
-                >
-                  <Plus size={16} />
-                  Выдать подписку
-                </Button>
-              </div>
-              <p className={s.mutedNote}>
-                Выдаётся помимо оплаты (тариф применяется как при покупке: продление, повышение или очередь).
-              </p>
-            </>
-          );
-        })()}
-
-        {user.app?.subscriptions?.length ? (
-          <Table>
-            <thead>
-              <tr><th>Тариф</th><th>Период</th><th>Откуда</th><th>Лимиты</th><th>Статус</th><th /></tr>
-            </thead>
-            <tbody>
-              {user.app.subscriptions.map(sub => {
-                const active = !sub.canceled && Date.parse(sub.endsAt) > Date.now() && Date.parse(sub.startsAt) <= Date.now();
-                const future = !sub.canceled && Date.parse(sub.startsAt) > Date.now();
-                return (
-                  <tr key={sub.id}>
-                    <td>{PLAN_LABEL[sub.plan] ?? sub.plan}</td>
-                    <td>{shortDate(sub.startsAt)} — {shortDate(sub.endsAt)}</td>
-                    <td><Badge tone={sub.source === 'admin' ? 'warning' : 'default'}>{sub.source === 'admin' ? 'админ' : sub.source === 'partner' ? 'партнёр' : 'оплата'}</Badge></td>
-                    <td>{sub.codes} подб.{sub.stickers ? ` · ${sub.stickers} стик.` : ''} · {sub.deviceLimit} ПК</td>
-                    <td><Badge tone={active ? 'success' : future ? 'default' : 'error'}>{active ? 'активна' : future ? 'в очереди' : sub.canceled ? 'отозвана' : 'истекла'}</Badge></td>
-                    <td>
-                      {(active || future) && (
-                        <Button variant="ghost" size="sm" onClick={() => run(revokeApp, { userId, id: sub.id }, 'Подписка отозвана')}>
-                          <Trash2 size={16} />
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Подписок нет.</p>
-        )}
-
-        <h4 style={{ marginTop: 16 }}>Услуги и пакеты</h4>
-        <div className={s.toolbar}>
-          <Field label="Что">
-            <Select value={addonId} onChange={e => {
-              const next = e.target.value;
-              setAddonId(next);
-              const terms = Object.keys(addonList.find(a => a.id === next)?.prices ?? {}).map(Number);
-              if (terms.length && !terms.includes(addonMonths)) setAddonMonths(Math.min(...terms));
-            }}>
-              {(addonList.length ? addonList : [{ id: 'archive', title: 'Архив клиентов' }]).map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-            </Select>
-          </Field>
-          <Field label="Срок">
-            <Select value={String(addonMonths)} onChange={e => setAddonMonths(Number(e.target.value))}>
-              {addonTerms.map(m => <option key={m} value={String(m)}>{m} мес.</option>)}
-            </Select>
-          </Field>
-          <Button
-            loading={grantAddon.isPending}
-            onClick={() => run(grantAddon, { userId, addon: addonId, months: addonMonths }, 'Подключено')}
-          >
-            <Plus size={16} />
-            Подключить
-          </Button>
-        </div>
-        <p className={s.mutedNote}>
-          Архив работает вместе с тарифом Стандарт или Про; отзыв закрывает доступ, сам архив (на ПК и в облаке) не удаляется.
-          Пакеты добавляют компьютеры и пункты к лимиту тарифа.
-        </p>
-        {user.app?.addons?.length ? (
-          <Table>
-            <thead>
-              <tr><th>Услуга</th><th>Период</th><th>Откуда</th><th>Статус</th><th /></tr>
-            </thead>
-            <tbody>
-              {user.app.addons.map(a => {
-                const active = !a.canceled && Date.parse(a.endsAt) > Date.now() && Date.parse(a.startsAt) <= Date.now();
-                const future = !a.canceled && Date.parse(a.startsAt) > Date.now();
-                return (
-                  <tr key={a.id}>
-                    <td>{a.title}</td>
-                    <td>{shortDate(a.startsAt)} — {shortDate(a.endsAt)}</td>
-                    <td><Badge tone={a.source === 'admin' ? 'warning' : 'default'}>{a.source === 'admin' ? 'админ' : a.source === 'partner' ? 'партнёр' : 'оплата'}</Badge></td>
-                    <td><Badge tone={active ? 'success' : future ? 'default' : 'error'}>{active ? 'активна' : future ? 'в очереди' : a.canceled ? 'отозвана' : 'истекла'}</Badge></td>
-                    <td>
-                      {(active || future) && (
-                        <Button variant="ghost" size="sm" onClick={() => run(revokeAddon, { userId, id: a.id }, 'Услуга отозвана')}>
-                          <Trash2 size={16} />
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-        ) : null}
-
-        <h4 style={{ marginTop: 16 }}>Пункты ({user.app?.points?.filter(p => !p.revokedAt).length ?? 0})</h4>
-        {user.app?.points?.length ? (
-          <Table>
-            <thead>
-              <tr><th>Пункт</th><th>Подключён</th><th>Архив обновлён</th><th>Статус</th><th /></tr>
-            </thead>
-            <tbody>
-              {user.app.points.map(p => (
-                <tr key={p.id}>
-                  <td>{p.name || 'Пункт'} <span className={s.mutedNote}>№{p.wbPointId}</span></td>
-                  <td>{shortDate(p.createdAt)}</td>
-                  <td>{p.lastSyncAt ? shortDate(p.lastSyncAt) : '—'}</td>
-                  <td><Badge tone={p.revokedAt ? 'error' : 'success'}>{p.revokedAt ? 'отключён' : 'подключён'}</Badge></td>
-                  <td>
-                    {!p.revokedAt && (
-                      <Button variant="ghost" size="sm" onClick={() => run(revokePoint, { userId, id: p.id }, 'Пункт отключён')}>
-                        <Trash2 size={16} />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Пунктов нет — подключатся сами, когда программа войдёт в аккаунт на ПК пункта.</p>
-        )}
-
-        <h4 style={{ marginTop: 16 }}>Компьютеры ({user.app?.devices?.filter(d => !d.revokedAt).length ?? 0})</h4>
-        {user.app?.devices?.length ? (
-          <Table>
-            <thead><tr><th>Название</th><th>Версия</th><th>Последний вход</th><th>Статус</th><th /></tr></thead>
-            <tbody>
-              {user.app.devices.map(d => (
-                <tr key={d.id}>
-                  <td>{d.name}</td>
-                  <td className="mono">{d.appVersion || '—'}</td>
-                  <td>{d.lastSeenAt ? dateTime(d.lastSeenAt) : '—'}</td>
-                  <td><Badge tone={d.revokedAt ? 'error' : 'success'}>{d.revokedAt ? 'отвязан' : 'активен'}</Badge></td>
-                  <td>
-                    {!d.revokedAt && (
-                      <Button variant="ghost" size="sm" onClick={() => run(revokeDevice, { userId, id: d.id }, 'Компьютер отвязан')}>
-                        <Trash2 size={16} />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Компьютеров нет.</p>
-        )}
-
-        {user.app?.usage?.length ? (
-          <details style={{ marginTop: 12 }}>
-            <summary className={s.mutedNote}>Последние списания ({user.app.usage.length})</summary>
-            <Table>
-              <thead><tr><th>Когда</th><th>Что</th><th>Сколько</th><th>Откуда</th></tr></thead>
-              <tbody>
-                {user.app.usage.map(u => (
-                  <tr key={u.id}>
-                    <td>{dateTime(u.createdAt)}</td>
-                    <td>{u.kind === 'code' ? 'подбор кода' : 'стикеры'}</td>
-                    <td>{u.amount}</td>
-                    <td>{u.source === 'pack' ? 'пакет' : 'квота'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </details>
-        ) : null}
-      </Card>
-
-      <Card>
-        <h3>Помощник ПВЗ — код клиента</h3>
-        <Switch
-          checked={user.profile?.app_code_via_bot_off !== true}
-          disabled={codeViaBotUser.isPending}
-          onChange={e =>
-            run(
-              codeViaBotUser,
-              { userId, enabled: e.target.checked },
-              e.target.checked
-                ? 'Код клиента этому аккаунту — через подтверждение в боте (как у всех)'
-                : 'Код клиента этому аккаунту выдаётся напрямую, без бота',
-            )
-          }
-          description={
-            codeViaBotGlobal.data?.enabled === false
-              ? 'Сейчас общий переключатель «Код клиента только через Telegram-бот» (раздел «Программа») выключен — код у всех выдаётся напрямую. Это исключение сработает, когда общий переключатель включат.'
-              : 'Выключите для владельца без Telegram: при включённом общем переключателе его компьютеры получают код напрямую, без подтверждения в боте. Программа узнаёт об этом сама при следующем запросе, обновление не нужно.'
-          }
-        >
-          Подтверждение кода клиента через Telegram-бот
-        </Switch>
-      </Card>
-
-      <Card>
-        <div className={s.spread}>
-          <h3>Ключи «Подбора кодов» (пакеты подборов)</h3>
-          <Button size="sm" variant="secondary" onClick={() => setProgramOpen(true)}>
-            <KeyRound size={16} />
-            Выдать ключ
-          </Button>
-        </div>
-        {user.programKeys.length ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Ключ</th>
-                <th>Итерации</th>
-                <th>Статус</th>
-              </tr>
-            </thead>
-            <tbody>
-              {user.programKeys.map(key => (
-                <tr key={key.id}>
-                  <td className="mono">{key.key}</td>
-                  <td>
-                    {key.used} из {key.limit}
-                  </td>
-                  <td>
-                    <Badge tone={key.active ? 'success' : 'error'}>
-                      {key.active ? 'Активен' : 'Отозван'}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Ключей нет.</p>
-        )}
-      </Card>
-
-      <Card>
-        <div className={s.spread}>
-          <h3>Печать ячеек</h3>
-          <Button size="sm" variant="secondary" onClick={() => setCellOpen(true)}>
-            <Plus size={16} />
-            Выдать ключ
-          </Button>
-        </div>
-        {user.cellLicenses.length ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Ключ</th>
-                <th>Права</th><th>Срок</th>
-                <th>Устройства</th>
-                <th>Действует до</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {user.cellLicenses.map(license => (
-                <tr key={license.id}>
-                  <td className="mono">{license.key}</td>
-                  <td>
-                    <MarketplaceScopeToggle
-                      value={license.marketplaceScope === 'legacy_unassigned' ? 'wb' : license.marketplaceScope}
-                      onChange={marketplaceScope => run(patchCell, { userId, id: license.id, marketplaceScope }, 'Права изменены')}
-                      disabled={patchCell.isPending}
-                    />
-                  </td>
-                  <td>{license.durationDays} дн.</td>
-                  <td>
-                    {license.devices?.length ?? 0} из {license.deviceLimit}
-                  </td>
-                  <td>{license.expiresAt ? shortDate(license.expiresAt) : 'не активирован'}</td>
-                  <td>
-                    <div className={s.row}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        loading={patchCell.isPending}
-                        onClick={() => {
-                          const days = Number(window.prompt('На сколько дней продлить?', '30'));
-                          if (Number.isInteger(days) && days > 0)
-                            run(
-                              patchCell,
-                              { userId, id: license.id, extendDays: days },
-                              'Ключ продлён',
-                            );
-                        }}
-                      >
-                        <RefreshCw size={16} />
-                        Продлить
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          run(
-                            patchCell,
-                            { userId, id: license.id, active: !license.active },
-                            license.active ? 'Ключ отозван' : 'Ключ возвращён',
-                          )
-                        }
-                      >
-                        {license.active ? 'Отозвать' : 'Вернуть'}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Лицензий нет.</p>
-        )}
-      </Card>
-
-      <Card>
-        <h3>Заказы</h3>
-        {user.orders.length ? (
-          <Table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Покупка</th>
-                <th>Сумма</th>
-                <th>Статус</th>
-              </tr>
-            </thead>
-            <tbody>
-              {user.orders.map(order => (
-                <tr key={order.id}>
-                  <td>{dateTime(order.created_at)}</td>
-                  <td>{productLabel(order.product_kind)}</td>
-                  <td>{money(Math.round(Number(order.amount) * 100))}</td>
-                  <td>{orderStatusLabel(order.status)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className={s.mutedNote}>Покупок не было.</p>
-        )}
-      </Card>
-
-      <Card>
-        <div className={s.spread}>
-          <h3>Рефералы и уведомления</h3>
-          <Button size="sm" variant="secondary" onClick={() => setNotifyOpen(true)}>
-            Написать пользователю
-          </Button>
-        </div>
-        <div className={s.tiles}>
-          <Stat value={user.referral.code ?? '—'} label="реферальный код" />
-          <Stat value={user.referral.invited} label="приглашено" />
-          <Stat value={money(user.referral.earnedKopecks)} label="начислено всего" />
-          <Stat value={money(user.referral.paidKopecks)} label="выплачено" />
-        </div>
-        {(user.referral.referrals || []).length > 0 && (
-          <Table>
-            <thead>
-              <tr>
-                <th>Реферал</th>
-                <th>Приглашён</th>
-                <th>Покупки</th>
-                <th>Оплачено</th>
-                <th>Возвраты</th>
-                <th>Начислено</th>
-                <th>Списано</th>
-                <th>Итого заработано</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(user.referral.referrals || []).map(referral => (
-                <tr key={referral.userId}>
-                  <td>
-                    <div>{referral.displayName || referral.email || 'Без имени'}</div>
-                    {referral.displayName && referral.email && (
-                      <div className={s.mutedNote}>{referral.email}</div>
-                    )}
-                    {referral.phone && <div className={s.mutedNote}>{referral.phone}</div>}
-                    <div className="mono">{referral.userId}</div>
-                  </td>
-                  <td>{dateTime(referral.attributedAt)}</td>
-                  <td>
-                    {referral.orders.length
-                      ? referral.orders.map(order => (
-                          <div key={order.id} className={s.mutedNote}>
-                            {dateTime(order.createdAt)} · {productLabel(order.productKind)} ·{' '}
-                            {money(order.amountKopecks)} · {orderStatusLabel(order.status)}
-                          </div>
-                        ))
-                      : 'нет'}
-                  </td>
-                  <td>{money(referral.paidKopecks)}</td>
-                  <td>{money(referral.refundedKopecks)}</td>
-                  <td>{money(referral.rewardedKopecks)}</td>
-                  <td>{money(referral.reversedKopecks)}</td>
-                  <td>{money(referral.earnedKopecks)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-        {user.notifications.length > 0 && (
-          <Table>
-            <thead>
-              <tr>
-                <th>Уведомление</th>
-                <th>Дата</th>
-                <th>Прочитано</th>
-              </tr>
-            </thead>
-            <tbody>
-              {user.notifications.slice(0, 8).map(item => (
-                <tr key={item.id}>
-                  <td>{item.title}</td>
-                  <td>{dateTime(item.created_at)}</td>
-                  <td>{item.read_at ? 'да' : 'нет'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Card>
-
-      {user.actions.length > 0 && (
-        <Card>
-          <h3>Журнал действий администратора</h3>
-          <Table>
-            <thead>
-              <tr>
-                <th>Дата</th>
-                <th>Действие</th>
-                <th>Детали</th>
-              </tr>
-            </thead>
-            <tbody>
-              {user.actions.map(action => (
-                <tr key={action.id}>
-                  <td>{dateTime(action.created_at)}</td>
-                  <td>{action.action}</td>
-                  <td className="mono">{JSON.stringify(action.payload)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      )}
-
-      <div className={s.danger}>
-        <h3>Опасная зона</h3>
-        <p className={s.mutedNote}>
-          Блокировка обратима: аккаунт остаётся, но вход закрыт и все коды с ключами отключаются.
-          Удаление необратимо — профиль, настройки и импортированная история исчезнут, а заказы и
-          выданные коды останутся в базе без владельца.
-        </p>
-        <Button variant="secondary" onClick={() => setDeleteOpen(true)}>
-          <Trash2 size={16} />
-          Удалить аккаунт
-        </Button>
       </div>
 
-      <Modal
-        open={grantOpen}
-        onOpenChange={setGrantOpen}
-        title="Выдать код доступа"
-        description="Код сгенерирует сервер и сразу привяжет его к этому пользователю."
-      >
-        <form
-          className="stack"
-          onSubmit={event => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            run(
-              grantSticker,
-              {
-                userId,
-                name: String(form.get('name') || ''),
-                limit: Number(form.get('limit') || 0),
-              },
-              'Код выдан',
-              () => setGrantOpen(false),
-            );
-          }}
-        >
-          <Field label="Имя пакета">
-            <Input name="name" defaultValue="Выдан администратором" required />
-          </Field>
-          <Field label="Сколько генераций">
-            <Input name="limit" type="number" min={1} max={100000} defaultValue={100} required />
-          </Field>
-          <Button type="submit" loading={grantSticker.isPending}>
-            Выдать
-          </Button>
-        </form>
-      </Modal>
-
-      <Modal open={individualOpen} onOpenChange={setIndividualOpen} title="Создать индивидуальный заказ" description="Номера будут закрыты до оплаты. Остаток генераций резервируется сразу.">
-        <form className="stack" onSubmit={event=>{event.preventDefault();const form=new FormData(event.currentTarget);run(createIndividual,{userId,title:String(form.get('title')||''),codes:String(form.get('codes')||''),totalAmount:Number(form.get('totalAmount')||0),creditUnits:Number(form.get('creditUnits')||0)},'Индивидуальный заказ выставлен',()=>setIndividualOpen(false));}}>
-          <Field label="Название"><Input name="title" defaultValue="Индивидуальный заказ стикеров" required/></Field>
-          <Field label="Номера" help="По одному в строке. Повторы будут удалены."><Textarea name="codes" rows={10} required/></Field>
-          <Field label="Полная стоимость, ₽"><Input name="totalAmount" type="number" min="0" step="0.01" required/></Field>
-          <Field label="Зачесть генераций из текущего пакета"><Input name="creditUnits" type="number" min="0" defaultValue="0" required/></Field>
-          <Button type="submit" loading={createIndividual.isPending}>Выставить заказ</Button>
-        </form>
-      </Modal>
-
-      <Modal open={programOpen} onOpenChange={setProgramOpen} title="Выдать ключ «Подбора кодов»">
-        <form
-          className="stack"
-          onSubmit={event => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            run(
-              grantProgram,
-              {
-                userId,
-                key: String(form.get('key') || ''),
-                limit: Number(form.get('limit') || 0),
-                note: String(form.get('note') || ''),
-              },
-              'Ключ выдан',
-              () => setProgramOpen(false),
-            );
-          }}
-        >
-          <Field label="Ключ" help="6–64 латинские буквы, цифры или дефис">
-            <Input name="key" defaultValue="WBPK-" required />
-          </Field>
-          <Field label="Лимит итераций">
-            <Input name="limit" type="number" min={1} defaultValue={1000} required />
-          </Field>
-          <Field label="Пометка">
-            <Input name="note" />
-          </Field>
-          <Button type="submit" loading={grantProgram.isPending}>
-            Выдать
-          </Button>
-        </form>
-      </Modal>
-
-      <Modal open={cellOpen} onOpenChange={setCellOpen} title="Выдать ключ «Печати ячеек»">
-        <form
-          className="stack"
-          onSubmit={event => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            run(
-              grantCell,
-              {
-                userId,
-                durationDays: Number(form.get('durationDays')),
-                deviceLimit: Number(form.get('deviceLimit')),
-                marketplaceScope: newCellMarketplaceScope,
-                note: String(form.get('note') || ''),
-              },
-              'Ключ выдан',
-              () => setCellOpen(false),
-            );
-          }}
-        >
-          <Field label="Срок">
-            <Select name="durationDays" defaultValue="30">
-              {CELL_DURATIONS.map(days => (
-                <option key={days} value={days}>
-                  {days} дней
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Устройств">
-            <Select name="deviceLimit" defaultValue="1">
-              {CELL_DEVICES.map(devices => (
-                <option key={devices} value={devices}>
-                  {devices}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Маркетплейс">
-            <MarketplaceScopeToggle value={newCellMarketplaceScope} onChange={setNewCellMarketplaceScope} />
-          </Field>
-          <Field label="Пометка">
-            <Input name="note" />
-          </Field>
-          <Button type="submit" loading={grantCell.isPending}>
-            Выдать
-          </Button>
-        </form>
-      </Modal>
-
-      <Modal
-        open={notifyOpen}
-        onOpenChange={setNotifyOpen}
-        title="Сообщение пользователю"
-        description="Появится в кабинете и, если есть почта, уйдёт письмом."
-      >
-        <form
-          className="stack"
-          onSubmit={event => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            run(
-              notify,
-              {
-                userId,
-                title: String(form.get('title') || ''),
-                body: String(form.get('body') || ''),
-              },
-              'Отправлено',
-              () => setNotifyOpen(false),
-            );
-          }}
-        >
-          <Field label="Заголовок">
-            <Input name="title" maxLength={160} required />
-          </Field>
-          <Field label="Текст">
-            <Textarea name="body" rows={4} maxLength={2000} required />
-          </Field>
-          <Button type="submit" loading={notify.isPending}>
-            Отправить
-          </Button>
-        </form>
-      </Modal>
-
-      <Modal
-        open={deleteOpen}
-        onOpenChange={value => {
-          setDeleteOpen(value);
-          setConfirm('');
-        }}
-        title="Удалить аккаунт"
-        description="Действие необратимо."
-      >
-        <div className="stack">
-          <Alert tone="warning">
-            Каскадом удалятся профиль, настройки и импортированная история генераций. Заказы и
-            выданные коды останутся в базе, но потеряют владельца.
-          </Alert>
-          <Field label="Введите почту пользователя для подтверждения" help={user.confirmValue}>
-            <Input value={confirm} onChange={event => setConfirm(event.target.value)} />
-          </Field>
-          <Button
-            variant="secondary"
-            disabled={confirm.trim() !== user.confirmValue}
-            loading={remove.isPending}
-            onClick={() =>
-              run(remove, { userId, confirm: confirm.trim() }, 'Аккаунт удалён', () =>
-                navigate('/panel/users'),
-              )
-            }
-          >
-            <Trash2 size={16} />
-            Удалить навсегда
-          </Button>
-        </div>
-      </Modal>
+      <LimitsModal open={limits.open} onOpenChange={open => setLimits(prev => ({ ...prev, open }))} detail={detail} initialTab={limits.tab} />
+      <RestrictModal
+        open={restrictMode !== null}
+        onOpenChange={open => !open && setRestrictMode(null)}
+        detail={detail}
+        mode={restrictMode === 'edit' && restriction ? 'edit' : 'create'}
+      />
+      <LiftRestrictionModal open={liftOpen} onOpenChange={setLiftOpen} detail={detail} />
+      <MessageComposer
+        open={message.open}
+        onOpenChange={open => setMessage(prev => ({ ...prev, open }))}
+        detail={detail}
+        initialChannels={message.channels}
+        initialDeviceIds={message.deviceIds}
+      />
+      <ConfirmDialog
+        open={unblockOpen}
+        onOpenChange={setUnblockOpen}
+        title="Разблокировать аккаунт?"
+        description="Вход откроется, выключенные старой блокировкой коды, ключи и лицензии включатся."
+        confirmLabel="Разблокировать"
+        requireReason
+        onConfirm={({ reason }) => run(unblock, { userId, reason }, 'Пользователь разблокирован')}
+      />
     </div>
   );
 }

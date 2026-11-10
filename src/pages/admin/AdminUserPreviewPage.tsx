@@ -2,13 +2,12 @@ import { ArrowLeft, Eye, History, KeyRound, PackageCheck, ShieldCheck } from 'lu
 import { Link, useParams } from 'react-router-dom';
 import { useAdminUser } from '../../api/admin';
 import { dateTime, money } from '../../api/cabinet';
+import { customOrderStatusLabel, marketplaceLabel } from '../../lib/admin-users';
 import { Badge, Button, Card, Skeleton, Stat } from '../../ui';
+import p from './admin-pages.module.css';
 
-const statusLabel = (status: string) => {
-  if (status === 'paid') return 'Оплачен';
-  if (status === 'cancelled') return 'Отменён';
-  return 'Ожидает оплаты';
-};
+// Статусы индивидуальных заказов в базе: pending_payment | paid | canceled (одна «l»).
+const statusLabel = customOrderStatusLabel;
 
 export function AdminUserPreviewPage() {
   const { userId = '' } = useParams();
@@ -36,7 +35,7 @@ export function AdminUserPreviewPage() {
               <div className="muted">Только просмотр — действия, оплата и скачивание отключены.</div>
             </div>
           </div>
-          <Link to={`/panel/users/${userId}`}><Button variant="secondary" size="sm"><ArrowLeft size={16} />К карточке</Button></Link>
+          <Link to={`/panel/users/${userId}`}><Button variant="secondary" size="sm" className={p.tap}><ArrowLeft size={16} />К карточке</Button></Link>
         </div>
       </Card>
 
@@ -64,7 +63,7 @@ export function AdminUserPreviewPage() {
               <Card key={order.id} accent={pending}>
                 <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <div className="row"><strong>{order.title}</strong><Badge tone={order.status === 'paid' ? 'success' : 'warning'}>{statusLabel(order.status)}</Badge></div>
+                    <div className="row"><strong>{order.title}</strong><Badge tone={order.status === 'paid' ? 'success' : order.status === 'canceled' ? 'error' : 'warning'}>{statusLabel(order.status)}</Badge></div>
                     <p className="muted">{dateTime(order.created_at)} · {order.quantity} стикеров</p>
                     <div className="row">
                       <span>Полная стоимость: <strong>{money(Math.round(order.total_amount * 100))}</strong></span>
@@ -89,7 +88,7 @@ export function AdminUserPreviewPage() {
         <div className="stack section">
           {user.codes.map(code => <div className="row" key={`code-${code.id}`}><Badge tone={code.active ? 'success' : 'default'}>{code.active ? 'Активен' : 'Неактивен'}</Badge><strong>{code.name || 'Генерации стикеров'}</strong><span className="muted">Использовано {code.used} из {code.limit}</span></div>)}
           {user.programKeys.map(key => <div className="row" key={`program-${key.id}`}><Badge tone={key.active ? 'success' : 'default'}>{key.active ? 'Активен' : 'Неактивен'}</Badge><strong>Программа</strong></div>)}
-          {user.cellLicenses.map(key => <div className="row" key={`cell-${key.id}`}><Badge tone={key.active ? 'success' : 'default'}>{key.active ? 'Активен' : 'Неактивен'}</Badge><strong>Печать ячеек</strong><span className="muted">{key.marketplaceScope}</span></div>)}
+          {user.cellLicenses.map(key => <div className="row" key={`cell-${key.id}`}><Badge tone={key.active ? 'success' : 'default'}>{key.active ? 'Активен' : 'Неактивен'}</Badge><strong>Печать ячеек</strong><span className="muted">{marketplaceLabel(key.marketplaceScope)}</span></div>)}
           {!activeKeys && <p className="muted">Активных ключей нет.</p>}
         </div>
       </Card>

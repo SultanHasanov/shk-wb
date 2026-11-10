@@ -823,36 +823,77 @@ export function Checkbox({ children, id, ...p }: ComponentPropsWithRef<'input'>)
 
 /* ============ Modal ============ */
 
+/**
+ * Необязательные size/sheet/footer добавлены для окон админки; без них разметка
+ * и поведение прежние (сайт и кабинет не меняются).
+ * - size 'lg' — ширина 720 px (окна «Лимиты», «Написать»);
+ * - sheet — ниже 480 px окно на весь экран, шапка липкая;
+ * - footer — липкий подвал с кнопками: длинная форма прокручивается, а
+ *   «Сохранить» всегда на виду.
+ */
 export function Modal({
   open,
   onOpenChange,
   title,
   description,
   children,
+  size = 'md',
+  sheet = false,
+  footer,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
+  size?: 'md' | 'lg';
+  sheet?: boolean;
+  footer?: ReactNode;
 }) {
   const t = useT();
+  const hasFooter = footer !== undefined && footer !== null && footer !== false;
+  const classes = [s.dialog, size === 'lg' && s.dialogLg, sheet && s.dialogSheet, hasFooter && s.dialogWithFooter]
+    .filter(Boolean)
+    .join(' ');
+  const close = (
+    <Dialog.Close className={s.dialogClose} aria-label={t('Закрыть', 'Жабу')}>
+      <X size={20} />
+    </Dialog.Close>
+  );
+  const heading = (
+    <Dialog.Title asChild>
+      <h2>{title}</h2>
+    </Dialog.Title>
+  );
+  const fallback = t(`Диалог «${title}».`, `«${title}» диалогы.`);
+  // Строка — как раньше, в <p>; разметка (список, жирное) в <p> недопустима — div.
+  const desc =
+    description === undefined || description === null || typeof description === 'string' ? (
+      <Dialog.Description className={s.dialogDesc}>{description ?? fallback}</Dialog.Description>
+    ) : (
+      <Dialog.Description asChild>
+        <div className={s.dialogDesc}>{description}</div>
+      </Dialog.Description>
+    );
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className={s.overlay} />
-        <Dialog.Content className={s.dialog}>
-          <Dialog.Title asChild>
-            <h2>{title}</h2>
-          </Dialog.Title>
+        <Dialog.Content className={classes}>
+          {sheet ? (
+            <div className={s.dialogHead}>
+              {heading}
+              {close}
+            </div>
+          ) : (
+            heading
+          )}
           {/* Без Description Radix пишет предупреждение о доступности в консоль */}
-          <Dialog.Description className={s.dialogDesc}>
-            {description ?? t(`Диалог «${title}».`, `«${title}» диалогы.`)}
-          </Dialog.Description>
-          <Dialog.Close className={s.dialogClose} aria-label={t('Закрыть', 'Жабу')}>
-            <X size={20} />
-          </Dialog.Close>
+          {desc}
+          {!sheet && close}
           {children}
+          {hasFooter && <div className={s.dialogFooter}>{footer}</div>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

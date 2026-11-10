@@ -2,13 +2,16 @@ import { Route, Routes } from 'react-router-dom';
 import { AdminShell } from '../layout/AdminShell';
 import { RequireAdmin } from '../layout/RequireAdmin';
 import {
-  AdminAccessCodesPage, AdminAnnouncementsPage, AdminCabinetPage, AdminCellPrintPage,
-  AdminOverviewPage, AdminPartnerPage, AdminPartnersPage, AdminPaymentsPage, AdminPoolPage, AdminProgramPage, AdminUserPage,
-  AdminUserPreviewPage,
-  AdminUsersPage,
+  AdminAccessCodesPage, AdminAnnouncementsPage, AdminAuditPage, AdminCabinetPage, AdminCellPrintPage,
+  AdminOverviewPage, AdminPartnerPage, AdminPartnersPage, AdminPaymentsPage, AdminPoolPage, AdminProgramPage,
+  AdminSystemPage, AdminUserPage, AdminUserPreviewPage, AdminUsersPage,
 } from '../pages/admin';
 
-/** Ветка админки целиком: грузится ленивым чанком из App. */
+/**
+ * Ветка админки целиком: грузится ленивым чанком из App.
+ * Состояние страниц живёт в адресе: карточка — `users/:userId?tab=…`, журнал —
+ * `audit?tab=actions|deliveries&userId=&category=`, список — `users?q=&filter=&sort=&page=`.
+ */
 export default function AdminRoutes() {
   return (
     <Routes>
@@ -27,7 +30,10 @@ export default function AdminRoutes() {
           <Route path="program" element={<AdminProgramPage />} />
           <Route path="cell-print" element={<AdminCellPrintPage />} />
           <Route path="announcements" element={<AdminAnnouncementsPage />} />
-          <Route path="cabinet" element={<AdminCabinetPage />} />
+          <Route path="cabinet" element={<AdminCabinetPage section="withdrawals" />} />
+          <Route path="broadcasts" element={<AdminCabinetPage section="broadcasts" />} />
+          <Route path="audit" element={<AdminAuditPage />} />
+          <Route path="system" element={<AdminSystemPage />} />
         </Route>
       </Route>
     </Routes>

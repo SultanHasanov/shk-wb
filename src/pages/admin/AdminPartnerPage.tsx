@@ -7,9 +7,12 @@ import {
   type PartnerResource, RESOURCE_LABELS, formatKzt, formatRub, poolLeft,
 } from '../../lib/partner';
 import {
-  Alert, Badge, Button, Card, EmptyState, Field, Input, Progress, Skeleton, Stat, Table, Tabs, useToast,
+  Alert, Badge, Button, Card, Field, Input, Progress, Skeleton, Stat, Tabs, useToast,
 } from '../../ui';
+import { ConfirmDialog, EmptyBlock, ResponsiveTable } from './kit';
+import type { ResponsiveColumn } from './kit';
 import s from '../../layout/AdminShell.module.css';
+import p from './admin-pages.module.css';
 
 const RESOURCES: PartnerResource[] = ['sticker', 'program', 'cell'];
 
@@ -60,6 +63,7 @@ export function AdminPartnerPage() {
 function Header({ data }: { data: AdminPartnerDetail }) {
   const toast = useToast();
   const update = useAdminPartnerAction<{ partnerId: string; active?: boolean }>('update', 'PATCH');
+  const [confirmOff, setConfirmOff] = useState(false);
   const { partner } = data;
   return (
     <Card>
@@ -75,10 +79,14 @@ function Header({ data }: { data: AdminPartnerDetail }) {
         </div>
         <Button
           variant={partner.active ? 'secondary' : 'primary'}
+          className={p.tap}
           loading={update.isPending}
           onClick={() => {
-            if (partner.active && !window.confirm('Отключить партнёра? Он не сможет выпускать коды. Уже выданные коды продолжат работать.')) return;
-            update.mutate({ partnerId: partner.id, active: !partner.active }, {
+            if (partner.active) {
+              setConfirmOff(true);
+              return;
+            }
+            update.mutate({ partnerId: partner.id, active: true }, {
               onError: (error: Error) => toast(error.message, 'error'),
             });
           }}
@@ -86,6 +94,18 @@ function Header({ data }: { data: AdminPartnerDetail }) {
           {partner.active ? 'Отключить' : 'Включить'}
         </Button>
       </div>
+      <ConfirmDialog
+        open={confirmOff}
+        onOpenChange={setConfirmOff}
+        title="Отключить партнёра?"
+        description="Он не сможет выпускать коды. Уже выданные коды продолжат работать."
+        confirmLabel="Отключить"
+        tone="danger"
+        onConfirm={async () => {
+          await update.mutateAsync({ partnerId: partner.id, active: false });
+          toast('Партнёр отключён', 'success');
+        }}
+      />
     </Card>
   );
 }
@@ -115,8 +135,8 @@ function PoolCard({ data, resource }: { data: AdminPartnerDetail; resource: Part
         <Field label="Количество">
           <Input value={amount} onChange={e => setAmount(e.target.value)} type="number" min={1} />
         </Field>
-        <Button size="sm" loading={grant.isPending} onClick={() => submit(1)}>Пополнить</Button>
-        <Button size="sm" variant="ghost" loading={grant.isPending} onClick={() => submit(-1)}>Списать</Button>
+        <Button size="sm" className={p.tap} loading={grant.isPending} onClick={() => submit(1)}>Пополнить</Button>
+        <Button size="sm" variant="ghost" className={p.tap} loading={grant.isPending} onClick={() => submit(-1)}>Списать</Button>
       </div>
     </Card>
   );
@@ -136,7 +156,7 @@ function PricesCard({ data }: { data: AdminPartnerDetail }) {
         Новые цены действуют для следующих выпусков; уже выпущенное не пересчитывается.
       </p>
       <form
-        className={s.toolbar}
+        className={`${s.toolbar} ${p.formRow}`}
         onSubmit={event => {
           event.preventDefault();
           update.mutate({
@@ -153,7 +173,7 @@ function PricesCard({ data }: { data: AdminPartnerDetail }) {
         <Field label="₽ за генерацию"><Input inputMode="decimal" value={prices.sticker} onChange={e => setPrices({ ...prices, sticker: e.target.value })} /></Field>
         <Field label="₽ за итерацию программы"><Input inputMode="decimal" value={prices.program} onChange={e => setPrices({ ...prices, program: e.target.value })} /></Field>
         <Field label="₽ за день·ПК печати ячеек"><Input inputMode="decimal" value={prices.cell} onChange={e => setPrices({ ...prices, cell: e.target.value })} /></Field>
-        <Button type="submit" loading={update.isPending}>Сохранить цены</Button>
+        <Button type="submit" className={p.tap} loading={update.isPending}>Сохранить цены</Button>
       </form>
     </Card>
   );
@@ -174,7 +194,7 @@ function PaymentForm({ partnerId }: { partnerId: string }) {
   const [note, setNote] = useState('');
   return (
     <form
-      className={s.toolbar}
+      className={`${s.toolbar} ${p.formRow}`}
       onSubmit={event => {
         event.preventDefault();
         pay.mutate({ partnerId, amountRub: Number(amount.replace(',', '.')), note }, {
@@ -187,82 +207,99 @@ function PaymentForm({ partnerId }: { partnerId: string }) {
         <Input value={amount} onChange={e => setAmount(e.target.value)} inputMode="decimal" required />
       </Field>
       <Field label="Комментарий"><Input value={note} onChange={e => setNote(e.target.value)} maxLength={200} placeholder="Перевод на карту 14.10" /></Field>
-      <Button type="submit" loading={pay.isPending}>Записать оплату</Button>
+      <Button type="submit" className={p.tap} loading={pay.isPending}>Записать оплату</Button>
     </form>
   );
 }
 
+type PartnerItem = AdminPartnerDetail['items'][number];
+type PartnerLedgerRow = AdminPartnerDetail['ledger'][number];
+type PartnerPaymentRow = AdminPartnerDetail['payments'][number];
+
 function ItemsTable({ data }: { data: AdminPartnerDetail }) {
   const toast = useToast();
   const toggle = useAdminPartnerAction<{ partnerId: string; kind: PartnerResource; id: number; active: boolean }>('toggleItem');
-  if (!data.items.length) return <Card><EmptyState title="Партнёр ещё ничего не выпустил" text="Выпуски появятся здесь." /></Card>;
+  const columns: ResponsiveColumn<PartnerItem>[] = [
+    { key: 'value', header: 'Код / ключ', primary: true, cell: item => <span className={p.mono}>{item.value}</span> },
+    { key: 'kind', header: 'Вид', cell: item => RESOURCE_LABELS[item.kind].short },
+    { key: 'note', header: 'Для кого', cell: item => item.note || '—' },
+    {
+      key: 'volume',
+      header: 'Объём',
+      cell: item => (item.kind === 'cell' ? `${item.durationDays} дн. × ${item.deviceLimit} ПК` : `${item.used} из ${item.limit}`),
+    },
+    { key: 'created', header: 'Создан', cell: item => shortDate(item.createdAt) },
+    {
+      key: 'status',
+      header: 'Статус',
+      cell: item => <Badge tone={item.active ? 'success' : 'error'}>{item.active ? 'Активен' : 'Выключен'}</Badge>,
+    },
+  ];
   return (
-    <Table>
-      <thead><tr><th>Вид</th><th>Код / ключ</th><th>Для кого</th><th>Объём</th><th>Создан</th><th>Статус</th><th /></tr></thead>
-      <tbody>
-        {data.items.map(item => (
-          <tr key={`${item.kind}-${item.id}`}>
-            <td>{RESOURCE_LABELS[item.kind].short}</td>
-            <td className="mono">{item.value}</td>
-            <td>{item.note || '—'}</td>
-            <td>{item.kind === 'cell' ? `${item.durationDays} дн. × ${item.deviceLimit} ПК` : `${item.used} из ${item.limit}`}</td>
-            <td>{shortDate(item.createdAt)}</td>
-            <td><Badge tone={item.active ? 'success' : 'error'}>{item.active ? 'Активен' : 'Выключен'}</Badge></td>
-            <td>
-              <Button
-                variant="ghost" size="sm"
-                onClick={() => toggle.mutate({ partnerId: data.partner.id, kind: item.kind, id: item.id, active: !item.active }, {
-                  onError: (error: Error) => toast(error.message, 'error'),
-                })}
-              >
-                {item.active ? 'Выключить' : 'Включить'}
-              </Button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
+    <ResponsiveTable
+      rows={data.items}
+      columns={columns}
+      rowKey={item => `${item.kind}-${item.id}`}
+      empty={<EmptyBlock title="Партнёр ещё ничего не выпустил" text="Выпуски появятся здесь." />}
+      rowActions={item => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className={p.tap}
+          onClick={() =>
+            toggle.mutate({ partnerId: data.partner.id, kind: item.kind, id: item.id, active: !item.active }, {
+              onError: (error: Error) => toast(error.message, 'error'),
+            })
+          }
+        >
+          {item.active ? 'Выключить' : 'Включить'}
+        </Button>
+      )}
+    />
   );
 }
 
 const LEDGER_KIND = { grant: 'Пул от вас', issue: 'Выпуск', topup: 'Пополнение кода' } as const;
 
+const ledgerColumns: ResponsiveColumn<PartnerLedgerRow>[] = [
+  { key: 'kind', header: 'Операция', primary: true, cell: entry => LEDGER_KIND[entry.kind] },
+  { key: 'date', header: 'Дата', cell: entry => shortDate(entry.createdAt) },
+  { key: 'pool', header: 'Пул', cell: entry => RESOURCE_LABELS[entry.resource].unit },
+  {
+    key: 'delta',
+    header: 'Изменение',
+    align: 'end',
+    cell: entry => <span className={p.num}>{entry.delta > 0 ? `+${entry.delta}` : entry.delta}</span>,
+  },
+  { key: 'ref', header: 'Код / ключ', cell: entry => <span className={p.mono}>{entry.refLabel || entry.note || '—'}</span> },
+  { key: 'cost', header: 'Должен, ₽', align: 'end', cell: entry => (entry.costRub == null ? '—' : formatRub(entry.costRub)) },
+  { key: 'price', header: 'Клиенту, ₸', align: 'end', cell: entry => (entry.priceKzt == null ? '—' : formatKzt(entry.priceKzt)) },
+];
+
 function LedgerTable({ data }: { data: AdminPartnerDetail }) {
-  if (!data.ledger.length) return <Card><EmptyState title="Движений пока нет" text="Пополните пул партнёра выше." /></Card>;
   return (
-    <Table>
-      <thead><tr><th>Дата</th><th>Операция</th><th>Пул</th><th>Изменение</th><th>Код / ключ</th><th>Должен, ₽</th><th>Клиенту, ₸</th></tr></thead>
-      <tbody>
-        {data.ledger.map(entry => (
-          <tr key={entry.id}>
-            <td>{shortDate(entry.createdAt)}</td>
-            <td>{LEDGER_KIND[entry.kind]}</td>
-            <td>{RESOURCE_LABELS[entry.resource].unit}</td>
-            <td>{entry.delta > 0 ? `+${entry.delta}` : entry.delta}</td>
-            <td className="mono">{entry.refLabel || entry.note || '—'}</td>
-            <td>{entry.costRub == null ? '—' : formatRub(entry.costRub)}</td>
-            <td>{entry.priceKzt == null ? '—' : formatKzt(entry.priceKzt)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
+    <ResponsiveTable
+      rows={data.ledger}
+      columns={ledgerColumns}
+      rowKey={entry => entry.id}
+      empty={<EmptyBlock title="Движений пока нет" text="Пополните пул партнёра выше." />}
+    />
   );
 }
 
+const paymentColumns: ResponsiveColumn<PartnerPaymentRow>[] = [
+  { key: 'amount', header: 'Сумма', primary: true, cell: payment => formatRub(payment.amountRub) },
+  { key: 'date', header: 'Дата', cell: payment => shortDate(payment.createdAt) },
+  { key: 'note', header: 'Комментарий', cell: payment => payment.note || '—' },
+];
+
 function PaymentsTable({ data }: { data: AdminPartnerDetail }) {
-  if (!data.payments.length) return <Card><EmptyState title="Оплат пока нет" text="Записывайте оплаты партнёра в блоке «Расчёты»." /></Card>;
   return (
-    <Table>
-      <thead><tr><th>Дата</th><th>Сумма</th><th>Комментарий</th></tr></thead>
-      <tbody>
-        {data.payments.map(payment => (
-          <tr key={payment.id}>
-            <td>{shortDate(payment.createdAt)}</td>
-            <td>{formatRub(payment.amountRub)}</td>
-            <td>{payment.note || '—'}</td>
-          </tr>
-        ))}
-      </tbody>
-    </Table>
+    <ResponsiveTable
+      rows={data.payments}
+      columns={paymentColumns}
+      rowKey={payment => payment.id}
+      empty={<EmptyBlock title="Оплат пока нет" text="Записывайте оплаты партнёра в блоке «Расчёты»." />}
+    />
   );
 }

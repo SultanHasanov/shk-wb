@@ -1068,6 +1068,100 @@ button.priceCell:hover {
   }
 }
 
+/* Расширения Modal для админки (size / sheet / footer). Без новых пропсов
+   эти классы не ставятся, и окна сайта выглядят как раньше. */
+.dialog.dialogLg {
+  width: min(720px, calc(100vw - var(--sp-8)));
+}
+
+/* Липкий подвал: прокручивается только содержимое, кнопки остаются на виду.
+   Нижний отступ окна переезжает в подвал, иначе под ним виднелась бы полоса
+   прокручиваемого текста. */
+.dialog.dialogWithFooter {
+  padding-bottom: 0;
+}
+
+.dialogFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin: var(--sp-5) calc(-1 * var(--sp-6)) 0;
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+/* Липкая шапка листа: заголовок и крестик не уезжают при длинной форме. */
+.dialog.dialogSheet {
+  padding-top: 0;
+}
+
+.dialogHead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 calc(-1 * var(--sp-6)) var(--sp-2);
+  padding: var(--sp-6) var(--sp-6) var(--sp-2);
+  background: var(--surface);
+}
+
+.dialogHead h2 {
+  margin: 0;
+  padding-right: var(--sp-10);
+}
+
+.dialogHead .dialogClose {
+  top: var(--sp-5);
+  right: var(--sp-4);
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+
+@media (max-width: 640px) {
+  .dialog.dialogLg {
+    width: 100%;
+  }
+
+  .dialog.dialogWithFooter {
+    padding-bottom: 0;
+  }
+
+  .dialogFooter {
+    padding-bottom: calc(var(--sp-4) + var(--safe-b));
+  }
+
+  /* На телефоне кнопки подвала — на всю ширину, основная справа/сверху пальца. */
+  .dialogFooter > * {
+    flex: 1 1 0;
+    min-height: var(--tap);
+  }
+}
+
+/* Лист на весь экран: на узком телефоне шторка в 88vh всё равно почти весь
+   экран, а клавиатура съедает остаток — честнее открыть окно целиком. */
+@media (max-width: 479px) {
+  .dialog.dialogSheet {
+    top: 0;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dialog.dialogSheet .dialogHead {
+    padding-top: calc(var(--sp-4) + var(--safe-t));
+  }
+
+  .dialog.dialogSheet .dialogFooter {
+    margin-top: auto;
+  }
+}
+
 @keyframes sheetUp {
   from {
     transform: translateY(100%);

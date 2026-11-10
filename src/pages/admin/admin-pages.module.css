@@ -1,0 +1,567 @@
+/* Страницы админки (FE-3): список пользователей по макетам Users / M-Users
+   и мобильная доводка остальных разделов. Токены — из src/styles/tokens.css,
+   классы AdminShell.module.css только читаем. Все нажимаемые элементы ≥ 44 px. */
+
+/* ============ Общее ============ */
+.tap.tap {
+  min-height: var(--tap);
+}
+
+/* Квадратная кнопка с иконкой (копировать, удалить): 44 × 44 и на десктопе. */
+.iconButton.iconButton {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  justify-content: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  overflow-wrap: anywhere;
+}
+
+/* Подзаголовок страницы и кнопка справа (Экспорт CSV). */
+.pageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.pageSub {
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+/* Форма-строка: на телефоне каждое поле на всю ширину. */
+@media (max-width: 768px) {
+  .formRow > * {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .formRow > button {
+    width: 100%;
+  }
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+}
+
+/* Список «что произойдёт» в окнах подтверждения. */
+.effects {
+  margin: 0;
+  padding-left: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-14);
+  color: var(--text);
+}
+
+.dialogFacts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  font-size: var(--fs-13);
+}
+
+.dialogFacts dt {
+  color: var(--text-muted);
+}
+
+.dialogFacts dd {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* ============ Пользователи: плитки ============ */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: var(--tap);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--dur) var(--ease);
+}
+
+.tile:hover {
+  border-color: var(--border-strong);
+}
+
+.tile:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.tile[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tileLabel {
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.tileValue {
+  font-size: 22px;
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tileWarning .tileValue {
+  color: var(--warning);
+}
+
+.tileDanger .tileValue {
+  color: var(--danger);
+}
+
+.tilesError {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--fs-13);
+  color: var(--danger);
+}
+
+/* ============ Пользователи: поиск и фильтры ============ */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+
+.searchRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.searchField {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.sortField {
+  flex: 0 1 240px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+
+.searchBox {
+  position: relative;
+}
+
+.searchBox svg {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.searchBox input {
+  width: 100%;
+  min-height: var(--tap);
+  padding-left: 40px;
+}
+
+/* Кнопка «Фильтр: …» есть только на телефоне (M-Users): там чипы раскрываются по нажатию. */
+.filterToggle {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .panel {
+    padding: var(--sp-4);
+    gap: var(--sp-3);
+  }
+
+  .searchField,
+  .sortField {
+    flex: 1 1 100%;
+  }
+
+  .filterToggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    min-height: var(--tap);
+    padding: 0 var(--sp-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+  }
+
+  .filterToggle[data-active='true'] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+  }
+
+  .filterToggle span {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chipsWrap[data-open='false'] {
+    display: none;
+  }
+
+  /* Плиток в мобильном макете нет: их числа видны в чипах и в «Найдено». */
+  .tiles,
+  .tilesError {
+    display: none;
+  }
+}
+
+/* ============ Пользователи: список ============ */
+.listHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.listHead h2 {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.legendMark {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  width: 100%;
+}
+
+.avatar {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-bold);
+}
+
+.avatar[data-tone='0'] {
+  background: var(--accent-softer);
+  color: var(--accent-dark);
+}
+
+.avatar[data-tone='1'] {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.avatar[data-tone='2'] {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.avatar[data-tone='3'] {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.avatar[data-tone='4'] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.userText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.userName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-weight: var(--fw-semibold);
+  min-width: 0;
+}
+
+.userNameText {
+  overflow-wrap: anywhere;
+}
+
+.userContact {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-normal);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Стрелка в заголовке карточки — только на телефоне; на десктопе — своя колонка. */
+.cardChevron {
+  display: none;
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.openCell {
+  color: var(--text-tertiary);
+  display: inline-flex;
+}
+
+@media (max-width: 768px) {
+  .cardChevron {
+    display: inline-flex;
+  }
+}
+
+.tariff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.tariffEmpty {
+  color: var(--text-muted);
+}
+
+.expiring {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--warning);
+}
+
+.balanceZero {
+  color: var(--text-muted);
+}
+
+.balance {
+  font-weight: var(--fw-semibold);
+}
+
+.revenueSub {
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+}
+
+/* ============ Пагинация ============ */
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.pagerControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.pagerControls label {
+  font-size: var(--fs-13);
+}
+
+.pagerControls select {
+  min-height: var(--tap);
+  width: auto;
+}
+
+@media (max-width: 768px) {
+  .pager {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pagerControls {
+    justify-content: space-between;
+  }
+
+  .pagerControls button {
+    flex: 1 1 0;
+  }
+}
+
+/* ============ Пусто ============ */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) var(--sp-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+}
+
+.empty strong {
+  color: var(--text);
+  font-size: var(--fs-16);
+}
+
+.emptyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-full);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+/* ============ Пулы: переключатель «Стикеры / Коробки» ============ */
+.switcher {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  max-width: 100%;
+}
+
+.switcherLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.switcherLink:hover {
+  color: var(--text);
+}
+
+.switcherLink[aria-current='page'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+
+@media (max-width: 768px) {
+  .switcher {
+    display: flex;
+  }
+
+  .switcherLink {
+    flex: 1 1 0;
+  }
+}
+
+/* ============ Прочее ============ */
+.cellText {
+  overflow-wrap: anywhere;
+  max-width: 48ch;
+}
+
+@media (max-width: 768px) {
+  .cellText {
+    max-width: none;
+  }
+}
