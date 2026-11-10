@@ -16,6 +16,7 @@
 | «Помощник ПВЗ» (Tauri) | [docs/pvz-helper.md](docs/pvz-helper.md) | боевая программа: тарифы и аренда, облако и пункты, загрузка с другого ПК, видео по ШК, код клиента, график и зарплата, выпуск обновлений |
 | «Печать ячеек» | [docs/cell-print.md](docs/cell-print.md) | 2.x на Tauri и 1.5.x на Tkinter, подписанный канал обновлений, сверка версии перед правкой |
 | Telegram-бот | [docs/telegram-bot.md](docs/telegram-bot.md) | меню, баланс, магазин, рефералка, релей до api.telegram.org |
+| Бэкапы и восстановление | [docs/restore.md](docs/restore.md) | что лежит в бэкапе, порядок восстановления VPS, Supabase, узла бота |
 | Python-версии 1.3.x / 1.4.x | [docs/archive/pvz-helper-python-1.4.md](docs/archive/pvz-helper-python-1.4.md) | история, НЕ инструкция для нового релиза |
 
 Память проекта — `~/.claude/projects/.../memory/` (индекс в `MEMORY.md`), там же живут заметки про грабли.
