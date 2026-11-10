@@ -192,10 +192,13 @@ function effectiveFeatures(plan, addons, free, codesLimit = 0) {
 /**
  * Сколько ПК и пунктов можно подключить: тариф (ПК — из снимка подписки, пункты — из
  * конфига) + действующие пакеты. Без подписки — 1 и 1. Бесплатный режим/безлимит — 99.
+ * deviceBonus — постоянная надбавка ПК аккаунту (app_device_bonuses, выдаёт админ):
+ * держится при любом продлении и смене тарифа, без подписки тоже прибавляется.
  */
-function accountLimits(plan, addons, subDeviceLimit, unlimited) {
+function accountLimits(plan, addons, subDeviceLimit, unlimited, deviceBonus = 0) {
   if (unlimited) return { devices: 99, points: 99 };
   let devices = isPlan(plan) ? Math.max(Number(subDeviceLimit) || 0, PLANS[plan].devices) : 1;
+  devices += Math.max(0, Math.min(20, Math.trunc(Number(deviceBonus) || 0)));
   let points = isPlan(plan) ? PLANS[plan].points : 1;
   for (const [id, info] of Object.entries(addons || {})) {
     const a = ADDONS[id];

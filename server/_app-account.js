@@ -80,7 +80,7 @@ async function entitlementsFor(userId, { cached = false } = {}) {
   return {
     ent, free, unlimited, plan, addons, mirror,
     features: withMirror(effectiveFeatures(plan, addons, all, ent.codes_limit), mirror),
-    limits: accountLimits(plan, addons, ent.device_limit, all),
+    limits: accountLimits(plan, addons, ent.device_limit, all, ent.device_bonus),
   };
 }
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -561,8 +561,8 @@ async function accountSummary(user, currentHash) {
     packs: packs.map(row => ({ key: maskKey(row.key), total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used), addedAt: row.created_at })),
     packsLeft,
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
-    deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all).devices,
-    pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all).points,
+    deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus).devices,
+    pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus).points,
     // сколько пунктов можно загружать на другие ПК (пакеты «Загрузка с другого ПК»)
     mirrorLimit: mirrorLimit(plan, rawAddons, unlimited),
     devices,

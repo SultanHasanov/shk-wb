@@ -96,6 +96,14 @@ describe('лимиты пунктов и ПК', () => {
     expect(plans.accountLimits('pro', { points_1: past }, 4, false)).toEqual({ devices: 4, points: 2 });
     expect(plans.accountLimits(null, {}, 1, true)).toEqual({ devices: 99, points: 99 });
   });
+  it('постоянная надбавка ПК: без тарифа, с тарифом и с пакетами', () => {
+    const future = { ends_at: '2099-01-01T00:00:00Z' };
+    expect(plans.accountLimits(null, {}, 1, false, 1)).toEqual({ devices: 2, points: 1 });
+    expect(plans.accountLimits('standard', {}, 2, false, 1)).toEqual({ devices: 3, points: 1 });
+    expect(plans.accountLimits('pro', { devices_3: future }, 4, false, 1)).toEqual({ devices: 8, points: 2 });
+    expect(plans.accountLimits('pro', {}, 4, false, null)).toEqual({ devices: 4, points: 2 });
+    expect(plans.accountLimits(null, {}, 1, true, 1)).toEqual({ devices: 99, points: 99 });
+  });
   it('лишний пункт — POINT_LIMIT со списком', async () => {
     mockSupabase(url => {
       if (url.includes('rpc/app_register_point')) return { status: 400, body: { message: 'POINT_LIMIT' } };
