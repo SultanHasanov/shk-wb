@@ -16,10 +16,12 @@ function copyDirectory(source, destination) {
     else copyFileSync(from, to);
   }
 }
-// css/ и js/ нужны не публичным страницам, а админке: admin-enigma/index.html
-// подключает ../css/style.css и десяток ../js/*-admin.js.
+// Старая статическая админка admin-enigma удалена (её заменила /panel, а адрес
+// уводит туда redirect в vercel.json). css/ и js/ пока копируются: там остались
+// файлы старых страниц, и css/style.css ещё могут запрашивать извне — решение
+// об удалении после проверки логов сервера.
 // sounds/ — сигналы окна «сообщение от владельца» для прослушивания в кабинете (те же WAV, что в программе).
-for (const directory of ['admin-enigma', 'images', 'css', 'js', 'sounds']) {
+for (const directory of ['images', 'css', 'js', 'sounds']) {
   if (existsSync(directory)) copyDirectory(directory, resolve(output, directory));
 }
 // Платные установщики никогда не попадают в публичный dist. Публичным остаётся

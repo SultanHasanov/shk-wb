@@ -57,8 +57,8 @@ export const PublicShell = observer(() => {
   const storedLocale = useStoredLocale();
   const nav = primaryNav(t);
 
-  // Только публичная часть: заходы админа в панель посещаемостью сайта не были
-  // и в старой статике — js/visits.js на admin-enigma не подключался.
+  // Только публичная часть: заходы админа в панель посещаемостью сайта не считаются
+  // (панель живёт вне PublicShell).
   useVisitCounter();
 
   // Закрывать шторку «Ещё» при переходе

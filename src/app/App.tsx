@@ -75,8 +75,8 @@ export function App() {
         <Route element={<PublicShell />}>{publicRoutes}</Route>
         <Route path="kz" element={<PublicShell />}>{publicRoutes}</Route>
 
-        {/* Панель управления. Адрес не /admin-enigma: там до сих пор лежит
-            статическая админка, и Vercel отдаёт файл раньше, чем маршрут SPA. */}
+        {/* Панель управления. Старый адрес статической админки уводит сюда
+            redirect в vercel.json. */}
         <Route
           path="panel/*"
           element={
