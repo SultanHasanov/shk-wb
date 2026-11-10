@@ -105,3 +105,36 @@ describe('анти-перебор при добавлении ключа (claim)
     expect(claimCalled).toBe(false);
   });
 });
+
+describe('ограничение аккаунта в кабинете', () => {
+  const controls = require('../../server/_user-controls.js') as { __setSnapshotForTests: (json: unknown) => void };
+  const restricted = (scopes: string[]) => ({
+    generated_at: new Date().toISOString(), unlimited: [],
+    restrictions: [{ id: 'r1', user_id: 'u1', telegram_user_id: null, scopes, until: null, public_message: 'Доступ ограничен администратором.' }],
+  });
+  beforeEach(() => {
+    process.env.SUPABASE_URL = 'https://db.test';
+    process.env.SUPABASE_PUBLISHABLE_KEY = 'pub';
+    process.env.SUPABASE_SECRET_KEY = 'secret';
+  });
+  afterEach(() => { controls.__setSnapshotForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('«Сайт и кабинет» — 403 ACCOUNT_RESTRICTED, не 401', async () => {
+    controls.__setSnapshotForTests(restricted(['site']));
+    mock(true, null, []);
+    const res = response();
+    await handler({ ...claimReq({}), method: 'GET', query: { action: 'assets' } }, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toMatchObject({ code: 'ACCOUNT_RESTRICTED', until: null });
+  });
+
+  it('«Выводы» — заявка на вывод 403 до обращения к базе, остальной кабинет работает', async () => {
+    controls.__setSnapshotForTests(restricted(['withdrawals']));
+    mock(true, null, []);
+    const res = response();
+    await handler({ ...claimReq({ amountKopecks: 60000, phone: '+79990000000', bank: 'Банк' }), query: { action: 'withdraw' } }, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toMatchObject({ code: 'ACCOUNT_RESTRICTED' });
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('create_referral_withdrawal'))).toBe(false);
+  });
+});

@@ -4,6 +4,14 @@ const { newStickerDesign, qrPng, qrTextPng, returnStickerDesign, stickerDecorati
 const { supabaseFetch } = require('../../server/_supabase');
 const { requireUser } = require('../../server/_user-auth');
 
+// Область ограничения из админки: запрос программы (X-App-Name / X-App-Version — их шлёт stickers.rs
+// «Помощника ПВЗ») проверяется по «Программе», запрос сайта — по «Сайту и кабинету».
+function restrictionScope(req) {
+  const name = String(req.headers?.['x-app-name'] || '').trim();
+  if (name === 'cell-print') return 'cell_print';
+  return name || String(req.headers?.['x-app-version'] || '').trim() ? 'app' : 'site';
+}
+
 const mm = (value) => value * 72 / 25.4;
 const A4_WIDTH = mm(210);
 const A4_HEIGHT = mm(297);
@@ -162,7 +170,7 @@ module.exports = async function handler(req,res){
       if(left.length!==right.length||!crypto.timingSafeEqual(left,right))return res.status(403).end();
       all=[{code:customCode}];
     }else if(historyId){
-      const user=await requireUser(req,res);if(!user)return;
+      const user=await requireUser(req,res,{scope:restrictionScope(req)});if(!user)return;
       const history=await supabaseFetch(`user_generation_history?id=eq.${encodeURIComponent(historyId)}&user_id=eq.${encodeURIComponent(user.id)}&select=payload&limit=1`);
       if(!history.length)return res.status(404).end();
       const payload=history[0].payload||{};

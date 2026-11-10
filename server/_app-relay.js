@@ -64,6 +64,15 @@ function onlineIds(userId, now = Date.now()) {
   return out;
 }
 
+/** Сколько ПК в сети по всем аккаунтам (админка: «Требует внимания»). */
+function onlineCount(now = Date.now()) {
+  let count = 0;
+  for (const map of presence.values()) {
+    for (const d of map.values()) if (now - d.seenAt < ONLINE_MS) count += 1;
+  }
+  return count;
+}
+
 // Ждать сигнала (или таймаута). Возвращает true, если разбудили.
 function waitOn(waiters, ms) {
   return new Promise(resolve => {
@@ -319,4 +328,4 @@ function resetForTests() {
   presence.clear();
 }
 
-module.exports = { ack, ask, get, inbox, onlineIds, peers, put, sweep, wake, resetForTests, ONLINE_MS, JOB_TTL_MS };
+module.exports = { ack, ask, get, inbox, onlineCount, onlineIds, peers, put, sweep, wake, resetForTests, ONLINE_MS, JOB_TTL_MS };

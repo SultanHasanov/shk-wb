@@ -13,6 +13,7 @@ const { CLIENT_CODE_PRICE } = require('./_payments');
 const { clubPrice } = require('./_club');
 const wallet = require('./_wallet');
 const account = require('./_app-account');
+const controls = require('./_user-controls');
 const { findIdentity, identityForUser, telegramLabel } = require('./_telegram-identity');
 const userCache = require('./_telegram-user-cache');
 
@@ -230,6 +231,10 @@ async function approve(id, { telegramUserId = null, payWithWallet = false } = {}
     billing = { via: 'reuse', of: earlier.id };
   } else if (payWithWallet) {
     qrText = buildClientQr(row.sid).qrText;
+    // ограничения из админки: «Покупки» — с баланса нельзя; «Программа» — кодов по аккаунту нет и за деньги
+    // (путь по квоте проверяет то же в chargeClientCode). Бросает ACCOUNT_RESTRICTED — бот покажет текст.
+    await controls.assertAllowed(row.user_id, 'purchases');
+    await controls.assertAllowed(row.user_id, 'app');
     const { price, club } = await clubPrice(telegramUserId || row.telegram_chat_id, CLIENT_CODE_PRICE);
     const spent = await supabaseFetch('rpc/wallet_spend', {
       method: 'POST',

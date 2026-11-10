@@ -1,13 +1,15 @@
 const { supabaseFetch } = require('./_supabase');
+const controls = require('./_user-controls');
 
 const GENERATION_PRICES = Object.freeze({ custom: 750, batch: 2000 });
 const GENERATION_DISCOUNT_PRICES = Object.freeze({ custom: 600, batch: 1600 });
 const BATCH_QUANTITY = 50;
 
-function billingError(code, message, status = 400) {
+function billingError(code, message, status = 400, extra) {
   const error = new Error(message);
   error.code = code;
   error.status = status;
+  if (extra) error.extra = extra;
   return error;
 }
 
@@ -44,6 +46,16 @@ async function reserveGeneration({ userId, requestKey, mode, category }) {
       throw billingError('GENERATION_BUSY', 'Дождитесь завершения предыдущей генерации', 409);
     }
     throw billingError('BILLING_ERROR', 'Не удалось зарезервировать оплату', 409);
+  }
+  // Ограничение «Покупки» из админки: с баланса платить нельзя, пакетом — можно. Источник оплаты известен
+  // только после резерва, поэтому новый резерв с баланса сразу возвращаем. Повтор уже оплаченного запроса
+  // (duplicate) не трогаем: там готовый результат, и возврат вернул бы деньги за выданное.
+  if (result.paymentSource === 'wallet' && !result.duplicate) {
+    const restriction = await controls.restrictionFor(userId);
+    if (controls.covers(restriction, 'purchases')) {
+      await refundGeneration(result.chargeId).catch(error => console.error('refund restricted generation:', error.message));
+      throw billingError('ACCOUNT_RESTRICTED', restriction.message, 403, { until: restriction.until });
+    }
   }
   return result;
 }

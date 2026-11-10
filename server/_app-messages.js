@@ -5,13 +5,17 @@
 //   поверх всего и подтверждает показ (ack read) → менеджер жмёт кнопку или пишет ответ (ack ok|done|
 //   cannot|closed|reply) → владельцу уведомление в кабинете и в Telegram.
 //
+// Сообщение может написать и администрация (админка → «Написать» → ПК, created_by = 'admin'): тогда ответ
+// с ПК уходит админам в Telegram (sendToAdmins), а не владельцу, и в кабинете владельца такие сообщения не видны.
+//
 // Авторизация ПК — ключ устройства или сессия (api/app.js deviceActions): работает и без входа в аккаунт.
 const { supabaseFetch } = require('./_supabase');
 const { appError } = require('./_app-account');
 const { createNotification } = require('./_notifications');
 const relay = require('./_app-relay');
 
-const SELECT = 'id,user_id,device_id,text,created_at,expires_at,delivered_at,read_at,answered_at,answer_kind,reply_text';
+const SELECT = 'id,user_id,device_id,text,created_at,expires_at,delivered_at,read_at,answered_at,answer_kind,reply_text,created_by';
+const CREATED_BY = new Set(['owner', 'admin']);
 const MAX_TEXT = 500;
 const MAX_OPEN = 20;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -55,12 +59,17 @@ function mapMessage(row, now = Date.now()) {
     answer: row.answer_kind,
     answerLabel: row.answer_kind ? ANSWERS[row.answer_kind] : null,
     reply: row.reply_text,
+    createdBy: row.created_by === 'admin' ? 'admin' : 'owner',
     status,
   };
 }
 
-/** Кабинет: отправить сообщение на ПК аккаунта. 404 — ПК не свой или отключён, 409 — слишком много неотвеченных. */
-async function send({ userId, deviceId, text }) {
+/**
+ * Кабинет (или админка, createdBy = 'admin'): отправить сообщение на ПК аккаунта.
+ * 404 — ПК не свой или отключён, 409 — слишком много неотвеченных.
+ */
+async function send({ userId, deviceId, text, createdBy = 'owner' }) {
+  if (!CREATED_BY.has(createdBy)) throw appError(400, 'VALIDATION_ERROR', 'Некорректный отправитель');
   const clean = cleanText(text, MAX_TEXT + 1);
   if (!UUID_RE.test(String(deviceId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
   if (!clean) throw appError(400, 'VALIDATION_ERROR', 'Введите текст сообщения');
@@ -74,7 +83,7 @@ async function send({ userId, deviceId, text }) {
     rows = await supabaseFetch('app_device_messages', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ user_id: userId, device_id: deviceId, text: clean }),
+      body: JSON.stringify({ user_id: userId, device_id: deviceId, text: clean, created_by: createdBy }),
     });
   } finally {
     // и при ошибке: ответ мог потеряться, а строка — записаться
@@ -84,12 +93,13 @@ async function send({ userId, deviceId, text }) {
   return mapMessage(rows[0]);
 }
 
-/** Кабинет: лента сообщений аккаунта (по ПК или все). */
-async function list(userId, { deviceId, limit = 50 } = {}) {
+/** Кабинет: лента сообщений аккаунта (по ПК или все). Сообщения администрации — только с includeAdmin (админка). */
+async function list(userId, { deviceId, limit = 50, includeAdmin = false } = {}) {
   const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
   if (deviceId && !UUID_RE.test(String(deviceId))) throw appError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
   const byDevice = deviceId ? `&device_id=eq.${enc(deviceId)}` : '';
-  const rows = await supabaseFetch(`app_device_messages?user_id=eq.${enc(userId)}${byDevice}&select=${SELECT}&order=created_at.desc&limit=${n}`);
+  const byAuthor = includeAdmin ? '' : '&created_by=eq.owner';
+  const rows = await supabaseFetch(`app_device_messages?user_id=eq.${enc(userId)}${byDevice}${byAuthor}&select=${SELECT}&order=created_at.desc&limit=${n}`);
   const now = Date.now();
   return { items: rows.map(row => mapMessage(row, now)) };
 }
@@ -132,7 +142,10 @@ async function ack(userId, device, { id, status, reply } = {}) {
     if (!existing.length) throw appError(404, 'NOT_FOUND', 'Сообщение не найдено');
     return mapMessage(existing[0]);
   }
-  if (kind !== 'read') await notifyOwner(rows[0], device).catch(error => console.warn('pc message: notify owner:', error.message));
+  if (kind !== 'read') {
+    if (rows[0].created_by === 'admin') await notifyAdmins(rows[0], device).catch(error => console.warn('pc message: notify admins:', error.message));
+    else await notifyOwner(rows[0], device).catch(error => console.warn('pc message: notify owner:', error.message));
+  }
   return mapMessage(rows[0]);
 }
 
@@ -161,6 +174,21 @@ async function notifyOwner(row, device) {
   const { sendMessage } = require('./_telegram-api');
   const html = `💬 <b>Ответ с ПК «${escapeHtml(name)}»</b>\n${escapeHtml(answer)}\n\n<i>На сообщение:</i> ${escapeHtml(quoted)}`;
   await sendMessage(owner.id, html, { parse_mode: 'HTML' });
+}
+
+/** Ответ на сообщение администрации — админам в Telegram; уведомление в кабинет владельцу не создаётся. */
+async function notifyAdmins(row, device) {
+  const label = ANSWERS[row.answer_kind] || 'Ответ';
+  const answer = row.answer_kind === 'reply' ? `Ответ: ${row.reply_text}` : label;
+  const quoted = row.text.length > 200 ? `${row.text.slice(0, 200)}…` : row.text;
+  const name = device.name || 'Компьютер';
+  const html = `💬 <b>Ответ с ПК «${escapeHtml(name)}»</b> на сообщение администрации
+` +
+    `Пользователь: <code>${escapeHtml(row.user_id)}</code>
+${escapeHtml(answer)}
+
+<i>На сообщение:</i> ${escapeHtml(quoted)}`;
+  await require('./_admin-alerts').sendToAdmins(html);
 }
 
 /** Крон кабинета: сообщения старше 30 дней. */

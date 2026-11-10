@@ -16,6 +16,15 @@ const {
 } = require('../../server/_admin-grants');
 const { freeModeState, setAppFreeMode } = require('../../server/_app-free');
 const { codeViaBotState, crackFallbackState, setCodeViaBot, setCrackFallback } = require('../../server/_app-flags');
+// Журнал, доставки, «Требует внимания» и «Система» — отдельные модули, права проверены здесь (requireAdmin).
+const { handleAudit, handleDeliveries, handleAttention } = require('../../server/_admin-audit');
+const { handleSystem } = require('../../server/_admin-system');
+
+/** Причина из тела — в журнал (необязательна для старых действий). */
+function reasonOf(req) {
+  const value = String(req.body?.reason || '').trim();
+  return value ? value.slice(0, 500) : null;
+}
 
 module.exports = async function handler(req, res) {
   if (req.query.cabinet) return handleCabinetAdmin(req, res);
@@ -23,6 +32,10 @@ module.exports = async function handler(req, res) {
   if (req.query.auth === 'logout') return handleLogout(req, res);
   if (req.query.auth === 'session') return handleSession(req, res);
   if (!requireAdmin(req, res)) return;
+  if (req.query.resource === 'audit')      return handleAudit(req, res);
+  if (req.query.resource === 'deliveries') return handleDeliveries(req, res);
+  if (req.query.resource === 'attention')  return handleAttention(req, res);
+  if (req.query.resource === 'system')     return handleSystem(req, res);
   if (req.query.resource === 'users') return handleAdminUsers(req, res);
   if (req.query.resource === 'partners') return handleAdminPartners(req, res);
   if (req.query.resource === 'stickerPool') return handleStickerPool(req, res);
@@ -40,6 +53,9 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid resource' });
   }
 
+  // Журнал общего CRUD: payload {resource, id}, before/after — та же форма, что видит админка (config.fromDb).
+  const resource = String(req.query.resource);
+  const currentRow = async () => (await supabaseFetch(`${config.table}?id=eq.${id}&select=*&limit=1`).catch(() => []))[0] || null;
   try {
     if (req.method === 'GET') {
       const rows = await supabaseFetch(`${config.table}?select=*&order=id.desc`);
@@ -49,12 +65,14 @@ module.exports = async function handler(req, res) {
       if (req.query.resource === 'cellLicense') {
         const created = await createCellLicense(req.body || {});
         if (created.error) return res.status(400).json({ error: created.error });
+        await recordAdminAction(req, 'createResource', created.row?.owner_user_id || null, { resource, id: created.row?.id ?? null }, { after: config.fromDb(created.row), reason: reasonOf(req) });
         return res.status(201).json(config.fromDb(created.row));
       }
       if (req.query.resource === 'programPromo') { const validationError=validateProgramPromo(req.body||{},true); if(validationError)return res.status(400).json({error:validationError}); }
       if (req.query.resource === 'stickerAccess') {
         const created = await createStickerAccessCode(req.body || {});
         if (created.error) return res.status(400).json({ error: created.error });
+        await recordAdminAction(req, 'createResource', created.row?.owner_user_id || null, { resource, id: created.row?.id ?? null }, { after: config.fromDb(created.row), reason: reasonOf(req) });
         return res.status(201).json(config.fromDb(created.row));
       }
       const rows = await supabaseFetch(config.table, {
@@ -62,6 +80,7 @@ module.exports = async function handler(req, res) {
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify(config.toDb(req.body || {})),
       });
+      await recordAdminAction(req, 'createResource', rows[0]?.owner_user_id || null, { resource, id: rows[0]?.id ?? null }, { after: rows[0] ? config.fromDb(rows[0]) : null, reason: reasonOf(req) });
       return res.status(201).json(config.fromDb(rows[0]));
     }
     if (req.method === 'PATCH' && id) {
@@ -79,16 +98,22 @@ module.exports = async function handler(req, res) {
         const checked = await checkStickerAccessPatch(id, req.body || {});
         if (checked.error) return res.status(checked.status || 400).json({ error: checked.error });
       }
+      const previous = await currentRow();
       const rows = await supabaseFetch(`${config.table}?id=eq.${id}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ ...config.toDb(req.body || {}), ...(extra || {}) }),
       });
+      await recordAdminAction(req, 'updateResource', (rows[0] || previous)?.owner_user_id || null, { resource, id },
+        { before: previous ? config.fromDb(previous) : null, after: rows[0] ? config.fromDb(rows[0]) : null, reason: reasonOf(req) });
       return res.status(200).json(config.fromDb(rows[0]));
     }
     if (req.method === 'DELETE' && id) {
       if(req.query.resource==='cellLicense'){const current=await supabaseFetch(`${config.table}?id=eq.${id}&select=activated_at&limit=1`);if(current[0]?.activated_at)return res.status(409).json({error:'Активированный ключ можно только отозвать'});}
+      const previous = await currentRow();
       await supabaseFetch(`${config.table}?id=eq.${id}`, { method: 'DELETE' });
+      await recordAdminAction(req, 'deleteResource', previous?.owner_user_id || null, { resource, id },
+        { before: previous ? config.fromDb(previous) : null, reason: reasonOf(req) });
       return res.status(204).end();
     }
     res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
@@ -165,8 +190,12 @@ async function handleAppFreeMode(req, res) {
       const until = hasUntil ? (req.body.until ? String(req.body.until) : null) : undefined;
       if (until && !(Date.parse(until) > Date.now()))
         return res.status(400).json({ error: 'Дата окончания должна быть в будущем' });
+      const previous = await freeModeState().catch(() => null);
       const state = await setAppFreeMode(req.body?.enabled === true, until);
-      await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, until: state.until, extended: state.extended }).catch(() => {});
+      await recordAdminAction(req, 'setAppFreeMode', null, { enabled: state.enabled, until: state.until, extended: state.extended }, {
+        before: previous ? { enabled: previous.enabled, until: previous.until } : null,
+        after: { enabled: state.enabled, until: state.until ?? null }, reason: reasonOf(req),
+      }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');
@@ -180,8 +209,11 @@ async function handleAppCrackFallback(req, res) {
   try {
     if (req.method === 'GET') return res.json(await crackFallbackState());
     if (req.method === 'POST') {
+      const previous = await crackFallbackState().catch(() => null);
       const state = await setCrackFallback(req.body?.enabled === true);
-      await recordAdminAction(req, 'setAppCrackFallback', null, { enabled: state.enabled }).catch(() => {});
+      await recordAdminAction(req, 'setAppCrackFallback', null, { enabled: state.enabled }, {
+        before: previous ? { enabled: previous.enabled } : null, after: { enabled: state.enabled }, reason: reasonOf(req),
+      }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');
@@ -195,8 +227,11 @@ async function handleAppCodeViaBot(req, res) {
   try {
     if (req.method === 'GET') return res.json(await codeViaBotState());
     if (req.method === 'POST') {
+      const previous = await codeViaBotState().catch(() => null);
       const state = await setCodeViaBot(req.body?.enabled === true);
-      await recordAdminAction(req, 'setAppCodeViaBot', null, { enabled: state.enabled }).catch(() => {});
+      await recordAdminAction(req, 'setAppCodeViaBot', null, { enabled: state.enabled }, {
+        before: previous ? { enabled: previous.enabled } : null, after: { enabled: state.enabled }, reason: reasonOf(req),
+      }).catch(() => {});
       return res.json(state);
     }
     res.setHeader('Allow', 'GET, POST');
@@ -235,20 +270,45 @@ async function handlePaymentAdmin(req, res) {
     }
     if(req.method==='POST'&&operation==='settings'){
       const enabled=Boolean(req.body?.enabled); if(enabled&&!hasYookassa())return res.status(400).json({error:'Сначала добавьте реквизиты ЮKassa в Vercel'});
-      await supabaseFetch('payment_settings?id=eq.true',{method:'PATCH',body:JSON.stringify({enabled,updated_at:new Date().toISOString()})}); return res.json({enabled});
+      const previous=await supabaseFetch('payment_settings?select=enabled&id=eq.true&limit=1').catch(()=>[]);
+      await supabaseFetch('payment_settings?id=eq.true',{method:'PATCH',body:JSON.stringify({enabled,updated_at:new Date().toISOString()})});
+      await recordAdminAction(req, 'setPaymentsEnabled', null, { enabled }, { before: previous[0] ? { enabled: Boolean(previous[0].enabled) } : null, after: { enabled }, reason: reasonOf(req) });
+      return res.json({enabled});
     }
     if(req.method==='POST'&&operation==='tier'){
       const kind=String(req.body?.kind),min=Number(req.body?.minQuantity),price=Number(req.body?.unitPrice);
       if(!['range','custom'].includes(kind)||!Number.isInteger(min)||min<1||min>100||!Number.isFinite(price)||price<=0)return res.status(400).json({error:'Проверьте ступень цены'});
-      const rows=await supabaseFetch('payment_price_tiers',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({kind,min_quantity:min,unit_price:price,active:true})});return res.status(201).json(rows[0]);
+      const rows=await supabaseFetch('payment_price_tiers',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({kind,min_quantity:min,unit_price:price,active:true})});
+      await recordAdminAction(req, 'upsertPriceTier', null, { kind, minQuantity: min, unitPrice: price }, { after: rows[0] || null, reason: reasonOf(req) });
+      return res.status(201).json(rows[0]);
     }
-    if(req.method==='DELETE'&&operation==='tier'&&/^\d+$/.test(String(req.query.id||''))){await supabaseFetch(`payment_price_tiers?id=eq.${req.query.id}`,{method:'DELETE'});return res.status(204).end()}
+    if(req.method==='DELETE'&&operation==='tier'&&/^\d+$/.test(String(req.query.id||''))){
+      const previous=await supabaseFetch(`payment_price_tiers?id=eq.${req.query.id}&select=*&limit=1`).catch(()=>[]);
+      await supabaseFetch(`payment_price_tiers?id=eq.${req.query.id}`,{method:'DELETE'});
+      await recordAdminAction(req, 'deletePriceTier', null, { id: Number(req.query.id) }, { before: previous[0] || null, reason: reasonOf(req) });
+      return res.status(204).end();
+    }
     if(req.method==='POST'&&operation==='sync'){
       const rows=await supabaseFetch(`payment_orders?id=eq.${encodeURIComponent(req.body?.id)}&select=*&limit=1`);if(!rows[0]?.yookassa_payment_id)return res.status(404).json({error:'Платёж не найден'});
-      const payment=await yookassa(`payments/${encodeURIComponent(rows[0].yookassa_payment_id)}`,{},rows[0].payment_shop);await supabaseFetch(`payment_orders?id=eq.${rows[0].id}`,{method:'PATCH',body:JSON.stringify({provider_status:payment.status,...(payment.status==='succeeded'?{}:{status:payment.status}),updated_at:new Date().toISOString()})});await completeOrder(rows[0],payment);return res.json({status:payment.status});
+      const payment=await yookassa(`payments/${encodeURIComponent(rows[0].yookassa_payment_id)}`,{},rows[0].payment_shop);await supabaseFetch(`payment_orders?id=eq.${rows[0].id}`,{method:'PATCH',body:JSON.stringify({provider_status:payment.status,...(payment.status==='succeeded'?{}:{status:payment.status}),updated_at:new Date().toISOString()})});await completeOrder(rows[0],payment);
+      await recordAdminAction(req, 'syncPaymentOrder', rows[0].user_id || null, { orderId: rows[0].id, status: payment.status }, { before: { status: rows[0].status }, after: { status: payment.status }, reason: reasonOf(req) });
+      return res.json({status:payment.status});
     }
     return res.status(405).json({error:'Method not allowed'});
   }catch(error){return sendApiError(res,error)}
+}
+
+/** Текущий свободный диапазон пула (как в GET): «было» для журнала. Сбой — null, диапазон всё равно меняем. */
+async function poolRange(table) {
+  try {
+    const [first, last] = await Promise.all([
+      supabaseFetch(`${table}?select=code&batch_id=is.null&order=code.asc&limit=1`),
+      supabaseFetch(`${table}?select=code&batch_id=is.null&order=code.desc&limit=1`),
+    ]);
+    return { start: first?.[0]?.code != null ? String(first[0].code) : null, end: last?.[0]?.code != null ? String(last[0].code) : null };
+  } catch (_) {
+    return null;
+  }
 }
 
 async function handleBoxPool(req,res){
@@ -267,8 +327,10 @@ async function handleBoxPool(req,res){
       const start=String(req.body?.start||'').trim(),end=String(req.body?.end||'').trim();
       if(!/^\d{1,12}$/.test(start)||!/^\d{1,12}$/.test(end))return res.status(400).json({error:'Начало и конец должны содержать от 1 до 12 цифр'});
       const first=BigInt(start),last=BigInt(end);if(last<first||last-first>100000n||last>1099511627775n)return res.status(400).json({error:'Диапазон должен содержать не более 100 001 номера'});
+      const before=await poolRange('return_box_codes');
       const inserted=await supabaseFetch('rpc/add_return_box_range',{method:'POST',body:JSON.stringify({p_start:start,p_end:end})});
       await supabaseFetch(`return_box_codes?batch_id=is.null&or=(code.lt.${start},code.gt.${end})`,{method:'DELETE'});
+      await recordAdminAction(req, 'setBoxPoolRange', null, { start, end }, { before, after: { start, end, inserted: Number(inserted || 0) }, reason: reasonOf(req) });
       return res.status(200).json({start,end,inserted:Number(inserted||0)});
     }
     return res.status(405).json({error:'Method not allowed'});
@@ -312,10 +374,12 @@ async function handleStickerPool(req, res) {
       if (endNumber < startNumber || endNumber - startNumber > 100000n || endNumber > 1099511627775n) {
         return res.status(400).json({ error: 'Диапазон должен содержать не более 100 001 номера' });
       }
+      const before = await poolRange('return_sticker_codes');
       const inserted = await supabaseFetch('rpc/add_return_sticker_range', {
         method: 'POST', body: JSON.stringify({ p_start: start, p_end: end }),
       });
       await supabaseFetch(`return_sticker_codes?batch_id=is.null&or=(code.lt.${start},code.gt.${end})`, { method: 'DELETE' });
+      await recordAdminAction(req, 'setStickerPoolRange', null, { start, end }, { before, after: { start, end, inserted: Number(inserted || 0) }, reason: reasonOf(req) });
       return res.status(200).json({ start, end, inserted: Number(inserted || 0) });
     }
     res.setHeader('Allow', 'GET, POST');

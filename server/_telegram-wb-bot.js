@@ -21,6 +21,8 @@ const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
 const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 const { newStickerSvg, stickerSvg } = require('./_stickers');
+// Ограничения аккаунтов из админки (снимок в памяти, на узле бота обновляется раз в 60 с или по invalidateUserControls)
+const controls = require('./_user-controls');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -600,6 +602,8 @@ async function handleClientCode(from, chatId, sid) {
     await sendPhoto(chatId, clientQrUrl(charged.qrText || qrText), { caption });
     return;
   }
+  // ограничение «Покупки» — с баланса нельзя (ACCOUNT_RESTRICTED покажет processUpdate)
+  await controls.assertAllowed(userId, 'purchases');
   const [balance, { price, club }] = await Promise.all([walletRub(userId), clientCodePrice(from.id)]);
   if (balance < price) return showClientCodePaywall(from, chatId, sid, balance, price);
   const spent = await supabaseFetch('rpc/wallet_spend', {
@@ -1159,13 +1163,21 @@ async function unlimitedAccessCode(userId, units) {
 
 /** Купить с баланса ровно нужное число генераций; возвращает код, на который они легли. */
 async function buyGenerationsWithWallet(draft) {
+  const reserve = () => reserveGeneration({
+    userId: draft.userId,
+    requestKey: draft.billingRequestKey,
+    mode: draft.mode === 'range' ? 'batch' : 'custom',
+    category: draft.category === 'box' ? 'box' : 'product',
+  });
   try {
-    const charge = await reserveGeneration({
-      userId: draft.userId,
-      requestKey: draft.billingRequestKey,
-      mode: draft.mode === 'range' ? 'batch' : 'custom',
-      category: draft.category === 'box' ? 'box' : 'product',
-    });
+    let charge = await reserve();
+    // Тот же ключ уже был зарезервирован и возвращён (например, при ограничении «Покупки» резерв сразу
+    // возвращается, а запрос мастера освобождается). Повтор «Подтвердить» на том же сообщении получил бы
+    // этот возвращённый резерв и упал на списании — резервируем заново под новым ключом.
+    if (charge?.duplicate && charge.status === 'refunded') {
+      draft.billingRequestKey = `${draft.billingRequestKey}:r${crypto.randomBytes(4).toString('hex')}`;
+      charge = await reserve();
+    }
     return { ok: true, charge };
   } catch (error) {
     if (error.code === 'INSUFFICIENT_BALANCE') {
@@ -1859,6 +1871,8 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
   else if (revealed) footer = 'Этого автора вы уже смотрели — бесплатно.';
   else if (balance < price) return showReviewPaywall(from, chatId, 'empty', undefined, then);
   else {
+    // ограничение «Покупки» — с баланса нельзя (ACCOUNT_RESTRICTED покажет processUpdate)
+    await controls.assertAllowed(userId, 'purchases');
     // bot_review_spend списывает цену с баланса (25 ₽, со скидкой клуба 20 ₽; миграция 20261027), balance — в копейках.
     const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId, p_kopecks: price * 100 }) });
     if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then);
@@ -2232,6 +2246,9 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
     result = await wallet.payWithWallet({ userId, productKind: item.productKind, fields: item.fields, priceRub: item.priceRub, snapshot: item.snapshot });
   } catch (error) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
+    if (error.code === 'ACCOUNT_RESTRICTED') {
+      return showScreen(chatId, screenId, `⛔ ${escapeHtml(error.message)}`, { reply_markup: choiceKeyboard([[{ text: '⬅️ В магазин', callback_data: 'shop:home' }], MENU_ROW]) });
+    }
     return showScreen(chatId, screenId, `⚠️ Не удалось оформить покупку: ${escapeHtml(error.message)}\n\nДеньги вернулись на баланс. Если повторится — напишите в поддержку.`, { reply_markup: choiceKeyboard([[{ text: '🆘 Поддержка', callback_data: 'menu:support' }], [{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
   }
   if (!result.ok) {
@@ -2368,6 +2385,8 @@ async function showReferrals(from, chatId, messageId, notice) {
 async function referralToWallet(from, chatId, messageId) {
   const userId = await findUser(from.id);
   if (!userId) return showReferrals(from, chatId, messageId);
+  const restriction = await controls.restrictionFor(userId);
+  if (controls.covers(restriction, 'withdrawals')) return showReferrals(from, chatId, messageId, `⛔ ${escapeHtml(restriction.message)}`);
   const result = await supabaseFetch('rpc/referral_to_wallet', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: null }) });
   const notice = result?.ok
     ? `✅ Переведено ${wallet.formatRub(Number(result.moved) / 100)} на баланс. На балансе: ${wallet.formatRub(Number(result.wallet_balance) / 100)}.`
@@ -2878,15 +2897,64 @@ function updateLabel(update) {
   return `message ${text.startsWith('/') ? text.split(/\s/)[0] : text ? 'text' : 'other'}`;
 }
 
+// Ответ ограниченному в боте — не чаще раза в час на человека, чтобы не отвечать на каждое сообщение.
+const RESTRICTED_REPLY_EVERY_MS = 60 * 60 * 1000;
+const RESTRICTED_REPLY_MAX = 5000;
+const restrictedReplies = new Map(); // telegram id → когда отвечали
+
+function shouldReplyRestricted(tgId, now = Date.now()) {
+  const last = restrictedReplies.get(tgId);
+  if (last && now - last < RESTRICTED_REPLY_EVERY_MS) return false;
+  if (restrictedReplies.size >= RESTRICTED_REPLY_MAX) {
+    for (const [id, at] of restrictedReplies) if (now - at >= RESTRICTED_REPLY_EVERY_MS) restrictedReplies.delete(id);
+    if (restrictedReplies.size >= RESTRICTED_REPLY_MAX) restrictedReplies.clear();
+  }
+  restrictedReplies.set(tgId, now);
+  return true;
+}
+
+// answerCallbackQuery из _telegram-api не передаёт show_alert; предел текста у Telegram — 200 символов
+function alertCallback(callbackId, text) {
+  return telegramRequest('answerCallbackQuery', { callback_query_id: callbackId, text: String(text || '').slice(0, 200), show_alert: true }).catch(() => {});
+}
+
+/** true — апдейт поглощён ограничением «Бот» (или «Полностью») из админки. */
+async function rejectRestricted(update) {
+  const tgId = update.message?.from?.id ?? update.callback_query?.from?.id;
+  if (!tgId) return false;
+  const restriction = await controls.restrictionForTelegram(tgId).catch(() => null);
+  if (!controls.covers(restriction, 'bot')) return false;
+  const cq = update.callback_query;
+  if (cq) {
+    await alertCallback(cq.id, restriction.message);
+  } else if (update.message?.chat?.id && shouldReplyRestricted(tgId)) {
+    await sendMessage(update.message.chat.id, `⛔ ${escapeHtml(restriction.message)}`).catch(() => {});
+  }
+  return true;
+}
+
 async function processUpdate(update) {
   const startedAt = Date.now();
   try {
+    if (await rejectRestricted(update)) {
+      botHealth.recordUpdate({ label: updateLabel(update), ms: Date.now() - startedAt });
+      return;
+    }
     if (update.callback_query) await handleCallback(update.callback_query);
     else if (update.message?.from && update.message?.chat) await handleMessage(update.message);
     const ms = Date.now() - startedAt;
     console.log(`bot ${updateLabel(update)} ${ms} ms`);
     botHealth.recordUpdate({ label: updateLabel(update), ms });
   } catch (error) {
+    // Ограничение из админки (покупки, программа…) — показать его текст, а не «внутреннюю ошибку»
+    if (error?.code === 'ACCOUNT_RESTRICTED') {
+      botHealth.recordUpdate({ label: updateLabel(update), ms: Date.now() - startedAt });
+      const cq = update.callback_query;
+      if (cq) await alertCallback(cq.id, error.message);
+      const chatId = update.message?.chat?.id || cq?.message?.chat?.id;
+      if (chatId) await sendMessage(chatId, `⛔ ${escapeHtml(error.message)}`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
+      return;
+    }
     // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
     const incident = crypto.randomBytes(3).toString('hex');
     const ms = Date.now() - startedAt;
@@ -2921,5 +2989,7 @@ async function handleTelegramUpdate(req, res) {
 /** Сайт отвязал/перепривязал Telegram у аккаунта — узел бота держит связку в памяти до 10 минут, сбрасываем по RPC. */
 function forgetSiteUser(userId) { userCache.forgetSiteUser(userId); return true; }
 function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramId); return true; }
+/** Админка сняла/поставила ограничение или безлимит — сбросить снимок на узле бота (по RPC с сайта). */
+function invalidateUserControls() { controls.invalidate(); return true; }
 
-module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

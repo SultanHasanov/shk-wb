@@ -23,6 +23,7 @@ const permissions = require('../server/_app-permissions');
 const { generationPrices } = require('../server/_generation-billing');
 const { CELL_PRINT_PRICES } = require('../server/_payments');
 const cabinet = require('./cabinet');
+const controls = require('../server/_user-controls');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
 // Отдельный файл не заводим: на Vercel 12 функций — это лимит тарифа, поэтому
@@ -127,6 +128,10 @@ async function deviceActions(req, res, action, userId, device) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 const KEYED_ACTIONS = new Set(['relay-inbox', 'relay-put', 'messages-ack', 'device-settings']);
+// Что программа может и при ограничении «Программа» из админки (server/_user-controls.js): сводка с причиной,
+// фоновая работа по передатчику и сообщениям, ключ устройства и выход. Остальное — 403 ACCOUNT_RESTRICTED
+// (никогда не 401 и не DEVICE_REVOKED: иначе программа сотрёт сессию или ключ ПК).
+const APP_RESTRICT_EXEMPT = new Set(['me', 'relay-inbox', 'relay-put', 'messages-ack', 'device-settings', 'device-key', 'logout']);
 // Фоновые опросы программы: ответ Supabase Auth о токене можно помнить до 2 минут (_app-device-cache.js).
 function isBackgroundPoll(action, method) {
   return (method === 'POST' && action === 'relay-inbox')
@@ -180,15 +185,22 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'login-approve' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-login-approve', limit: 20, windowSeconds: 600 })) return;
+      // Вход программы по коду со страницы сайта. Тот же код выдаёт и ПВЗ Принт (api/cell-print.js,
+      // app_version 'cell-print/…'), поэтому область ограничения берётся из самого запроса входа:
+      // ПВЗ Принт — «ПВЗ Принт» (cell_print), Помощник — «Программа» (app). 403 ACCOUNT_RESTRICTED, не 401.
       const user = await requireUser(req, res);
       if (!user) return;
       const code = account.normalizeLoginCode(body(req).code);
       if (!code) return res.status(400).json({ error: 'Некорректный код', code: 'VALIDATION_ERROR' });
+      const loginRow = await account.loginRequest(code);
+      const loginScope = String(loginRow.app_version || '').startsWith('cell-print') ? 'cell_print' : 'app';
+      const restriction = await controls.restrictionFor(user.id);
+      if (controls.covers(restriction, loginScope)) return res.status(403).json(controls.restrictedBody(restriction));
       return res.status(200).json(await account.approveBrowserLogin(user.id, code));
     }
     if (action === 'me' && req.method === 'GET' && !req.headers['x-device-id']) {
       // Кабинет на сайте: та же сводка, без привязки к ПК.
-      const user = await requireUser(req, res);
+      const user = await requireUser(req, res, { scope: 'site' });
       if (!user) return;
       const summary = await account.accountSummary(user, null);
       // «в сети» — ПК держит inbox передатчика прямо сейчас (в памяти процесса сайта)
@@ -198,7 +210,7 @@ module.exports = async function handler(req, res) {
     }
     // Кабинет на сайте: сообщения владельца на ПК (server/_app-messages.js).
     if (action === 'messages' && !req.headers['x-device-id']) {
-      const user = await requireUser(req, res);
+      const user = await requireUser(req, res, { scope: 'site' });
       if (!user) return;
       if (req.method === 'GET') return res.status(200).json(await messages.list(user.id, { deviceId: req.query.device, limit: req.query.limit }));
       if (req.method === 'POST') {
@@ -210,13 +222,13 @@ module.exports = async function handler(req, res) {
     }
     if (action === 'point' && req.method === 'DELETE' && !req.headers['x-device-id']) {
       // кабинет на сайте: отключить пункт (облачные данные пункта сохраняются)
-      const user = await requireUser(req, res);
+      const user = await requireUser(req, res, { scope: 'site' });
       if (!user) return;
       await sync.revokePoint(user.id, req.query.id);
       return res.status(204).end();
     }
     if (action === 'device' && req.method === 'DELETE') {
-      const user = await requireUser(req, res);
+      const user = await requireUser(req, res, { scope: req.headers['x-device-id'] ? 'app' : 'site' });
       if (!user) return;
       const by = await account.requireAllowed(req, user.id, 'act.account');
       if (by && permissions.isWork(by)) return res.status(403).json(WORK_PC);
@@ -224,7 +236,7 @@ module.exports = async function handler(req, res) {
       return res.status(204).end();
     }
     if (action === 'device' && req.method === 'PATCH') {
-      const user = await requireUser(req, res);
+      const user = await requireUser(req, res, { scope: req.headers['x-device-id'] ? 'app' : 'site' });
       if (!user) return;
       if (!await enforceRateLimit(req, res, { scope: 'app-device-rename', limit: 30, windowSeconds: 600, key: user.id })) return;
       const b = body(req);
@@ -391,7 +403,11 @@ module.exports = async function handler(req, res) {
       return await deviceActions(req, res, action, userId, device);
     }
 
-    const user = await requireUser(req, res, { cached: isBackgroundPoll(action, req.method) });
+    const user = await requireUser(req, res, {
+      cached: isBackgroundPoll(action, req.method),
+      // с ПК — область «Программа» (кроме APP_RESTRICT_EXEMPT), из кабинета сайта — «Сайт»
+      scope: req.headers['x-device-id'] ? (APP_RESTRICT_EXEMPT.has(action) ? undefined : 'app') : 'site',
+    });
     if (!user) return;
 
     if (action === 'register-device' && req.method === 'POST') {

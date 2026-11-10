@@ -68,3 +68,23 @@ describe('здоровье бота: доставка и повторы', () => 
     expect(send).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('здоровье бота: снимок для экрана «Система»', () => {
+  it('сайт при узле бота не обрабатывает апдейты — окна нет, это не ошибка', () => {
+    const summary = (health as unknown as { summary: (now?: number) => { processesUpdates: boolean; window: unknown; lastUpdateAgoSec: number | null; state: Record<string, unknown> } }).summary;
+    process.env.BOT_NODE_URL = 'https://tg.example:88/webhook';
+    delete process.env.BOT_ROLE;
+    try {
+      const site = summary();
+      expect(site.processesUpdates).toBe(false);
+      expect(site.window).toBeNull();
+      expect(site.lastUpdateAgoSec).toBeNull();
+      expect(site.state).toMatchObject({ t: expect.any(Object) });
+    } finally {
+      delete process.env.BOT_NODE_URL;
+    }
+    const own = summary();
+    expect(own.processesUpdates).toBe(true);
+    expect(own.window).toMatchObject({ total: expect.any(Number), slow: expect.any(Number), failed: expect.any(Number) });
+  });
+});

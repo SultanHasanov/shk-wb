@@ -1,12 +1,12 @@
 const crypto = require('crypto');
-const { sendApiError, supabaseFetch } = require('./_supabase');
-const { deleteAuthUser, getAuthUser } = require('./_user-auth');
+const { supabaseFetch } = require('./_supabase');
+const { authConfig, deleteAuthUser, getAuthUser } = require('./_user-auth');
 const { createNotification } = require('./_notifications');
 const {
-  RESOURCES, addStickerGenerations, checkCellLicensePatch, checkStickerAccessPatch,
-  createCellLicense, createProgramKey, createStickerAccessCode, isUuid, recordAdminAction,
+  RESOURCES, addStickerGenerations, adminError, checkCellLicensePatch, checkStickerAccessPatch,
+  createCellLicense, createProgramKey, createStickerAccessCode, isUuid, recordAdminAction, sendAdminError,
 } = require('./_admin-grants');
-const { ADDONS, PLANS, TERMS, addonPrice, isAddon, isPlan, isTerm, orderSnapshot } = require('./_app-plans');
+const { ADDONS, PLANS, accountLimits, addonPrice, isAddon, isPlan, isTerm, mirrorLimit, orderSnapshot } = require('./_app-plans');
 const { setCodeViaBotOffForUser } = require('./_app-flags');
 
 /**
@@ -23,31 +23,132 @@ const { setCodeViaBotOffForUser } = require('./_app-flags');
  * показ страницы.
  */
 
-const SORTS = ['created_at', 'last_sign_in_at', 'revenue', 'generation_used'];
-const FILTERS = ['all', 'paying', 'free', 'telegram', 'banned', 'inactive'];
-/** Бан длиной в сто лет: GoTrue умеет только срок, «навсегда» у него нет. */
-const BAN_FOREVER = '876000h';
+const SORTS = ['created_at', 'last_sign_in_at', 'revenue', 'generation_used', 'balance', 'expiring'];
+const FILTERS = ['all', 'paying', 'free', 'telegram', 'banned', 'inactive', 'subscribed', 'expiring', 'unlimited', 'restricted'];
+const COUNT_KEYS = ['all', 'paying', 'subscribed', 'expiring', 'unlimited', 'restricted', 'telegram', 'inactive', 'new30'];
+const COUNTS_TTL_MS = 60_000;
+const OAUTH_PROVIDERS = ['yandex', 'mailru', 'vkid'];
+const SECTIONS_HERE = ['wallet', 'usage', 'charges', 'cellDevices', 'logins'];
+const SECTIONS_MESSAGES = ['messages', 'deliveries', 'pcMessages'];
+
+/**
+ * Новые действия живут в своих модулях. require ленивый: _admin-restrictions и _admin-messages
+ * тянут _app-account и бота, а им этот модуль не нужен — так нет ни циклов, ни лишней загрузки.
+ * Делегат отвечает сам: (req, res, { userId }) => Promise<void>.
+ */
+const DELEGATED = {
+  'POST setOverrides': () => require('./_admin-limits').setOverrides,
+  'POST clearOverrides': () => require('./_admin-limits').clearOverrides,
+  'POST walletAdjust': () => require('./_admin-limits').walletAdjust,
+  'POST restrict': () => require('./_admin-restrictions').restrict,
+  'POST updateRestriction': () => require('./_admin-restrictions').updateRestriction,
+  'POST liftRestriction': () => require('./_admin-restrictions').liftRestrictionAction,
+  'POST block': () => require('./_admin-restrictions').blockCompat,
+  'POST unblock': () => require('./_admin-restrictions').unblockCompat,
+  'GET messageTargets': () => require('./_admin-messages').messageTargets,
+  'POST message': () => require('./_admin-messages').message,
+  'POST notify': () => require('./_admin-messages').notifyCompat,
+};
 
 function badRequest(res, error) {
-  return res.status(400).json({ error });
+  return res.status(400).json({ error, code: 'VALIDATION_ERROR' });
 }
 
-function authConfig() {
-  const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
-  const serviceKey = process.env.SUPABASE_SECRET_KEY;
-  if (!url || !serviceKey) throw new Error('Supabase auth environment variables are not configured');
-  return { url, serviceKey };
+/** Причина из тела — в журнал каждого действия (необязательна у старых действий). */
+function logOptions(req, extra = {}) {
+  return { reason: req.body?.reason || null, ...extra };
 }
 
-/** Бан и разбан в GoTrue — это PUT с ban_duration, отдельных ручек нет. */
-async function setAuthBan(userId, banned) {
-  const { url, serviceKey } = authConfig();
-  const response = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
-    method: 'PUT',
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ban_duration: banned ? BAN_FOREVER : 'none' }),
-  });
-  if (!response.ok) throw new Error('Unable to update ban state');
+function requiredReason(req) {
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) throw adminError(400, 'VALIDATION_ERROR', 'Укажите причину для журнала');
+  if (reason.length > 500) throw adminError(400, 'VALIDATION_ERROR', 'Причина длиннее 500 символов');
+  return reason;
+}
+
+function account() {
+  return require('./_app-account');
+}
+
+/** Безлимит по env или по снимку (_app-account.isUnlimited). Ошибка модуля не должна ронять список. */
+function unlimitedByAccount(userId) {
+  try {
+    return Boolean(account().isUnlimited(userId));
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Только env-список владельцев — чтобы показать источник безлимита «env». */
+function unlimitedByEnv(userId) {
+  return String(process.env.APP_UNLIMITED_USER_IDS || '')
+    .split(/[\s,]+/).filter(Boolean).map(s => s.toLowerCase())
+    .includes(String(userId || '').toLowerCase());
+}
+
+function technical(email) {
+  return Boolean(email?.endsWith('@users.invalid'));
+}
+
+function liveUntil(until, now = Date.now()) {
+  return !until || Date.parse(until) > now;
+}
+
+let countsCache = null;
+
+async function userCounts() {
+  if (countsCache && Date.now() - countsCache.at < COUNTS_TTL_MS) return countsCache.value;
+  const raw = await supabaseFetch('rpc/admin_user_counts', { method: 'POST', body: '{}' });
+  const value = {};
+  for (const key of COUNT_KEYS) value[key] = Number(raw?.[key] || 0);
+  countsCache = { at: Date.now(), value };
+  return value;
+}
+
+function loginMethodsFrom(authUser, telegramRow, oauthRows, subscriber) {
+  return {
+    email: {
+      address: technical(authUser?.email) ? null : authUser?.email || null,
+      confirmed: Boolean(authUser?.email_confirmed_at),
+      technical: technical(authUser?.email),
+    },
+    telegram: telegramRow ? {
+      username: telegramRow.username || null,
+      telegramUserId: Number(telegramRow.telegram_user_id),
+      linkedAt: telegramRow.created_at || null,
+      bot: { started: Boolean(subscriber), blockedAt: subscriber?.blocked_at || null },
+    } : null,
+    oauth: (Array.isArray(oauthRows) ? oauthRows : []).map(row => ({
+      provider: row.provider, email: row.email || null, displayName: row.display_name || null, linkedAt: row.created_at || null,
+    })),
+  };
+}
+
+async function telegramSubscriber(telegramUserId) {
+  if (!telegramUserId) return null;
+  const rows = await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${encodeURIComponent(telegramUserId)}&select=blocked_at,activated_at&limit=1`).catch(() => []);
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+/** Лимиты ПК, пунктов, зеркала и подборов для карточки: итог (null = безлимит) и «по тарифу» без ручных правок. */
+function appLimits(ent, unlimited) {
+  const plan = isPlan(ent?.plan) ? ent.plan : null;
+  const addons = ent?.addons && typeof ent.addons === 'object' ? ent.addons : {};
+  const total = accountLimits(plan, addons, ent?.device_limit, false, ent?.device_bonus, ent?.points_bonus);
+  const base = accountLimits(plan, addons, ent?.device_limit, false, 0, 0);
+  return {
+    devices: unlimited ? null : total.devices,
+    points: unlimited ? null : total.points,
+    mirror: unlimited ? null : mirrorLimit(plan, addons, false, ent?.mirror_bonus),
+    codesLimit: Number(ent?.codes_limit || 0),
+    codesUsed: Number(ent?.codes_used || 0),
+    base: {
+      devices: base.devices,
+      points: base.points,
+      mirror: mirrorLimit(plan, addons, false, 0),
+      codes: Number(ent?.codes_base ?? (plan ? ent?.codes_limit : 0) ?? 0) || 0,
+    },
+  };
 }
 
 /** Ручная выдача должна выглядеть для клиента так же, как покупка. */
@@ -79,7 +180,40 @@ async function listUsers(req, res) {
       p_filter: filter,
     }),
   });
-  const items = (rows || []).map(row => ({
+  const now = Date.now();
+  const items = (rows || []).map(row => {
+    const plan = isPlan(row.app_plan) ? row.app_plan : null;
+    const addons = row.app_addons && typeof row.app_addons === 'object' ? row.app_addons : {};
+    // env-безлимит директория не знает — добавляем его здесь
+    const unlimited = Boolean(row.unlimited) || unlimitedByAccount(row.user_id);
+    const limits = accountLimits(plan, addons, row.app_device_limit, false, row.device_bonus, row.points_bonus);
+    const paidUntil = row.app_paid_until || null;
+    const endsAt = row.app_ends_at || null;
+    const lastDay = paidUntil || endsAt;
+    const restricted = Boolean(row.restricted);
+    return {
+      ...baseRow(row),
+      walletKopecks: Number(row.wallet_kopecks || 0),
+      app: {
+        plan, endsAt, paidUntil,
+        expiresInDays: lastDay ? Math.max(0, Math.ceil((Date.parse(lastDay) - now) / 86400000)) : null,
+      },
+      devices: { used: Number(row.devices_count || 0), limit: unlimited ? null : limits.devices },
+      points: { used: Number(row.points_count || 0), limit: unlimited ? null : limits.points },
+      lastSeenAt: row.last_seen_at || null,
+      restricted,
+      restriction: restricted
+        ? { scopes: Array.isArray(row.restriction_scopes) && row.restriction_scopes.length ? row.restriction_scopes : ['all'], until: row.restriction_until || null }
+        : null,
+      unlimited,
+      unlimitedUntil: row.unlimited ? row.unlimited_until || null : null,
+    };
+  });
+  return res.json({ items, total: Number(rows?.[0]?.total_count || 0), page, pageSize, sort, filter });
+}
+
+function baseRow(row) {
+  return {
     userId: row.user_id,
     email: row.email,
     emailConfirmed: row.email_confirmed,
@@ -105,13 +239,16 @@ async function listUsers(req, res) {
     referralEarnedKopecks: Number(row.referral_earned || 0),
     referralAvailableKopecks: Number(row.referral_available || 0),
     invited: Number(row.invited_count || 0),
-  }));
-  return res.json({ items, total: Number(rows?.[0]?.total_count || 0), page, pageSize, sort, filter });
+  };
 }
 
 async function userDetail(req, res, userId) {
   const q = encodeURIComponent(userId);
-  const [authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions, notifications, historyCount, actions, appSubscriptions, appDevices, appUsage, appEnt, appAddons, appPoints] = await Promise.all([
+  const [
+    authUser, profiles, preferences, telegram, codes, programKeys, cellLicenses, orders, customOrders, referral, attributions,
+    notifications, historyCount, actions, appSubscriptions, appDevices, appUsage, appEnt, appAddons, appPoints,
+    overrideRows, restrictionRows, walletRows, oauthRows, bonusRows, partnerRows,
+  ] = await Promise.all([
     getAuthUser(userId),
     supabaseFetch(`user_profiles?user_id=eq.${q}&select=*&limit=1`),
     supabaseFetch(`user_preferences?user_id=eq.${q}&select=*&limit=1`),
@@ -125,7 +262,8 @@ async function userDetail(req, res, userId) {
     supabaseFetch(`referral_attributions?referrer_user_id=eq.${q}&select=invited_user_id,attributed_at&order=attributed_at.desc&limit=100`),
     supabaseFetch(`in_app_notifications?user_id=eq.${q}&select=id,kind,title,created_at,read_at&order=created_at.desc&limit=20`),
     supabaseFetch(`user_generation_history?user_id=eq.${q}&select=id&limit=1000`),
-    supabaseFetch(`admin_actions?target_user_id=eq.${q}&select=*&order=created_at.desc&limit=50`),
+    // без колонки response: там целый ответ действия, карточке он не нужен
+    supabaseFetch(`admin_actions?target_user_id=eq.${q}&select=id,created_at,action,target_user_id,payload,admin_fingerprint,reason,before,after,result,user_agent&order=created_at.desc&limit=50`),
     // «Помощник ПВЗ»: подписки (отрезки), привязанные ПК и расход лимитов.
     supabaseFetch(`app_subscriptions?user_id=eq.${q}&select=*&order=starts_at.desc&limit=50`).catch(() => []),
     supabaseFetch(`app_devices?user_id=eq.${q}&select=*&order=last_seen_at.desc&limit=50`).catch(() => []),
@@ -133,8 +271,32 @@ async function userDetail(req, res, userId) {
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
     supabaseFetch(`app_addons?user_id=eq.${q}&select=*&order=starts_at.desc&limit=50`).catch(() => []),
     supabaseFetch(`app_points?user_id=eq.${q}&select=id,wb_point_id,name,created_at,last_sync_at,mirror_at,revoked_at&order=created_at.asc`).catch(() => []),
+    // Ручные лимиты, ограничение, кошелёк, способы входа, партнёр. Каждый запрос со своим catch:
+    // карточка открывается и до миграций.
+    supabaseFetch(`user_overrides?user_id=eq.${q}&select=*&limit=1`).catch(() => []),
+    supabaseFetch(`user_restrictions?user_id=eq.${q}&lifted_at=is.null&select=*&limit=1`).catch(() => []),
+    supabaseFetch(`wallet_accounts?user_id=eq.${q}&select=balance_kopecks,updated_at&limit=1`).catch(() => []),
+    supabaseFetch(`user_oauth_identities?user_id=eq.${q}&select=provider,email,display_name,created_at&order=created_at.asc`).catch(() => []),
+    supabaseFetch(`app_device_bonuses?user_id=eq.${q}&select=devices&limit=1`).catch(() => []),
+    supabaseFetch(`partners?user_id=eq.${q}&select=id,name,active&limit=1`).catch(() => []),
   ]);
-  if (!authUser) return res.status(404).json({ error: 'Пользователь не найден' });
+  if (!authUser) return res.status(404).json({ error: 'Пользователь не найден', code: 'NOT_FOUND' });
+  const telegramRow = telegram[0] || null;
+  const subscriber = telegramRow ? await telegramSubscriber(telegramRow.telegram_user_id) : null;
+  let online = new Set();
+  try {
+    online = require('./_app-relay').onlineIds(userId);
+  } catch (error) {
+    console.error('relay online ids failed', error.message);
+  }
+  const overrideRow = Array.isArray(overrideRows) ? overrideRows[0] || null : null;
+  const restrictionRow = Array.isArray(restrictionRows) ? restrictionRows[0] || null : null;
+  const walletRow = Array.isArray(walletRows) ? walletRows[0] || null : null;
+  const partnerRow = Array.isArray(partnerRows) ? partnerRows[0] || null : null;
+  const envUnlimited = unlimitedByEnv(userId);
+  const overrideUnlimited = (Boolean(overrideRow?.unlimited) && liveUntil(overrideRow?.unlimited_until)) || appEnt?.unlimited === true;
+  const unlimitedActive = envUnlimited || overrideUnlimited || unlimitedByAccount(userId);
+  const unlimitedSource = envUnlimited ? 'env' : unlimitedActive ? 'override' : null;
   const licenseIds = cellLicenses.map(row => row.id);
   const activations = licenseIds.length
     ? await supabaseFetch(`cell_print_activations?license_id=in.(${licenseIds.join(',')})&select=*&order=last_seen_at.desc`)
@@ -222,8 +384,22 @@ async function userDetail(req, res, userId) {
     notifications,
     historyEntries: historyCount.length,
     actions,
+    overrides: require('./_admin-limits').overridesDto(overrideRow),
+    legacyDeviceBonus: Number(bonusRows?.[0]?.devices || 0),
+    restriction: restrictionRow ? require('./_admin-restrictions').restrictionDto(restrictionRow) : null,
+    // то же правило, что в restrict: ограничить такой аккаунт можно только с force
+    protected: unlimitedActive,
+    partner: partnerRow ? { id: partnerRow.id, name: partnerRow.name, active: Boolean(partnerRow.active) } : null,
+    unlimited: {
+      active: unlimitedActive,
+      source: unlimitedSource,
+      until: unlimitedSource === 'override' ? overrideRow?.unlimited_until || appEnt?.unlimited_until || null : null,
+    },
+    wallet: { balanceKopecks: Number(walletRow?.balance_kopecks || 0), updatedAt: walletRow?.updated_at || null },
+    loginMethods: loginMethodsFrom(authUser, telegramRow, oauthRows, subscriber),
     app: {
       entitlements: appEnt || null,
+      limits: appLimits(appEnt, unlimitedActive),
       subscriptions: (appSubscriptions || []).map(s => ({
         id: s.id, plan: s.plan, startsAt: s.starts_at, endsAt: s.ends_at, canceled: s.canceled,
         source: s.source, monthlyPrice: Number(s.monthly_price), codes: s.codes_per_month,
@@ -232,6 +408,9 @@ async function userDetail(req, res, userId) {
       devices: (appDevices || []).map(d => ({
         id: d.id, name: d.name, appVersion: d.app_version, lastSeenAt: d.last_seen_at,
         createdAt: d.created_at, revokedAt: d.revoked_at,
+        role: d.role === 'owner' || d.role === 'work' ? d.role : null,
+        online: online.has(d.id),
+        pointWb: d.point_wb || null,
       })),
       usage: (appUsage || []).map(u => ({
         id: u.id, kind: u.kind, amount: u.amount, source: u.source, createdAt: u.created_at,
@@ -248,17 +427,191 @@ async function userDetail(req, res, userId) {
   });
 }
 
-module.exports = async function handler(req, res) {
+/** Тяжёлые разделы карточки — по вкладкам, а не в detail (трафик Supabase). */
+async function userSection(section, userId) {
+  const q = encodeURIComponent(userId);
+  if (section === 'wallet') {
+    const [accounts, ledger] = await Promise.all([
+      supabaseFetch(`wallet_accounts?user_id=eq.${q}&select=balance_kopecks&limit=1`).catch(() => []),
+      supabaseFetch(`wallet_ledger?user_id=eq.${q}&select=id,kind,amount_kopecks,order_id,details,created_at&order=created_at.desc&limit=50`),
+    ]);
+    return {
+      balanceKopecks: Number(accounts?.[0]?.balance_kopecks || 0),
+      ledger: (ledger || []).map(row => ({
+        id: Number(row.id), kind: row.kind, amountKopecks: Number(row.amount_kopecks || 0), orderId: row.order_id || null,
+        note: typeof row.details?.note === 'string' && row.details.note ? row.details.note : null, createdAt: row.created_at,
+      })),
+    };
+  }
+  if (section === 'usage') {
+    const [usage, devices] = await Promise.all([
+      supabaseFetch(`app_usage?user_id=eq.${q}&select=id,kind,amount,source,device_id,meta,created_at&order=created_at.desc&limit=100`),
+      supabaseFetch(`app_devices?user_id=eq.${q}&select=id,name&limit=200`).catch(() => []),
+    ]);
+    const names = new Map((devices || []).map(d => [d.id, d.name]));
+    return {
+      items: (usage || []).map(row => ({
+        id: Number(row.id), kind: row.kind, amount: Number(row.amount || 0), source: row.source,
+        deviceName: row.device_id ? names.get(row.device_id) || null : null,
+        via: typeof row.meta?.via === 'string' ? row.meta.via : null, createdAt: row.created_at,
+      })),
+    };
+  }
+  if (section === 'charges') {
+    const rows = await supabaseFetch(`sticker_generation_charges?user_id=eq.${q}&select=id,mode,category,quantity,price_kopecks,payment_source,status,created_at&order=created_at.desc&limit=50`);
+    return {
+      items: (rows || []).map(row => ({
+        id: row.id, mode: row.mode, category: row.category, quantity: Number(row.quantity || 0),
+        priceKopecks: Number(row.price_kopecks || 0), paymentSource: row.payment_source || 'wallet', status: row.status, createdAt: row.created_at,
+      })),
+    };
+  }
+  if (section === 'cellDevices') {
+    const rows = await supabaseFetch(`cell_print_devices?user_id=eq.${q}&select=id,name,app_version,first_seen_at,last_seen_at,revoked_at&order=last_seen_at.desc&limit=50`);
+    return {
+      items: (rows || []).map(row => ({
+        id: Number(row.id), name: row.name || '', appVersion: row.app_version || '', firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at, revokedAt: row.revoked_at || null,
+      })),
+    };
+  }
+  if (section === 'logins') {
+    const [authUser, telegram, oauth] = await Promise.all([
+      getAuthUser(userId),
+      supabaseFetch(`user_telegram_identities?user_id=eq.${q}&select=telegram_user_id,username,created_at&limit=1`).catch(() => []),
+      supabaseFetch(`user_oauth_identities?user_id=eq.${q}&select=provider,email,display_name,created_at&order=created_at.asc`).catch(() => []),
+    ]);
+    if (!authUser) throw adminError(404, 'NOT_FOUND', 'Пользователь не найден');
+    const telegramRow = telegram?.[0] || null;
+    const subscriber = telegramRow ? await telegramSubscriber(telegramRow.telegram_user_id) : null;
+    return loginMethodsFrom(authUser, telegramRow, oauth, subscriber);
+  }
+  throw adminError(400, 'VALIDATION_ERROR', 'Неизвестный раздел карточки');
+}
+
+async function requireAuthUser(userId) {
+  const authUser = await getAuthUser(userId);
+  if (!authUser) throw adminError(404, 'NOT_FOUND', 'Пользователь не найден');
+  return authUser;
+}
+
+/**
+ * Завершить сеансы пользователя на сайте и в программе: у GoTrue Admin API нет «выйти везде», поэтому
+ * открываем сеанс от имени пользователя (как вход через Telegram) и зовём logout?scope=global его токеном.
+ * Ключи ПК и app_devices не трогаем — фоновая работа программы по ключу продолжается.
+ */
+async function logoutAll(req, res, userId) {
+  const reason = requiredReason(req);
+  const authUser = await requireAuthUser(userId);
+  // Сеанс открывается через magiclink, а его проверка в GoTrue подтверждает почту. Неподтверждённую почту
+  // так подтверждать нельзя — и сеансов у такого аккаунта нет: без подтверждения вход по паролю не пускает,
+  // а Telegram, OAuth и программа создают аккаунты уже с подтверждённой почтой.
+  if (!authUser.email_confirmed_at) {
+    throw adminError(409, 'LOGOUT_UNAVAILABLE', 'Почта не подтверждена — у аккаунта нет открытых сеансов, завершать нечего');
+  }
+  let session;
+  try {
+    session = await account().sessionForUser(userId);
+  } catch (error) {
+    console.error('admin logoutAll session failed', error.message);
+    throw adminError(409, 'LOGOUT_FAILED', 'Не удалось открыть сеанс пользователя, чтобы завершить остальные. Если аккаунт ограничен полностью, его сеансы уже завершены');
+  }
+  const { url, publishableKey } = authConfig();
+  const response = await fetch(`${url}/auth/v1/logout?scope=global`, {
+    method: 'POST',
+    headers: { apikey: publishableKey, Authorization: `Bearer ${session?.access_token}` },
+  });
+  if (!response.ok) throw new Error(`GoTrue logout failed (${response.status})`);
+  // В журнале отмечаем, что для выхода открывался сеанс от имени пользователя (magiclink без письма).
+  await recordAdminAction(req, 'logoutAll', userId, { via: 'session_on_behalf' }, { reason, after: { sessions: 'ended' } });
+  return res.json({ ok: true, devicesRevoked: 0 });
+}
+
+async function unlinkTelegram(req, res, userId) {
+  const reason = requiredReason(req);
+  const authUser = await requireAuthUser(userId);
+  if (technical(authUser.email)) {
+    throw adminError(409, 'LAST_LOGIN_METHOD', 'Это аккаунт Telegram без почты — после отвязки в него будет не войти');
+  }
+  const q = encodeURIComponent(userId);
+  const rows = await supabaseFetch(`user_telegram_identities?user_id=eq.${q}&select=telegram_user_id,username&limit=1`);
+  if (!rows.length) throw adminError(404, 'NOT_FOUND', 'Telegram не привязан');
+  await supabaseFetch(`user_telegram_identities?user_id=eq.${q}`, { method: 'DELETE' });
+  require('./_telegram-user-cache').forgetSiteUser(userId);
+  // Бот живёт отдельным процессом (узел в Германии) и держит связку в памяти до 10 минут.
+  await Promise.resolve()
+    .then(() => require('./_bot-rpc').callBot('forgetSiteUser', userId))
+    .catch(error => console.warn('bot cache reset after unlink failed', error.message));
+  const label = rows[0].username ? `@${rows[0].username}` : `tg:${rows[0].telegram_user_id}`;
+  await recordAdminAction(req, 'unlinkTelegram', userId, { telegramUserId: Number(rows[0].telegram_user_id) }, {
+    reason, before: { telegram: label }, after: { telegram: null },
+  });
+  return res.json({ ok: true });
+}
+
+async function unlinkOAuth(req, res, userId) {
+  const provider = String(req.body?.provider || '');
+  if (!OAUTH_PROVIDERS.includes(provider)) throw adminError(400, 'VALIDATION_ERROR', 'Неизвестный способ входа');
+  const reason = requiredReason(req);
+  const authUser = await requireAuthUser(userId);
+  const q = encodeURIComponent(userId);
+  const oauth = require('./_oauth-login');
+  // Правило кабинета: у аккаунта без почты должен остаться Telegram или другой провайдер.
+  if (technical(authUser.email)) {
+    const [tg, others] = await Promise.all([
+      supabaseFetch(`user_telegram_identities?user_id=eq.${q}&select=user_id&limit=1`),
+      oauth.identitiesForUser(userId),
+    ]);
+    if (!tg.length && others.filter(row => row.provider !== provider).length === 0) {
+      throw adminError(409, 'LAST_LOGIN_METHOD', 'Это последний способ входа — после отвязки в аккаунт будет не войти');
+    }
+  }
+  await oauth.unlinkIdentity(userId, provider);
+  await recordAdminAction(req, 'unlinkOAuth', userId, { provider }, { reason, before: { provider }, after: { provider: null } });
+  return res.json({ ok: true });
+}
+
+async function setDeviceRoleAction(req, res, userId) {
+  const deviceId = String(req.body?.deviceId || '');
+  const role = String(req.body?.role || '');
+  if (!isUuid(deviceId)) throw adminError(400, 'VALIDATION_ERROR', 'Некорректное устройство');
+  if (role !== 'owner' && role !== 'work') throw adminError(400, 'VALIDATION_ERROR', 'Роль компьютера: владелец или сотрудник');
+  const result = await account().setDeviceRole({ id: userId, email: null }, deviceId, role, { by: null });
+  await recordAdminAction(req, 'setDeviceRole', userId, { deviceId, role }, logOptions(req, { after: { role: result.role } }));
+  return res.json(result);
+}
+
+async function handler(req, res) {
   const action = String(req.query.action || 'list');
   const userId = String(req.body?.userId || req.query.userId || '');
   try {
+    const delegated = DELEGATED[`${req.method} ${action}`];
+    if (delegated) {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      return await delegated()(req, res, { userId });
+    }
+    if (req.method === 'GET' && action === 'counts') return res.json(await userCounts());
+    if (req.method === 'GET' && action === 'detailSection') {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      const section = String(req.query.section || '');
+      if (SECTIONS_MESSAGES.includes(section)) return res.json(await require('./_admin-messages').userSection(section, userId));
+      if (!SECTIONS_HERE.includes(section)) return badRequest(res, 'Неизвестный раздел карточки');
+      return res.json(await userSection(section, userId));
+    }
+    if (req.method === 'POST' && ['logoutAll', 'unlinkTelegram', 'unlinkOAuth', 'setDeviceRole'].includes(action)) {
+      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
+      if (action === 'logoutAll') return await logoutAll(req, res, userId);
+      if (action === 'unlinkTelegram') return await unlinkTelegram(req, res, userId);
+      if (action === 'unlinkOAuth') return await unlinkOAuth(req, res, userId);
+      return await setDeviceRoleAction(req, res, userId);
+    }
     if (req.method === 'GET' && action === 'summary') {
       return res.json(await supabaseFetch('rpc/admin_user_summary', { method: 'POST', body: '{}' }));
     }
-    if (req.method === 'GET' && action === 'list') return listUsers(req, res);
+    if (req.method === 'GET' && action === 'list') return await listUsers(req, res);
     if (req.method === 'GET' && action === 'detail') {
       if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
-      return userDetail(req, res, userId);
+      return await userDetail(req, res, userId);
     }
 
     if (req.method === 'POST' && action === 'grantSticker') {
@@ -267,7 +620,7 @@ module.exports = async function handler(req, res) {
         name: req.body?.name, limit: req.body?.limit, ownerUserId: userId,
       });
       if (created.error) return badRequest(res, created.error);
-      await recordAdminAction(req, 'grantSticker', userId, { code: created.row.code, limit: created.row.generation_limit });
+      await recordAdminAction(req, 'grantSticker', userId, { code: created.row.code, limit: created.row.generation_limit }, logOptions(req));
       await notifyUser(userId, 'Вам выдан код доступа',
         `Код ${created.row.code} — ${created.row.generation_limit} генераций. Он уже доступен в кабинете.`);
       return res.status(201).json(RESOURCES.stickerAccess.fromDb(created.row));
@@ -294,7 +647,7 @@ module.exports = async function handler(req, res) {
       const orderId = String(created);
       await recordAdminAction(req, 'createIndividualStickerOrder', userId, {
         orderId, quantity: codes.length, totalAmount, creditUnits,
-      });
+      }, logOptions(req));
       await notifyUser(userId, 'Выставлен индивидуальный заказ',
         `${title}: ${codes.length} стикеров. После оплаты они появятся в истории и станут доступны для скачивания.`, '/cabinet/orders');
       return res.status(201).json({ id: orderId, quantity: codes.length });
@@ -304,7 +657,7 @@ module.exports = async function handler(req, res) {
       if (!Number.isInteger(codeId)) return badRequest(res, 'Некорректный код');
       const result = await addStickerGenerations(codeId, req.body?.add);
       if (result.error) return badRequest(res, result.error);
-      await recordAdminAction(req, 'topupSticker', userId, { codeId, add: Number(req.body?.add) });
+      await recordAdminAction(req, 'topupSticker', userId, { codeId, add: Number(req.body?.add) }, logOptions(req));
       if (isUuid(userId)) {
         await notifyUser(userId, 'Пакет генераций пополнен',
           `К коду ${result.row.code} добавлено ${Number(req.body?.add)} генераций.`);
@@ -317,7 +670,7 @@ module.exports = async function handler(req, res) {
         key: req.body?.key, limit: req.body?.limit, note: req.body?.note, ownerUserId: userId,
       });
       if (created.error) return badRequest(res, created.error);
-      await recordAdminAction(req, 'grantProgramKey', userId, { key: created.row.key, limit: created.row.usage_limit });
+      await recordAdminAction(req, 'grantProgramKey', userId, { key: created.row.key, limit: created.row.usage_limit }, logOptions(req));
       await notifyUser(userId, 'Вам выдан пакет подборов «Помощник ПВЗ»',
         `Ключ ${created.row.key}, ${created.row.usage_limit} подборов.`, '/cabinet/keys');
       return res.status(201).json(RESOURCES.key.fromDb(created.row));
@@ -329,7 +682,7 @@ module.exports = async function handler(req, res) {
         marketplaceScope: req.body?.marketplaceScope || 'wb', note: req.body?.note, ownerUserId: userId,
       });
       if (created.error) return badRequest(res, created.error);
-      await recordAdminAction(req, 'grantCellLicense', userId, { key: created.row.key, durationDays: created.row.duration_days });
+      await recordAdminAction(req, 'grantCellLicense', userId, { key: created.row.key, durationDays: created.row.duration_days }, logOptions(req));
       await notifyUser(userId, 'Вам выдан ключ «Печати ячеек»',
         `Ключ ${created.row.key} на ${created.row.duration_days} дней, устройств: ${created.row.device_limit}.`, '/cabinet/keys');
       return res.status(201).json(RESOURCES.cellLicense.fromDb(created.row));
@@ -347,7 +700,7 @@ module.exports = async function handler(req, res) {
         method: 'POST',
         body: JSON.stringify({ p_user: userId, p_plan: plan, p_months: months, p_snap: snap.app }),
       });
-      await recordAdminAction(req, 'grantAppSubscription', userId, { plan, months });
+      await recordAdminAction(req, 'grantAppSubscription', userId, { plan, months }, logOptions(req));
       await notifyUser(userId, 'Вам выдана подписка «Помощник ПВЗ»',
         `Тариф ${PLANS[plan].title} на ${months} мес. Программа готова к работе.`, '/cabinet/subscription');
       return res.status(201).json({ ok: true });
@@ -360,7 +713,7 @@ module.exports = async function handler(req, res) {
       await supabaseFetch('rpc/admin_revoke_app_subscription', {
         method: 'POST', body: JSON.stringify({ p_sub: subId }),
       });
-      await recordAdminAction(req, 'revokeAppSubscription', userId, { id: subId });
+      await recordAdminAction(req, 'revokeAppSubscription', userId, { id: subId }, logOptions(req));
       return res.status(200).json({ ok: true });
     }
     // Выдать доп. услугу (архив) помимо оплаты: продлевает от конца активной, source='admin'.
@@ -372,7 +725,7 @@ module.exports = async function handler(req, res) {
       await supabaseFetch('rpc/admin_grant_app_addon', {
         method: 'POST', body: JSON.stringify({ p_user: userId, p_addon: addon, p_months: months }),
       });
-      await recordAdminAction(req, 'grantAppAddon', userId, { addon, months });
+      await recordAdminAction(req, 'grantAppAddon', userId, { addon, months }, logOptions(req));
       await notifyUser(userId, ADDONS[addon].kind === 'pack' ? `Вам подключено: «${ADDONS[addon].title}»` : `Вам подключена услуга «${ADDONS[addon].title}»`,
         ADDONS[addon].kind === 'pack'
           ? `Срок — ${months} мес. ${ADDONS[addon].summary}.`
@@ -384,7 +737,7 @@ module.exports = async function handler(req, res) {
       const addonId = String(req.body?.id || '');
       if (!isUuid(addonId)) return badRequest(res, 'Некорректная услуга');
       await supabaseFetch('rpc/admin_revoke_app_addon', { method: 'POST', body: JSON.stringify({ p_addon_id: addonId }) });
-      await recordAdminAction(req, 'revokeAppAddon', userId, { id: addonId });
+      await recordAdminAction(req, 'revokeAppAddon', userId, { id: addonId }, logOptions(req));
       return res.status(200).json({ ok: true });
     }
     // Отключить пункт (освобождает слот в лимите пунктов; облачные данные пункта остаются).
@@ -395,7 +748,7 @@ module.exports = async function handler(req, res) {
       await supabaseFetch(`app_points?id=eq.${encodeURIComponent(pointId)}&user_id=eq.${encodeURIComponent(userId)}`, {
         method: 'PATCH', body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       });
-      await recordAdminAction(req, 'revokeAppPoint', userId, { id: pointId });
+      await recordAdminAction(req, 'revokeAppPoint', userId, { id: pointId }, logOptions(req));
       return res.status(200).json({ ok: true });
     }
     // Отвязать ПК от аккаунта (освобождает слот в лимите устройств).
@@ -406,7 +759,7 @@ module.exports = async function handler(req, res) {
       await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}`, {
         method: 'PATCH', body: JSON.stringify({ revoked_at: new Date().toISOString() }),
       });
-      await recordAdminAction(req, 'revokeAppDevice', userId, { id: deviceId });
+      await recordAdminAction(req, 'revokeAppDevice', userId, { id: deviceId }, logOptions(req));
       return res.status(200).json({ ok: true });
     }
     if (req.method === 'POST' && action === 'attach') {
@@ -423,18 +776,10 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify({ owner_user_id: userId }),
       });
       if (!rows.length) return res.status(409).json({ error: 'Актив не найден или уже принадлежит другому аккаунту' });
-      await recordAdminAction(req, 'attach', userId, { kind, value });
+      await recordAdminAction(req, 'attach', userId, { kind, value }, logOptions(req));
       return res.json({ attached: true });
     }
-    if (req.method === 'POST' && action === 'notify') {
-      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
-      const title = String(req.body?.title || '').trim();
-      const body = String(req.body?.body || '').trim();
-      if (!title || title.length > 160 || !body || body.length > 2000) return badRequest(res, 'Заполните заголовок и текст');
-      await notifyUser(userId, title, body, String(req.body?.link || '') || null);
-      await recordAdminAction(req, 'notify', userId, { title });
-      return res.status(201).json({ sent: true });
-    }
+    // notify, block и unblock — в таблице DELEGATED (_admin-messages, _admin-restrictions)
     if (req.method === 'POST' && action === 'profile') {
       if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
       const patch = { updated_at: new Date().toISOString() };
@@ -447,7 +792,7 @@ module.exports = async function handler(req, res) {
       const rows = await supabaseFetch(`user_profiles?user_id=eq.${encodeURIComponent(userId)}`, {
         method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(patch),
       });
-      await recordAdminAction(req, 'profile', userId, patch);
+      await recordAdminAction(req, 'profile', userId, patch, logOptions(req, { after: patch }));
       return res.json(rows[0] || {});
     }
     // Индивидуальное исключение из подтверждения кода клиента через бот: {enabled:false} → код напрямую
@@ -456,22 +801,8 @@ module.exports = async function handler(req, res) {
       if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
       const off = req.body?.enabled === false;
       await setCodeViaBotOffForUser(userId, off);
-      await recordAdminAction(req, 'appCodeViaBot', userId, { enabled: !off });
+      await recordAdminAction(req, 'appCodeViaBot', userId, { enabled: !off }, logOptions(req));
       return res.json({ enabled: !off });
-    }
-    if (req.method === 'POST' && (action === 'block' || action === 'unblock')) {
-      if (!isUuid(userId)) return badRequest(res, 'Некорректный идентификатор пользователя');
-      const blocking = action === 'block';
-      await setAuthBan(userId, blocking);
-      // Одного бана мало: коды доступа работают без входа в аккаунт.
-      const q = encodeURIComponent(userId);
-      for (const table of ['sticker_access_codes', 'license_keys', 'cell_print_licenses']) {
-        await supabaseFetch(`${table}?owner_user_id=eq.${q}`, {
-          method: 'PATCH', body: JSON.stringify({ active: !blocking }),
-        });
-      }
-      await recordAdminAction(req, action, userId, {});
-      return res.json({ banned: blocking });
     }
 
     if (req.method === 'PATCH' && action === 'code') {
@@ -487,7 +818,7 @@ module.exports = async function handler(req, res) {
         method: 'PATCH', headers: { Prefer: 'return=representation' },
         body: JSON.stringify(RESOURCES.stickerAccess.toDb(patch)),
       });
-      await recordAdminAction(req, 'patchCode', userId, { codeId: id, ...patch });
+      await recordAdminAction(req, 'patchCode', userId, { codeId: id, ...patch }, logOptions(req, { after: patch }));
       return res.json(RESOURCES.stickerAccess.fromDb(rows[0]));
     }
     if (req.method === 'PATCH' && action === 'programKey') {
@@ -500,7 +831,7 @@ module.exports = async function handler(req, res) {
         method: 'PATCH', headers: { Prefer: 'return=representation' },
         body: JSON.stringify(RESOURCES.key.toDb(patch)),
       });
-      await recordAdminAction(req, 'patchProgramKey', userId, { id, ...patch });
+      await recordAdminAction(req, 'patchProgramKey', userId, { id, ...patch }, logOptions(req, { after: patch }));
       return res.json(RESOURCES.key.fromDb(rows[0]));
     }
     if (req.method === 'PATCH' && action === 'cellLicense') {
@@ -512,7 +843,7 @@ module.exports = async function handler(req, res) {
         method: 'PATCH', headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ ...RESOURCES.cellLicense.toDb(req.body || {}), ...(checked.extra || {}) }),
       });
-      await recordAdminAction(req, 'patchCellLicense', userId, { id, ...(req.body || {}) });
+      await recordAdminAction(req, 'patchCellLicense', userId, { id, ...(req.body || {}) }, logOptions(req, { after: RESOURCES.cellLicense.fromDb(rows[0] || {}) }));
       return res.json(RESOURCES.cellLicense.fromDb(rows[0]));
     }
 
@@ -526,7 +857,7 @@ module.exports = async function handler(req, res) {
       if (!confirm || confirm !== String(authUser.email || userId)) {
         return res.status(409).json({ error: 'Введите почту пользователя для подтверждения' });
       }
-      await recordAdminAction(req, 'deleteAccount', userId, { email: authUser.email });
+      await recordAdminAction(req, 'deleteAccount', userId, { email: authUser.email }, logOptions(req));
       await deleteAuthUser(userId);
       return res.status(204).end();
     }
@@ -534,6 +865,12 @@ module.exports = async function handler(req, res) {
     res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
-    return sendApiError(res, error);
+    return sendAdminError(res, error);
   }
-};
+}
+
+handler.FILTERS = FILTERS;
+handler.SORTS = SORTS;
+handler.DELEGATED = DELEGATED;
+handler.userSection = userSection;
+module.exports = handler;

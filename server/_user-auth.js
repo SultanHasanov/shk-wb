@@ -47,11 +47,23 @@ async function optionalUser(req, { cached = false } = {}) {
   return user;
 }
 
-async function requireUser(req, res, options) {
+// options.scope ('site' | 'app' | 'cell_print' | …) — проверить ограничение аккаунта из админки по снимку в памяти
+// (server/_user-controls.js). Ограничение — всегда 403 ACCOUNT_RESTRICTED, никогда 401: на 401 программа
+// обновляет сессию, а на DEVICE_REVOKED стирает ключ ПК.
+async function requireUser(req, res, options = {}) {
   const user = await optionalUser(req, options);
   if (!user) {
     res.status(401).json({ error: 'Требуется авторизация', code: 'AUTH_REQUIRED' });
     return null;
+  }
+  if (options && options.scope) {
+    // Лениво: _user-controls не должен грузиться там, где requireUser без области
+    const controls = require('./_user-controls');
+    const r = await controls.restrictionFor(user.id);
+    if (r && controls.covers(r, options.scope)) {
+      res.status(403).json(controls.restrictedBody(r));
+      return null;
+    }
   }
   return user;
 }

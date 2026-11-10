@@ -185,10 +185,32 @@ async function check() {
   if (!botNode) await checkBotNode().catch(error => console.error('bot health (bot node):', error.message));
 }
 
+/**
+ * Снимок для экрана «Система» в админке (без запросов наружу).
+ * Окно апдейтов живёт в памяти того процесса, который их обрабатывает: при заданном BOT_NODE_URL
+ * это узел в Германии, и у сайта window = null, lastUpdateAgoSec = null — это не ошибка.
+ */
+function summary(now = Date.now()) {
+  const botNode = process.env.BOT_ROLE === 'bot';
+  const processesUpdates = botNode || !String(process.env.BOT_NODE_URL || '').trim();
+  const items = records.filter(item => now - item.at <= WINDOW_MS);
+  const evaluated = processesUpdates ? evaluateUpdates(items) : null;
+  const last = records.length ? records[records.length - 1].at : null;
+  return {
+    processesUpdates,
+    slowMs: SLOW_MS,
+    window: evaluated ? { total: evaluated.total, slow: evaluated.slow, failed: evaluated.failed, worst: evaluated.worst, degraded: evaluated.degraded } : null,
+    lastUpdateAgoSec: processesUpdates && last ? Math.max(0, Math.round((now - last) / 1000)) : null,
+    relayFailures: relayFailures.count,
+    nodeFailures: nodeFailures.count,
+    state: readState(),
+  };
+}
+
 function startBotHealth() {
   const run = () => check();
   setTimeout(run, 90 * 1000).unref();
   setInterval(run, CHECK_MS).unref();
 }
 
-module.exports = { check, evaluateUpdates, recordUpdate, report, startBotHealth };
+module.exports = { STATE_FILE, check, evaluateUpdates, recordUpdate, report, startBotHealth, summary };

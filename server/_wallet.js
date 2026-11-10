@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { completeOrder, PACKAGE_PRICES } = require('./_payments');
+const controls = require('./_user-controls');
 
 const TOPUP_AMOUNTS = Object.freeze([100, 300, 500, 1000]);
 const MIN_TOPUP = 25;
@@ -108,6 +109,8 @@ async function grantBonus({ userId, kopecks, eventKey, note = '', adminTelegramI
 async function payWithWallet({ userId, productKind, fields = {}, priceRub, snapshot = {} }) {
   const priceKopecks = Math.round(Number(priceRub) * 100);
   if (!userId || !(priceKopecks > 0)) throw new Error('Invalid wallet purchase');
+  // ограничение «Покупки» из админки: 403 ACCOUNT_RESTRICTED до вставки заказа
+  await controls.assertAllowed(userId, 'purchases');
   const balance = await getBalanceKopecks(userId);
   if (balance < priceKopecks) return { ok: false, error: 'INSUFFICIENT', balanceKopecks: balance, missingKopecks: priceKopecks - balance };
   const inserted = await supabaseFetch('payment_orders', {

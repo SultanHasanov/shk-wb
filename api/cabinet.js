@@ -890,6 +890,8 @@ async function cronNotifications(req, res) {
     await supabaseFetch('rpc/app_sync_maintenance', { method: 'POST', body: '{}' }).catch(error => console.error(error.message));
     await require('../server/_archive-db').maintenance().catch(error => console.error('archive maintenance:', error.message));
     await require('../server/_app-messages').cleanup().catch(error => console.error('pc messages cleanup:', error.message));
+    // Админка: доставки старше 180 дней и журнал старше 730 дней.
+    await require('../server/_admin-audit').runMaintenance().catch(error => console.error('admin maintenance:', error.message));
     for (const license of licenses) {
       const prefs = await supabaseFetch(
         `user_preferences?user_id=eq.${encodeURIComponent(license.owner_user_id)}&select=notify_key_expiry&limit=1`,
@@ -1004,7 +1006,12 @@ async function handlePartner(req, res, user) {
 
 module.exports = async function handler(req, res) {
   if (action(req) === 'cron') return cronNotifications(req, res);
-  const user = await requireUser(req, res);
+  // Ограничение «Сайт и кабинет» (или «Полностью») — 403 ACCOUNT_RESTRICTED, не 401.
+  // Историю генераций читает и раздел «Стикеры» Помощника ПВЗ (X-App-Name / X-App-Version из stickers.rs):
+  // для него действует ограничение «Программа», а не «Сайт».
+  const programHistory = action(req) === 'history'
+    && Boolean(String(req.headers?.['x-app-name'] || req.headers?.['x-app-version'] || '').trim());
+  const user = await requireUser(req, res, { scope: programHistory ? 'app' : 'site' });
   if (!user) return;
   try {
     const a = action(req);
@@ -1114,6 +1121,7 @@ module.exports = async function handler(req, res) {
     if (a === 'withdraw' && req.method === 'POST') {
       const parsed = WithdrawalInput.safeParse(req.body);
       if (!parsed.success) return bad(res, parsed);
+      await require('../server/_user-controls').assertAllowed(user.id, 'withdrawals');
       const id = await supabaseFetch('rpc/create_referral_withdrawal', {
         method: 'POST',
         body: JSON.stringify({
@@ -1129,6 +1137,10 @@ module.exports = async function handler(req, res) {
     if (a === 'partner') return handlePartner(req, res, user);
     return res.status(404).json({ error: 'Метод кабинета не найден', code: 'NOT_FOUND' });
   } catch (error) {
+    if (error.code === 'ACCOUNT_RESTRICTED')
+      return res
+        .status(403)
+        .json({ error: error.message, code: error.code, ...(error.extra || {}) });
     const details = JSON.stringify(error.details || '');
     if (details.includes('belongs to another'))
       return res

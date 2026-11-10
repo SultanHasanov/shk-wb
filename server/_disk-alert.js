@@ -85,4 +85,4 @@ function startDiskAlert() {
   setInterval(run, CHECK_MS).unref();
 }
 
-module.exports = { check, startDiskAlert };
+module.exports = { STATE_FILE, check, startDiskAlert };

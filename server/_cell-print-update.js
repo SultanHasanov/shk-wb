@@ -54,4 +54,4 @@ function downloadResponse(res) {
   return fs.createReadStream(file).pipe(res);
 }
 
-module.exports = { updateResponse, downloadResponse };
+module.exports = { updateResponse, downloadResponse, readLatest };

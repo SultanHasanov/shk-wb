@@ -1,6 +1,7 @@
 const { supabaseFetch } = require('../server/_supabase');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { requireUser } = require('../server/_user-auth');
+const controls = require('../server/_user-controls');
 const { publicOrigin } = require('../server/_origin');
 const account = require('../server/_app-account');
 const cellPrintLink = require('../server/_cell-print-link');
@@ -35,7 +36,8 @@ const BOTH_FACTOR=1.8;
 function moscowMonthStart(){const now=new Date(Date.now()+3*3600000);return Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)-3*3600000;}
 function rpc(name,payload){return supabaseFetch(`rpc/${name}`,{method:'POST',body:JSON.stringify(payload)});}
 function accountError(res,error){
-  if(error.code&&error.status)return res.status(error.status).json({error:error.message,code:error.code});
+  // extra — например until у ACCOUNT_RESTRICTED (ограничение из админки)
+  if(error.code&&error.status)return res.status(error.status).json({error:error.message,code:error.code,...(error.extra||{})});
   console.error(error);return res.status(502).json({error:'Сервис временно недоступен'});
 }
 // Новые версии «Печати ячеек» присылают deviceHash при входе и refresh. Регистрируем
@@ -119,7 +121,8 @@ async function accountAction(action,req,res){
     return res.json(await account.sendPasswordReset(email,publicOrigin(req)));
   }
   if(action==='prices'&&req.method==='GET')return res.json({prices:CELL_PRINT_PRICES,bothFactor:BOTH_FACTOR});
-  const user=await requireUser(req,res);
+  // Ограничение «ПВЗ Принт» из админки → 403 ACCOUNT_RESTRICTED (не 401). Выход разрешён и при ограничении.
+  const user=await requireUser(req,res,{scope:action==='logout'?undefined:'cell_print'});
   if(!user)return;
   if(action==='trial'&&req.method==='POST'){
     if(!await enforceRateLimit(req,res,{scope:'cell-trial',limit:10,windowSeconds:3600,key:user.id}))return;
@@ -153,6 +156,7 @@ async function accountAction(action,req,res){
   // Оплата из программы: QR СБП (или ссылка ЮKassa для карты) — тот же заказ, что на сайте.
   if(action==='pay'&&req.method==='POST'){
     if(!await enforceRateLimit(req,res,{scope:'cell-pay',limit:20,windowSeconds:600,key:user.id}))return;
+    await controls.assertAllowed(user.id,'purchases');
     const renewal=body.renewalTargetKey?String(body.renewalTargetKey).trim().toUpperCase():'';
     req.query.action='create';
     req.body={
@@ -226,7 +230,7 @@ async function accountAction(action,req,res){
 // server/_cell-print-link.js; здесь только авторизация, лимит и маршрут по sub.
 async function accountLinkAction(req,res){
   const sub=String(req.query.sub||'');
-  const user=await requireUser(req,res);
+  const user=await requireUser(req,res,{scope:'cell_print'});
   if(!user)return;
   const body=req.body&&typeof req.body==='object'?req.body:{};
   if(sub==='link'&&req.method==='POST'){

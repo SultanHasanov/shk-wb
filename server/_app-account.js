@@ -16,6 +16,8 @@ const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 const { crackFallbackEnabled, codeViaBotEnabled } = require('./_app-flags');
 const { CLUB_DISCOUNT_PERCENT, clubUserDiscount } = require('./_club');
 const permissions = require('./_app-permissions');
+// Ограничения и безлимит из админки — снимок в памяти (без похода в базу на каждый запрос)
+const controls = require('./_user-controls');
 
 /**
  * Фактические даты подписки с учётом бесплатного периода. При его окончании подписки
@@ -40,13 +42,15 @@ function effectiveDates(ent, win) {
 
 const DEVICE_RE = /^[a-f0-9]{64}$/;
 
-// Аккаунты без лимитов и оплаты (владелец сервиса): APP_UNLIMITED_USER_IDS — UUID через запятую.
-// Всё открыто бессрочно, подборы не списываются, ПК и пунктов — сколько угодно.
+// Аккаунты без лимитов и оплаты (владелец сервиса): APP_UNLIMITED_USER_IDS — UUID через запятую,
+// или безлимит, выданный в админке (user_overrides, из снимка server/_user-controls.js).
+// Всё открыто, подборы не списываются, ПК и пунктов — сколько угодно.
 function isUnlimited(userId) {
   if (!userId) return false;
-  return String(process.env.APP_UNLIMITED_USER_IDS || '')
+  const env = String(process.env.APP_UNLIMITED_USER_IDS || '')
     .split(/[\s,]+/).filter(Boolean).map(s => s.toLowerCase())
     .includes(String(userId).toLowerCase());
+  return env || controls.isUnlimitedCached(userId);
 }
 
 // Фича «mirror» = есть хотя бы один зеркальный пункт (у безлимита — всегда).
@@ -72,15 +76,16 @@ async function entitlementsFor(userId, { cached = false } = {}) {
     loadEntitlements(userId, cached),
     appFreeMode(),
   ]);
-  const unlimited = isUnlimited(userId);
+  const unlimited = isUnlimited(userId) || ent.unlimited === true;
   const plan = isPlan(ent.plan) ? ent.plan : null;
   const addons = ent.addons && typeof ent.addons === 'object' ? ent.addons : {};
   const all = free || unlimited;
-  const mirror = mirrorLimit(plan, addons, unlimited);
+  const mirror = mirrorLimit(plan, addons, unlimited, ent.mirror_bonus);
   return {
     ent, free, unlimited, plan, addons, mirror,
-    features: withMirror(effectiveFeatures(plan, addons, all, ent.codes_limit), mirror),
-    limits: accountLimits(plan, addons, ent.device_limit, all, ent.device_bonus),
+    // в правило старого «Стандарта» — тарифный лимит кодов (codes_base), ручная квота без подписки — отдельно
+    features: withMirror(effectiveFeatures(plan, addons, all, ent.codes_base ?? ent.codes_limit, plan ? 0 : ent.codes_limit), mirror),
+    limits: accountLimits(plan, addons, ent.device_limit, all, ent.device_bonus, ent.points_bonus),
   };
 }
 const LOGIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -140,6 +145,8 @@ async function passwordLogin(email, password) {
     return await authRequest('token?grant_type=password', { body: { email, password } });
   } catch (error) {
     if (error.authCode === 'email_not_confirmed') throw appError(403, 'EMAIL_NOT_CONFIRMED', 'Подтвердите почту по ссылке из письма и попробуйте снова');
+    // GoTrue-бан ставит ограничение «Полностью» из админки — это не «неверный пароль»
+    if (error.authCode === 'user_banned') throw appError(403, 'ACCOUNT_RESTRICTED', 'Доступ к аккаунту ограничен администратором');
     if (error.status === 400 || error.status === 401) throw appError(401, 'BAD_CREDENTIALS', 'Неверная почта или пароль');
     throw error;
   }
@@ -497,7 +504,10 @@ async function accountSummary(user, currentHash) {
     clubUserDiscount(user.id).catch(() => false),
     codeViaBotEnabled().catch(() => false),
   ]);
-  const unlimited = isUnlimited(user.id);
+  const restriction = await controls.restrictionFor(user.id).catch(() => null);
+  // ограничение «Программа» (или «Полностью») из админки: разделы закрыты, тариф не показываем
+  const appBlocked = controls.covers(restriction, 'app');
+  const unlimited = isUnlimited(user.id) || ent.unlimited === true;
   const all = free || unlimited;
   const profile = profiles[0] || {};
   const tg = telegram[0] || null;
@@ -525,9 +535,14 @@ async function accountSummary(user, currentHash) {
     flags: { crackFallback: crackFallback === true, codeViaBot: codeViaBot === true && profile.app_code_via_bot_off !== true },
     // Скидка участника клуба на «Про», в процентах (0 — нет). Применяется только к тарифу pro.
     clubDiscountPercent: clubDiscount ? CLUB_DISCOUNT_PERCENT : 0,
-    ...(all ? { plan: 'pro' } : {}),
+    // Ограничение из админки (любая область): программа и кабинет показывают причину и срок.
+    restricted: restriction ? { scopes: [...restriction.scopes], message: restriction.message, until: restriction.until } : null,
+    ...(all && !appBlocked ? { plan: 'pro' } : {}),
     // Итоговые разделы программы: тариф + активные услуги (в бесплатном режиме — всё).
-    features: withMirror(effectiveFeatures(plan, rawAddons, all, ent.codes_limit), mirrorLimit(plan, rawAddons, unlimited)),
+    features: appBlocked ? [] : withMirror(
+      effectiveFeatures(plan, rawAddons, all, ent.codes_base ?? ent.codes_limit, plan ? 0 : ent.codes_limit),
+      mirrorLimit(plan, rawAddons, unlimited, ent.mirror_bonus),
+    ),
     // Услуги: куплена до endsAt; active = действует сейчас (на тарифе ниже нужного — false).
     addons: Object.values(ADDONS).map(a => {
       const endsAt = rawAddons[a.id]?.ends_at || null;
@@ -536,12 +551,12 @@ async function accountSummary(user, currentHash) {
         kind: a.kind || 'service',
         title: a.title,
         endsAt,
-        active: (all && a.kind !== 'pack') || Boolean(endsAt && addonAllowed(a.id, plan)),
+        active: !appBlocked && ((all && a.kind !== 'pack') || Boolean(endsAt && addonAllowed(a.id, plan))),
         needsPlan: !all && Boolean(endsAt) && !addonAllowed(a.id, plan) ? a.minPlan : null,
       };
     }),
-    // Без подписки, но с пакетами подбор кода всё равно работает — как «Базовый» без квоты.
-    effectivePlan: all ? 'pro' : plan || (packsLeft > 0 ? 'basic' : null),
+    // Без подписки, но с пакетами (или ручной квотой из админки) подбор кода всё равно работает — как «Базовый».
+    effectivePlan: appBlocked ? null : all ? 'pro' : plan || ((packsLeft > 0 || Number(ent.codes_limit) > 0) ? 'basic' : null),
     subscription: plan ? {
       plan,
       title: PLANS[plan].title,
@@ -552,7 +567,8 @@ async function accountSummary(user, currentHash) {
       // в бесплатный период: когда подписка фактически начнётся и до какого числа оплачена
       effective: free ? effectiveDates(ent, freeWin) : null,
     } : null,
-    quota: plan ? {
+    // ручная квота кодов без подписки (user_overrides) считается в окне календарного месяца по МСК
+    quota: plan || (ent.override?.codes_mode && ent.window_start) ? {
       windowStart: ent.window_start,
       resetAt: ent.window_end,
       codes: { used: Number(ent.codes_used || 0), limit: Number(ent.codes_limit || 0) },
@@ -561,10 +577,10 @@ async function accountSummary(user, currentHash) {
     packs: packs.map(row => ({ key: maskKey(row.key), total: row.usage_limit, left: Math.max(0, row.usage_limit - row.used), addedAt: row.created_at })),
     packsLeft,
     stickerPacksLeft: stickerCodes.reduce((sum, row) => sum + Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)), 0),
-    deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus).devices,
-    pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus).points,
-    // сколько пунктов можно загружать на другие ПК (пакеты «Загрузка с другого ПК»)
-    mirrorLimit: mirrorLimit(plan, rawAddons, unlimited),
+    deviceLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus, ent.points_bonus).devices,
+    pointLimit: accountLimits(plan, rawAddons, ent.device_limit, all, ent.device_bonus, ent.points_bonus).points,
+    // сколько пунктов можно загружать на другие ПК (пакеты «Загрузка с другого ПК» и надбавка из админки)
+    mirrorLimit: mirrorLimit(plan, rawAddons, unlimited, ent.mirror_bonus),
     devices,
     points: points.map(p => ({
       id: p.id,
@@ -608,6 +624,15 @@ async function leaseRights(req) {
       }
       throw error;
     }
+  }
+  // Ограничение «Программа» из админки: пустые права и причина — программа покажет её вместо разделов.
+  // Ни 401, ни DEVICE_REVOKED: ключ ПК и вход остаются, после снятия всё откроется само.
+  const restriction = await controls.restrictionFor(userId);
+  if (restriction && controls.covers(restriction, 'app')) {
+    return {
+      user: userId, plan: null, features: [], archive_until: null, free: false, denied: [], role: permissions.roleOf(device),
+      via: viaKey ? 'key' : 'session', restricted: { message: restriction.message, until: restriction.until },
+    };
   }
   await rememberDevicePoint(device, req.headers['x-point-wb']);
   const { free, unlimited, plan, addons, features } = await entitlementsFor(userId);
@@ -684,6 +709,8 @@ async function codeOnce(body) {
  */
 async function chargeClientCode(userId, deviceId, { requestId, sid, qrText, meta }) {
   if (!UUID_RE.test(String(requestId || ''))) throw appError(400, 'VALIDATION_ERROR', 'Некорректный идентификатор запроса кода');
+  // зовут и бот, и подтверждения владельца — проверка ограничения здесь, а не только в HTTP
+  await controls.assertAllowed(userId, 'app');
   if (isUnlimited(userId) || await appFreeMode()) {
     return { qrText, billing: { via: 'account', ok: true, free: true }, replayed: false };
   }
@@ -696,6 +723,7 @@ async function billClientCode(req, { key, meta, requestId, sid, qrText }) {
   }
   const user = await optionalUser(req).catch(() => null);
   if (user) {
+    await controls.assertAllowed(user.id, 'app');
     const device = await requireDevice(req, user.id);
     return chargeClientCode(user.id, device.id, { requestId, sid, qrText, meta });
   }
@@ -710,6 +738,7 @@ async function billClientCode(req, { key, meta, requestId, sid, qrText }) {
 async function billCode(req, { key, meta } = {}) {
   const user = await optionalUser(req).catch(() => null);
   if (user) {
+    await controls.assertAllowed(user.id, 'app');
     const device = await requireDevice(req, user.id);
     const result = await consumeCode(user.id, device.id, meta || {});
     return { via: 'account', ...result };
@@ -998,6 +1027,7 @@ module.exports = {
   renameDevice,
   revokeDevice,
   sessionPayload,
+  sessionForUser,
   startBrowserLogin,
   usageHistory,
   loginRequest,

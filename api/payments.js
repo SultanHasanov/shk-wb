@@ -19,6 +19,7 @@ const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubUserDiscount } = require('
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { optionalUser, readReferralCookieDetails } = require('../server/_user-auth');
+const controls = require('../server/_user-controls');
 const { publicOrigin } = require('../server/_origin');
 const { MAIN, normalizeShop, siteForRequest } = require('../server/_sites');
 const appUpdate = require('../server/_app-update');
@@ -128,6 +129,8 @@ module.exports = async function handler(req, res) {
       // req.internalUser ставит только код в этом же процессе (бот создаёт пополнение за пользователя,
       // server/_bot-checkout.js); у HTTP-запроса такого поля быть не может.
       const user = req.internalUser || await optionalUser(req);
+      // ограничение «Покупки» из админки — 403 ACCOUNT_RESTRICTED до создания заказа (ловится в общем catch)
+      if (user) await controls.assertAllowed(user.id, 'purchases');
       await maybeBindReferral(req, user);
       const requestedKind = String(req.body?.productKind || '');
       // Отдельный сайт продаёт только ключи «Печати ячеек». Остальное оформляется на основном.
@@ -790,6 +793,7 @@ module.exports = async function handler(req, res) {
     }
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (error) {
+    if (error.code === 'ACCOUNT_RESTRICTED') return res.status(403).json({ error: error.message, code: error.code, ...(error.extra || {}) });
     console.error(error.message, error.details || '');
     // Код успели отключить или отвязать между созданием заказа и оплатой: без этой
     // ветки человек видит голый 502 и не понимает, что чинить.

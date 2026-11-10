@@ -84,6 +84,15 @@ async function workOnline(points = [{ wb: '900001', name: 'ПВЗ', live: true, 
 }
 
 describe('загрузка с другого ПК', () => {
+  it('onlineCount считает ПК в сети по всем аккаунтам (админка «Требует внимания»)', async () => {
+    mockSupabase();
+    expect((relay as unknown as { onlineCount: (now?: number) => number }).onlineCount()).toBe(0);
+    await workOnline();
+    const count = (relay as unknown as { onlineCount: (now?: number) => number }).onlineCount;
+    expect(count()).toBe(1);
+    expect(count(Date.now() + 71_000)).toBe(0);
+  });
+
   it('видно рабочий ПК и его пункты, себя в списке нет', async () => {
     mockSupabase();
     await workOnline();

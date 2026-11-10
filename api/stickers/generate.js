@@ -7,6 +7,15 @@ const { generateStickers } = require('../../server/_sticker-generation');
 const { BATCH_QUANTITY, finalizeGeneration, refundGeneration, reserveGeneration } = require('../../server/_generation-billing');
 const { guardAttempts, recordFailures, recordFailure, allowAttempt, subnetOf } = require('../../server/_attempt-guard');
 const { sendToAdmins } = require('../../server/_admin-alerts');
+const controls = require('../../server/_user-controls');
+
+// Область ограничения из админки: запрос программы (X-App-Name / X-App-Version — их шлёт stickers.rs
+// «Помощника ПВЗ») проверяется по «Программе», запрос сайта — по «Сайту и кабинету».
+function restrictionScope(req) {
+  const name = String(req.headers?.['x-app-name'] || '').trim();
+  if (name === 'cell-print') return 'cell_print';
+  return name || String(req.headers?.['x-app-version'] || '').trim() ? 'app' : 'site';
+}
 
 // Всплеск перебора гостевых кодов: уведомляем админа не чаще раза в час на подсеть.
 async function alertGuestBruteforce(req, subnet) {
@@ -22,6 +31,11 @@ module.exports = async function handler(req, res) {
   if (!await enforceRateLimit(req, res, { scope: 'sticker-generation', limit: 60, windowSeconds: 60 })) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const user = await optionalUser(req);
+  // ограничение из админки («Сайт» для сайта, «Программа» для Помощника): 403 ACCOUNT_RESTRICTED, не 401
+  if (user) {
+    const restriction = await controls.restrictionFor(user.id);
+    if (controls.covers(restriction, restrictionScope(req))) return res.status(403).json(controls.restrictedBody(restriction));
+  }
   let charge = null;
   let guestFailureDims = null;
   try {
@@ -87,7 +101,7 @@ module.exports = async function handler(req, res) {
     if (charge?.chargeId) await refundGeneration(charge.chargeId).catch(() => {});
     // Неверный гостевой код — засчитываем попытку (прочие ошибки лимит не трогают).
     if (guestFailureDims && error.code === 'INVALID_ACCESS_CODE') await recordFailures(req, guestFailureDims).catch(() => {});
-    if (error.code) return res.status(error.status || 400).json({ error: error.message, code: error.code });
+    if (error.code) return res.status(error.status || 400).json({ error: error.message, code: error.code, ...(error.extra || {}) });
     const host = String(req.headers?.host || '');
     if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) return res.status(502).json({ error: 'Database request failed', details: error.details || error.message });
     return sendApiError(res, error);

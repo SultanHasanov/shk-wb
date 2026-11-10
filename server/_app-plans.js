@@ -174,14 +174,17 @@ function addonSnapshot(addon, months) {
 
 /**
  * Итоговый список фич: тариф + активные услуги. Бесплатный режим = Про со всеми услугами.
- * addons — { archive: { ends_at } } из app_entitlements; codesLimit — снимок лимита кодов подписки.
+ * addons — { archive: { ends_at } } из app_entitlements; codesLimit — ТАРИФНЫЙ снимок лимита кодов подписки
+ * (`codes_base`, без ручной прибавки из админки: иначе «+200 подборов» на новом «Стандарте» открыло бы старые разделы).
+ * manualCodes — ручная квота кодов без подписки (user_overrides): открывает раздел «Код клиента».
  */
-function effectiveFeatures(plan, addons, free, codesLimit = 0) {
+function effectiveFeatures(plan, addons, free, codesLimit = 0, manualCodes = 0) {
   // зеркало в бесплатный режим не входит — только купленное (место в облаке)
   const mirror = mirrorLimit(plan, addons, false) > 0 ? ['mirror'] : [];
   if (free) return [...new Set([...PRO_FEATURES.filter(f => f !== 'mirror'), ...Object.values(ADDONS).flatMap(a => a.features).filter(f => f !== 'mirror'), ...mirror])];
   // 'code' открыт на любом тарифе: подбор всё равно списывается из месячного лимита или пакетов.
   const base = isPlan(plan) ? [...PLANS[plan].features, ...BASIC_FEATURES] : [];
+  if (!isPlan(plan) && Number(manualCodes) > 0) base.push(...BASIC_FEATURES);
   if (plan === 'standard' && Number(codesLimit) > 0) base.push(...LEGACY_STANDARD_EXTRA);
   for (const [id, info] of Object.entries(addons || {})) {
     if (addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) base.push(...ADDONS[id].features);
@@ -195,11 +198,17 @@ function effectiveFeatures(plan, addons, free, codesLimit = 0) {
  * deviceBonus — постоянная надбавка ПК аккаунту (app_device_bonuses, выдаёт админ):
  * держится при любом продлении и смене тарифа, без подписки тоже прибавляется.
  */
-function accountLimits(plan, addons, subDeviceLimit, unlimited, deviceBonus = 0) {
+function clampBonus(value) {
+  return Math.max(0, Math.min(20, Math.trunc(Number(value) || 0)));
+}
+
+// pointsBonus — ручная надбавка пунктов из админки (user_overrides.points_bonus), как deviceBonus.
+function accountLimits(plan, addons, subDeviceLimit, unlimited, deviceBonus = 0, pointsBonus = 0) {
   if (unlimited) return { devices: 99, points: 99 };
   let devices = isPlan(plan) ? Math.max(Number(subDeviceLimit) || 0, PLANS[plan].devices) : 1;
-  devices += Math.max(0, Math.min(20, Math.trunc(Number(deviceBonus) || 0)));
+  devices += clampBonus(deviceBonus);
   let points = isPlan(plan) ? PLANS[plan].points : 1;
+  points += clampBonus(pointsBonus);
   for (const [id, info] of Object.entries(addons || {})) {
     const a = ADDONS[id];
     if (a?.kind === 'pack' && info && Date.parse(info.ends_at) > Date.now()) {
@@ -212,10 +221,12 @@ function accountLimits(plan, addons, subDeviceLimit, unlimited, deviceBonus = 0)
 
 // Сколько пунктов аккаунта зеркалируется: действующие пакеты mirror_* на тарифе не ниже minPlan.
 // Бесплатный режим не даёт зеркала; безлимит — все пункты.
-function mirrorLimit(plan, addons, unlimited) {
+// mirrorBonus — ручная надбавка из админки: выдана явно, поэтому тариф не проверяется.
+function mirrorLimit(plan, addons, unlimited, mirrorBonus = 0) {
   if (unlimited) return 99;
   // «Про» — свои пункты без доплаты; пакеты mirror_* добавляются сверху (например, с пакетом «+1 пункт»)
   let n = isPlan(plan) ? Number(PLANS[plan].mirror || 0) : 0;
+  n += clampBonus(mirrorBonus);
   for (const [id, info] of Object.entries(addons || {})) {
     const a = ADDONS[id];
     if (a?.mirror && addonAllowed(id, plan) && info && Date.parse(info.ends_at) > Date.now()) n += a.mirror;

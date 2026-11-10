@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { supabaseFetch } = require('./_supabase');
+const { sendApiError, supabaseFetch } = require('./_supabase');
 const { createAccessCode } = require('./_access-code');
 
 /**
@@ -254,33 +254,207 @@ async function checkProgramPromoPatch(id, body) {
   return {};
 }
 
-/** Отпечаток админа для журнала: тот же приём, что в _admin-cabinet.js. */
+/**
+ * Отпечаток админа для журнала: тот же приём, что в _admin-cabinet.js.
+ * Без запроса (таймер снятия ограничений, обслуживание) — 'system'.
+ */
 function adminFingerprint(req) {
+  if (req == null) return 'system';
   return crypto.createHash('sha256')
-    .update(String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'admin'))
+    .update(String(req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'admin'))
     .digest('hex').slice(0, 24);
 }
 
-/** Журнал ручных операций. Сбой записи не должен отменять уже выданный ключ. */
-async function recordAdminAction(req, action, targetUserId, payload = {}) {
+/** Ошибка с кодом для ответа админке: { error, code, ...extra }. */
+function adminError(status, code, message, extra = undefined) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  if (extra) error.extra = extra;
+  return error;
+}
+
+/**
+ * Известная ошибка (4xx с кодом) уходит как есть, всё остальное — общий 502 без подробностей.
+ * Ошибки PostgREST тоже несут status (409 и т. п.), но без code — их наружу не показываем.
+ */
+function sendAdminError(res, error) {
+  const status = Number(error?.status);
+  if (status >= 400 && status <= 499 && error.code) {
+    return res.status(status).json({ error: error.message, code: error.code, ...(error.extra || {}) });
+  }
+  return sendApiError(res, error);
+}
+
+function userAgentOf(req) {
+  return String(req?.headers?.['user-agent'] || '').slice(0, 300) || null;
+}
+
+function cleanReason(reason) {
+  const text = String(reason ?? '').trim();
+  return text ? text.slice(0, 500) : null;
+}
+
+/**
+ * Журнал ручных операций. Сбой записи не должен отменять уже выданный ключ — функция никогда не бросает.
+ * options: { before, after, reason, result, idempotencyKey, response, returnRow }.
+ * Старые вызовы с четырьмя аргументами пишут ту же строку, что и раньше (плюс user_agent).
+ */
+async function recordAdminAction(req, action, targetUserId, payload = {}, options = {}) {
+  const opts = options || {};
+  const row = {
+    action,
+    target_user_id: isUuid(targetUserId) ? targetUserId : null,
+    payload: payload || {},
+    admin_fingerprint: adminFingerprint(req),
+    user_agent: userAgentOf(req),
+  };
+  if (opts.reason !== undefined) row.reason = cleanReason(opts.reason);
+  if (opts.before !== undefined) row.before = opts.before;
+  if (opts.after !== undefined) row.after = opts.after;
+  if (opts.result !== undefined) row.result = opts.result;
+  if (opts.idempotencyKey) row.idempotency_key = String(opts.idempotencyKey).slice(0, 200);
+  if (opts.response !== undefined) row.response = opts.response;
   try {
-    await supabaseFetch('admin_actions', {
+    const rows = await supabaseFetch('admin_actions', {
       method: 'POST',
-      body: JSON.stringify({
-        action,
-        target_user_id: isUuid(targetUserId) ? targetUserId : null,
-        payload,
-        admin_fingerprint: adminFingerprint(req),
-      }),
+      ...(opts.returnRow ? { headers: { Prefer: 'return=representation' } } : {}),
+      body: JSON.stringify(row),
     });
+    if (!opts.returnRow) return null;
+    const id = Array.isArray(rows) ? rows[0]?.id : rows?.id;
+    return id != null ? { id } : null;
   } catch (error) {
     console.error('admin_actions write failed', error.message);
+    return null;
   }
 }
 
+// --- Ключ повтора (idempotency) -------------------------------------------------------------------
+// Клиент создаёт ключ при открытии окна. Строка журнала с этим ключом — и замок, и сохранённый ответ:
+// вставка проходит один раз (уникальный индекс), повтор получает тот же ответ, параллельный — 409.
+
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{8,80}$/;
+/** Сколько считать «ещё выполняется» строку pending; старше — запрос, видимо, упал вместе с процессом. */
+const PENDING_TTL_MS = 120_000;
+
+function validIdempotencyKey(key) {
+  return IDEMPOTENCY_KEY.test(String(key ?? ''));
+}
+
+/** Перехватить строку (после ошибки или зависшую): pending + свежее время, чтобы следующий повтор видел «идёт». */
+async function reclaim(id, filter) {
+  const rows = await supabaseFetch(`admin_actions?id=eq.${encodeURIComponent(id)}&${filter}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ result: 'pending', response: null, created_at: new Date().toISOString() }),
+  });
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+/**
+ * → { state: 'new', id } | { state: 'done', id, status, response } | { state: 'busy', id }
+ * Невалидный ключ — 400 до любого запроса к базе.
+ */
+async function beginIdempotent(req, { action, key, userId = null, payload = {}, reason = undefined }) {
+  if (!validIdempotencyKey(key)) throw adminError(400, 'VALIDATION_ERROR', 'Нет ключа повтора — обновите страницу');
+  const fullKey = `${action}:${key}`;
+  const row = {
+    action,
+    target_user_id: isUuid(userId) ? userId : null,
+    payload: payload || {},
+    admin_fingerprint: adminFingerprint(req),
+    user_agent: userAgentOf(req),
+    idempotency_key: fullKey,
+    result: 'pending',
+  };
+  if (reason !== undefined) row.reason = cleanReason(reason);
+  try {
+    const rows = await supabaseFetch('admin_actions', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify(row),
+    });
+    const id = Array.isArray(rows) ? rows[0]?.id : rows?.id;
+    return { state: 'new', id: id ?? null };
+  } catch (error) {
+    if (error.status !== 409) throw error;
+  }
+  const found = await supabaseFetch(`admin_actions?idempotency_key=eq.${encodeURIComponent(fullKey)}&select=id,result,response,created_at&limit=1`);
+  const existing = Array.isArray(found) ? found[0] : null;
+  if (!existing) throw new Error('Idempotency row vanished after conflict');
+  const { id } = existing;
+  // result null — строка записана recordAdminAction с ключом, но без итога: считаем выполненной (повтор не дублирует)
+  if (existing.result === 'ok' || existing.result === 'partial' || existing.result == null) {
+    const response = existing.response && typeof existing.response === 'object' ? existing.response : {};
+    return { state: 'done', id, status: Number(response.__status) || 200, response };
+  }
+  if (existing.result === 'error') {
+    return (await reclaim(id, 'result=eq.error')) ? { state: 'new', id } : { state: 'busy', id };
+  }
+  const startedAt = Date.parse(existing.created_at);
+  if (Number.isFinite(startedAt) && Date.now() - startedAt < PENDING_TTL_MS) return { state: 'busy', id };
+  const cutoff = new Date(Date.now() - PENDING_TTL_MS).toISOString();
+  return (await reclaim(id, `result=eq.pending&created_at=lt.${encodeURIComponent(cutoff)}`)) ? { state: 'new', id } : { state: 'busy', id };
+}
+
+/** Закрыть строку журнала: итог, сохранённый ответ ({...response, __status}), было/стало. Не бросает. */
+async function finishIdempotent(id, { result = 'ok', status = 200, response = null, before, after, reason, payload, targetUserId } = {}) {
+  if (id == null) return;
+  const patch = { result, response: { ...(response && typeof response === 'object' ? response : {}), __status: status } };
+  if (before !== undefined) patch.before = before;
+  if (after !== undefined) patch.after = after;
+  if (reason !== undefined) patch.reason = cleanReason(reason);
+  if (payload !== undefined) patch.payload = payload || {};
+  if (targetUserId !== undefined) patch.target_user_id = isUuid(targetUserId) ? targetUserId : null;
+  try {
+    await supabaseFetch(`admin_actions?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  } catch (error) {
+    console.error('admin_actions finish failed', error.message);
+  }
+}
+
+/**
+ * Обёртка действия с ключом повтора. work({ actionId }) → { status, body, before?, after?, reason?, payload?, result? }.
+ * Повтор после успеха — тот же ответ с replayed:true; параллельный — 409 IN_PROGRESS; исключение — строка
+ * помечается error (повтор с тем же ключом выполнит работу заново) и уходит через sendAdminError.
+ */
+async function runIdempotent(req, res, { action, key, userId = null, payload = {}, reason = undefined }, work) {
+  let begun;
+  try {
+    begun = await beginIdempotent(req, { action, key, userId, payload, reason });
+  } catch (error) {
+    return sendAdminError(res, error);
+  }
+  if (begun.state === 'busy') return res.status(409).json({ error: 'Запрос уже выполняется', code: 'IN_PROGRESS' });
+  if (begun.state === 'done') {
+    const { __status, ...stored } = begun.response || {};
+    return res.status(begun.status).json({ ...stored, replayed: true });
+  }
+  let out;
+  try {
+    out = (await work({ actionId: begun.id })) || {};
+  } catch (error) {
+    const known = Number(error?.status) >= 400 && Number(error?.status) <= 499 && error.code;
+    await finishIdempotent(begun.id, {
+      result: 'error',
+      status: known ? Number(error.status) : 502,
+      response: { error: known ? error.message : 'Database request failed', ...(known && error.code ? { code: error.code } : {}) },
+    });
+    return sendAdminError(res, error);
+  }
+  const status = Number(out.status) || 200;
+  const body = out.body ?? {};
+  await finishIdempotent(begun.id, {
+    result: out.result || 'ok', status, response: body,
+    before: out.before, after: out.after, reason: out.reason, payload: out.payload,
+  });
+  return res.status(status).json(body);
+}
+
 module.exports = {
-  CELL_DEVICE_LIMITS, CELL_DURATIONS, CELL_MAX_DAYS, RESOURCES,
-  addStickerGenerations, adminFingerprint, checkCellLicensePatch, checkProgramPromoPatch,
-  checkStickerAccessPatch, createCellLicense, createProgramKey, createStickerAccessCode,
-  isUuid, recordAdminAction, validateProgramPromo, validateStickerAccess,
+  CELL_DEVICE_LIMITS, CELL_DURATIONS, CELL_MAX_DAYS, IDEMPOTENCY_KEY, PENDING_TTL_MS, RESOURCES,
+  addStickerGenerations, adminError, adminFingerprint, beginIdempotent, checkCellLicensePatch, checkProgramPromoPatch,
+  checkStickerAccessPatch, createCellLicense, createProgramKey, createStickerAccessCode, finishIdempotent,
+  isUuid, recordAdminAction, runIdempotent, sendAdminError, validIdempotencyKey, validateProgramPromo, validateStickerAccess,
 };
