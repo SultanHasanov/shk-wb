@@ -320,6 +320,9 @@ async function linkTelegram(req, res, { userId }) {
       },
       after: { telegramUserId, linkedTo: userId, rpc: rpcResult || {}, delivered },
       reason: reason.value,
+      // строка журнала могла остаться от прошлой неудачной попытки с этим ключом — пишем то, что сделано сейчас
+      payload: { telegramUserId, expected, confirmMove },
+      targetUserId: userId,
     };
   });
 }

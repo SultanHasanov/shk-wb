@@ -515,6 +515,18 @@ function sendLinkSupport(chatId, from, state) {
 // Отказы перепривязки, которые решает только поддержка (supabase/migrations/20261120_account_merge_full.sql).
 const LINK_REFUSAL = /TELEGRAM_ACCOUNT_NOT_EMPTY|TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT|SOURCE_ACCOUNT_NOT_TECHNICAL|TARGET_ACCOUNT_|MERGE_/;
 
+// Вернуть снятую связку прежнего Telegram. Обычная вставка без слияния: если RPC на самом деле прошёл
+// (оборвался только ответ), у аккаунта уже новая связка — первичный ключ user_id не даст её затереть.
+async function restorePreviousIdentity(row) {
+  try {
+    await supabaseFetch('user_telegram_identities', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(row) });
+  } catch (error) {
+    console.warn('Link from app: previous Telegram not restored', error.message);
+  }
+  userCache.forgetSiteUser(row.user_id);
+  userCache.forgetTelegramUser(row.telegram_user_id);
+}
+
 async function completeLink(from, chatId, tokenRow) {
   const existing = await findIdentity(from.id);
   if (existing && existing.user_id !== tokenRow.user_id) {
@@ -526,11 +538,16 @@ async function completeLink(from, chatId, tokenRow) {
     // RPC требует у аккаунта программы подтверждённую почту — проверяем до того, как снимать его прежний Telegram.
     const target = await authUser(tokenRow.user_id);
     if (!target?.email_confirmed_at || /@users[.]invalid$/i.test(String(target.email || ''))) return sendLinkSupport(chatId, from, 'other');
-    await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(tokenRow.user_id)}&telegram_user_id=neq.${encodeURIComponent(from.id)}`, { method: 'DELETE' });
+    // RPC откажет, если у цели уже есть другой Telegram, поэтому прежний снимаем заранее — но запоминаем,
+    // чтобы вернуть при отказе или сбое: иначе аккаунт программы останется вовсе без Telegram.
+    const previousFilter = `user_telegram_identities?user_id=eq.${encodeURIComponent(tokenRow.user_id)}&telegram_user_id=neq.${encodeURIComponent(from.id)}`;
+    const previous = (await supabaseFetch(`${previousFilter}&select=*&limit=1`))?.[0] || null;
+    await supabaseFetch(previousFilter, { method: 'DELETE' });
     userCache.forgetSiteUser(tokenRow.user_id);
     try {
       await relinkIdentity(tokenRow.user_id, from);
     } catch (error) {
+      if (previous) await restorePreviousIdentity(previous);
       if (!LINK_REFUSAL.test(String(error?.message || ''))) throw error;
       console.warn('Link from app refused', error.message);
       return sendLinkSupport(chatId, from, 'other');

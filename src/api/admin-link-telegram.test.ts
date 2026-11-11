@@ -239,6 +239,8 @@ describe('связка', () => {
     expect(begin).toMatchObject({ action: 'linkTelegram', target_user_id: SITE, idempotency_key: `linkTelegram:${KEY}`, reason: 'просьба в поддержку' });
     const finish = journalFinish();
     expect(finish).toMatchObject({ result: 'ok' });
+    // строку могла забрать попытка после ошибки — итог переписывает, что сделано на самом деле
+    expect(finish).toMatchObject({ target_user_id: SITE, payload: { telegramUserId: TG, expected: 'relink', confirmMove: false } });
     expect(finish.before).toMatchObject({ outcome: 'relink', source: { userId: BOT } });
     expect(finish.after).toMatchObject({ telegramUserId: TG, linkedTo: SITE, rpc: { sourceUserId: BOT, deleteSource: true } });
   });

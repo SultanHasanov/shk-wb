@@ -11,7 +11,7 @@ import {
 } from '../../../../api/admin-controls';
 import { formatDateMsk, rub } from '../../../../lib/admin-controls';
 import { Alert, Badge, Button, Checkbox, Field, Input, Modal, Textarea, useToast } from '../../../../ui';
-import { REASON_MAX, errorText, useConfirmAction, useIdempotencyKey } from '../../kit';
+import { REASON_MAX, errorText, newIdempotencyKey, useConfirmAction } from '../../kit';
 import { modalSubtitle } from '../shared';
 import u from '../user.module.css';
 
@@ -96,7 +96,9 @@ export function LinkTelegramModal({
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [confirmMove, setConfirmMove] = useState(false);
-  const key = useIdempotencyKey(open);
+  // Ключ повтора — на каждый предпросмотр: повтор той же отправки (обрыв сети) безопасен, а другая пара
+  // аккаунтов после новой проверки не получит сохранённый ответ прошлой и не перехватит её строку журнала.
+  const [key, setKey] = useState(newIdempotencyKey);
   const { pending, error, run, guardedOpenChange } = useConfirmAction(open, onOpenChange);
   const link = useLinkTelegram();
   const toast = useToast();
@@ -120,6 +122,7 @@ export function LinkTelegramModal({
     setLookupError(null);
     setPreview(null);
     setConfirmMove(false);
+    setKey(newIdempotencyKey());
     try {
       setPreview(await fetchLinkTelegramPreview(detail.userId, value));
     } catch (err) {

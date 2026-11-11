@@ -415,7 +415,8 @@ async function finishIdempotent(id, { result = 'ok', status = 200, response = nu
 }
 
 /**
- * Обёртка действия с ключом повтора. work({ actionId }) → { status, body, before?, after?, reason?, payload?, result? }.
+ * Обёртка действия с ключом повтора. work({ actionId }) → { status, body, before?, after?, reason?, payload?, targetUserId?, result? }.
+ * payload/targetUserId из work перезаписывают строку журнала — нужно, когда строку забрал повтор после ошибки.
  * Повтор после успеха — тот же ответ с replayed:true; параллельный — 409 IN_PROGRESS; исключение — строка
  * помечается error (повтор с тем же ключом выполнит работу заново) и уходит через sendAdminError.
  */
@@ -447,7 +448,7 @@ async function runIdempotent(req, res, { action, key, userId = null, payload = {
   const body = out.body ?? {};
   await finishIdempotent(begun.id, {
     result: out.result || 'ok', status, response: body,
-    before: out.before, after: out.after, reason: out.reason, payload: out.payload,
+    before: out.before, after: out.after, reason: out.reason, payload: out.payload, targetUserId: out.targetUserId,
   });
   return res.status(status).json(body);
 }

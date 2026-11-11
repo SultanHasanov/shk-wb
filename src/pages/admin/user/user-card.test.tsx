@@ -15,6 +15,7 @@ let calls: Call[] = [];
 let detail: AdminUserDetail;
 let targets: AdminMessageTargets;
 let linkPreview: unknown;
+let linkReply: { data: unknown; status: number } | null = null;
 
 function json(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }));
@@ -43,6 +44,7 @@ beforeEach(() => {
       if (url.includes('action=detail')) return json(detail);
       if (url.includes('action=messageTargets')) return json(targets);
       if (url.includes('action=linkTelegramPreview')) return json(linkPreview);
+      if (url.includes('action=linkTelegram') && linkReply) return json(linkReply.data, linkReply.status);
       if (url.includes('action=linkTelegram')) {
         return json({ ok: true, outcome: 'merge', telegramUserId: 716976910, sourceUserId: 'b0b', sourceDeleted: true, moved: { walletKopecks: 0, subscriptions: 0, devices: 0 }, delivered: true });
       }
@@ -312,6 +314,7 @@ describe('«Связать с Telegram» (только поддержка)', () 
   });
 
   beforeEach(() => {
+    linkReply = null;
     detail = makeDetail({
       loginMethods: { email: { address: 'anna.s@example.ru', confirmed: true, technical: false }, telegram: null, oauth: [] },
     });
@@ -347,6 +350,31 @@ describe('«Связать с Telegram» (только поддержка)', () 
       userId: USER_ID, telegramUserId: 716976910, expected: 'merge', reason: 'написала в поддержку',
     });
     expect((posted('linkTelegram')[0].body as Record<string, unknown>).idempotencyKey).toMatch(/^[A-Za-z0-9_-]{8,80}$/);
+  });
+
+  it('ключ повтора: тот же предпросмотр — тот же ключ, новая проверка — новый', async () => {
+    linkReply = { data: { error: 'Один и тот же пункт WB подключён в обоих аккаунтах', code: 'MERGE_POINT_CONFLICT' }, status: 409 };
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(await screen.findByRole('button', { name: 'Привязать Telegram' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязать Telegram' });
+    await user.type(within(dialog).getByLabelText('Telegram ID или @ник'), '716976910');
+    await user.click(within(dialog).getByRole('button', { name: 'Проверить' }));
+    await user.type(await within(dialog).findByLabelText('Причина для журнала *'), 'поддержка');
+    const submit = within(dialog).getByRole('button', { name: 'Объединить аккаунты' });
+    await user.click(submit);
+    await waitFor(() => expect(posted('linkTelegram')).toHaveLength(1));
+    expect(await within(dialog).findByText(/пункт WB подключён в обоих/)).toBeInTheDocument();
+    await user.click(submit);
+    await waitFor(() => expect(posted('linkTelegram')).toHaveLength(2));
+    const keyOf = (i: number) => (posted('linkTelegram')[i].body as Record<string, unknown>).idempotencyKey;
+    expect(keyOf(1)).toBe(keyOf(0));
+
+    await user.click(within(dialog).getByRole('button', { name: 'Проверить' }));
+    await user.type(await within(dialog).findByLabelText('Причина для журнала *'), 'поддержка');
+    await user.click(within(dialog).getByRole('button', { name: 'Объединить аккаунты' }));
+    await waitFor(() => expect(posted('linkTelegram')).toHaveLength(3));
+    expect(keyOf(2)).not.toBe(keyOf(0));
   });
 
   it('отказ из предпросмотра — кнопка выключена, причина не спрашивается', async () => {
