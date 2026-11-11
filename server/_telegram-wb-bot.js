@@ -272,6 +272,9 @@ function newUserSource(text) {
   const referral = REFERRAL_PAYLOAD.exec(payload);
   if (referral) return { source: `по приглашению (код ${referral[1].toUpperCase()})`, referralCode: referral[1].toUpperCase() };
   if (/^club_/.test(payload)) return { source: 'из «Клуба вопросов»' };
+  // Одноразовые токены привязки и входа в уведомление админу не отдаём: по ним можно войти чужим профилем.
+  if (/^link_/i.test(payload)) return { source: 'по ссылке привязки из программы (link_…)' };
+  if (/^login_/i.test(payload)) return { source: 'по ссылке входа в программу (login_…)' };
   if (payload) return { source: `по ссылке со start=${payload}` };
   if (/^\/start\b/i.test(String(text || '').trim())) return { source: 'сам, через /start' };
   return { source: text ? 'сразу написал сообщение' : 'нажал кнопку или прислал фото' };
@@ -595,6 +598,119 @@ async function handleLinkConfirm(from, chatId, messageId, callbackId, answer, to
   if (!tokenRow) return showScreen(chatId, messageId, 'Ссылка устарела — получите новую в программе.', { reply_markup: choiceKeyboard([MENU_ROW]) });
   await deleteMessage(chatId, messageId).catch(() => {});
   return completeLink(from, chatId, tokenRow);
+}
+
+// ── Вход в «Помощник ПВЗ» и «ПВЗ Принт» подтверждением в боте: /start login_<КОД> ──
+// Программа получает код (login-start, 8 символов, живёт 10 минут) и открывает страницу /app-login, где есть
+// кнопка и QR со ссылкой сюда. Подтверждение — только кнопкой: чужая ссылка не должна входить сама.
+// Дальше всё как при подтверждении на сайте: программа забирает сессию через login-poll.
+
+const LOGIN_PAYLOAD = /^login_([A-Za-z0-9]{8})$/;
+const LOGIN_ATTEMPTS_PER_HOUR = 10;
+const LOGIN_STALE_TEXT = 'Код входа устарел. Начните вход в программе ещё раз.';
+const LOGIN_USED_TEXT = 'Этот код входа уже использован. Если вы не входили в программу — напишите в поддержку.';
+
+function loginCodeLabel(code) { return `${code.slice(0, 4)}-${code.slice(4)}`; }
+
+function supportKeyboard() {
+  return choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]);
+}
+
+// Запрос входа или null, если кода нет или он просрочен (остальные сбои — наверх, в общий ответ о сбое).
+async function loadLoginRequest(code) {
+  if (!code) return null;
+  try {
+    return await account.loginRequest(code);
+  } catch (error) {
+    if (error.code === 'NOT_FOUND' || error.code === 'EXPIRED') return null;
+    throw error;
+  }
+}
+
+function minutesAgoText(iso) {
+  const minutes = Math.floor((Date.now() - Date.parse(iso || '')) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return 'только что';
+  return `${minutes} мин назад`;
+}
+
+function loginRestrictedText(program, restriction) {
+  return `Вход в «${program.name}» для вашего профиля закрыт. ${escapeHtml(restriction.message)}`;
+}
+
+async function handleLoginStart(from, chatId, rawCode) {
+  if (!await consumeHourlyAttempt('bot-app-login', `bot-login:${from.id}`, LOGIN_ATTEMPTS_PER_HOUR)) {
+    return sendMessage(chatId, 'Слишком много попыток входа. Попробуйте через час.', { reply_markup: MENU_KEYBOARD });
+  }
+  const code = account.normalizeLoginCode(rawCode);
+  const row = await loadLoginRequest(code);
+  if (!row) return sendMessage(chatId, LOGIN_STALE_TEXT, { reply_markup: MENU_KEYBOARD });
+  if (row.status !== 'pending') return sendMessage(chatId, LOGIN_USED_TEXT, { reply_markup: supportKeyboard() });
+  const userId = await ensureUser(from);
+  const program = account.loginProgram(row);
+  const restriction = await account.loginRestriction(userId, row);
+  if (restriction) return sendMessage(chatId, loginRestrictedText(program, restriction), { reply_markup: supportKeyboard() });
+  const losing = program.scope === 'cell_print' ? 'ваш профиль, баланс и ключи' : 'ваш профиль, баланс и данные пункта';
+  return sendMessage(chatId, [
+    `🖥 <b>Вход в «${program.name}»</b>`,
+    `Компьютер: «${escapeHtml(row.device_name || 'Компьютер')}» · запрошен ${minutesAgoText(row.created_at)}`,
+    `Код входа: <code>${loginCodeLabel(code)}</code>`,
+    '',
+    `Подтверждайте, только если вы сами сейчас нажали «Войти» в программе. Ссылку прислал кто-то другой — нажмите «Нет»: иначе чужой компьютер получит ${losing}.`,
+  ].join('\n'), {
+    reply_markup: choiceKeyboard([[{ text: '✅ Да, войти', callback_data: `lg:ok:${code}` }, { text: '✖️ Нет', callback_data: `lg:no:${code}` }]]),
+  });
+}
+
+async function handleLoginConfirm(from, chatId, messageId, callbackId, answer, code) {
+  answerCallbackQuery(callbackId).catch(() => {});
+  if (answer === 'no') {
+    return showScreen(chatId, messageId, 'Вход отменён — компьютер не получил доступ. Если ссылку прислал кто-то другой, не пересылайте её никому.', { reply_markup: MENU_KEYBOARD });
+  }
+  const userId = await ensureUser(from);
+  try {
+    await account.approveLoginChecked(userId, code);
+  } catch (error) {
+    if (error.code === 'NOT_FOUND' || error.code === 'EXPIRED') return showScreen(chatId, messageId, LOGIN_STALE_TEXT, { reply_markup: MENU_KEYBOARD });
+    if (error.code === 'ALREADY_USED') return showScreen(chatId, messageId, LOGIN_USED_TEXT, { reply_markup: supportKeyboard() });
+    if (error.code === 'ACCOUNT_RESTRICTED') {
+      const row = await loadLoginRequest(code).catch(() => null);
+      return showScreen(chatId, messageId, loginRestrictedText(account.loginProgram(row), { message: error.message }), { reply_markup: supportKeyboard() });
+    }
+    throw error;
+  }
+  return showScreen(chatId, messageId, '✅ Вход подтверждён. Вернитесь в программу — она войдёт сама.', { reply_markup: MENU_KEYBOARD });
+}
+
+// «🚫 Это не я» под сообщением о новом компьютере (account.notifyNewDevice): отключить ПК и завершить все
+// сеансы. Компьютер ищем только среди ПК профиля этого Telegram — чужой id из подделанной кнопки не сработает.
+async function handleDeviceNotMe(from, chatId, messageId, callbackId, deviceId) {
+  answerCallbackQuery(callbackId).catch(() => {});
+  const userId = await findUser(from.id);
+  const rows = userId
+    ? await supabaseFetch(`app_devices?id=eq.${encodeURIComponent(deviceId)}&user_id=eq.${encodeURIComponent(userId)}&select=id,name,revoked_at&limit=1`)
+    : [];
+  const device = rows[0];
+  if (!device) return showScreen(chatId, messageId, 'Этого компьютера нет в вашем профиле.', { reply_markup: supportKeyboard() });
+  const name = escapeHtml(device.name || 'Компьютер');
+  if (!device.revoked_at) {
+    try {
+      await account.revokeDevice(userId, deviceId);
+    } catch (error) {
+      if (error.code !== 'NOT_FOUND') throw error; // уже отключили с другого экрана
+    }
+  }
+  const sessions = await account.endAllSessions(userId).catch(error => {
+    console.warn('Device not me: end sessions failed', error?.message || error);
+    return null;
+  });
+  const lines = [`🚫 <b>Компьютер «${name}» отключён</b>`];
+  if (sessions) {
+    lines.push('Все входы в ваш профиль завершены. На своих компьютерах войдите заново — подтверждением здесь, в боте.');
+    lines.push('Не понимаете, откуда был вход, — напишите в поддержку.');
+  } else {
+    lines.push('Завершить остальные входы не получилось — напишите в поддержку, поможем.');
+  }
+  return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: supportKeyboard() });
 }
 
 /** Не хватает денег на QR — пополнить ровно на недостающее и выдать QR (afterWalletTopup → qr:<sid>). */
@@ -1124,20 +1240,28 @@ function claimErrorText(error) {
   return null;
 }
 
-async function consumeCodeAttempt(telegramId) {
-  const keyHash = crypto.createHash('sha256').update(`bot-code:${telegramId}`).digest('hex');
+/**
+ * Попытка из лимита «N в час на Telegram ID» (коды доступа, вход в программу). Счётчик в базе
+ * (consume_api_rate_limit), при её сбое — в памяти процесса. keyText различает лимиты между собой.
+ */
+async function consumeHourlyAttempt(scope, keyText, limit = CODE_ATTEMPTS_PER_HOUR) {
+  const keyHash = crypto.createHash('sha256').update(keyText).digest('hex');
   try {
     const allowed = await supabaseFetch('rpc/consume_api_rate_limit', {
       method: 'POST',
-      body: JSON.stringify({ p_scope: 'bot-access-code', p_key_hash: keyHash, p_limit: CODE_ATTEMPTS_PER_HOUR, p_window_seconds: 3600 }),
+      body: JSON.stringify({ p_scope: scope, p_key_hash: keyHash, p_limit: limit, p_window_seconds: 3600 }),
     });
     return allowed === true;
   } catch {
     const now = Date.now(), current = codeAttemptsFallback.get(keyHash);
     if (!current || current.resetAt <= now) { codeAttemptsFallback.set(keyHash, { hits: 1, resetAt: now + 3600 * 1000 }); return true; }
     current.hits += 1;
-    return current.hits <= CODE_ATTEMPTS_PER_HOUR;
+    return current.hits <= limit;
   }
+}
+
+function consumeCodeAttempt(telegramId) {
+  return consumeHourlyAttempt('bot-access-code', `bot-code:${telegramId}`);
 }
 
 /**
@@ -2768,6 +2892,11 @@ async function handleCallback(callback) {
   if (approvalMatch) { await handleApprovalButton(from, chatId, messageId, callback.id, approvalMatch[1], approvalMatch[2]); return; }
   const linkMatch = data.match(/^cq:link:(yes|no):([A-Za-z0-9_-]{24})$/);
   if (linkMatch) { await handleLinkConfirm(from, chatId, messageId, callback.id, linkMatch[1], linkMatch[2]); return; }
+  // Вход в программу: lg:ok|no:<КОД> (19 байт); «🚫 Это не я» под сообщением о новом ПК: dv:no:<id ПК> (42 байта).
+  const loginMatch = data.match(/^lg:(ok|no):([A-Z2-9]{8})$/);
+  if (loginMatch) { await handleLoginConfirm(from, chatId, messageId, callback.id, loginMatch[1], loginMatch[2]); return; }
+  const notMeMatch = data.match(/^dv:no:([0-9a-f-]{36})$/i);
+  if (notMeMatch) { await handleDeviceNotMe(from, chatId, messageId, callback.id, notMeMatch[1].toLowerCase()); return; }
   const codeQr = data.match(/^code:qr:(\d{1,12})$/);
   if (codeQr) { answerCallbackQuery(callback.id).catch(() => {}); await handleClientCode(from, chatId, codeQr[1]); return; }
   if (data === 'code:enter') {
@@ -2856,6 +2985,9 @@ async function handleMessage(message) {
     // t.me/<бот>?start=link_<token> — привязать этот Telegram к аккаунту из программы «Помощник ПВЗ».
     const link = LINK_PAYLOAD.exec(startMatch[1] || '');
     if (link) return handleLinkStart(from, chatId, link[1]);
+    // t.me/<бот>?start=login_<КОД> — подтвердить вход в программу (кнопка и QR на странице /app-login).
+    const login = LOGIN_PAYLOAD.exec(startMatch[1] || '');
+    if (login) return handleLoginStart(from, chatId, login[1]);
     // t.me/<бот>?start=r_<КОД> — переход по приглашению.
     const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
     const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;

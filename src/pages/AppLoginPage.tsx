@@ -33,41 +33,82 @@ const SiteLinkLogin = observer(({ tokenHash, next }: { tokenHash: string; next: 
   );
 });
 
-/** Вход в программу через сайт: программа показала код, человек подтверждает его здесь. */
+type LoginRequest = { deviceName: string; status: string; program?: string; telegramUrl?: string | null; telegramQr?: string | null };
+
+// Опрос статуса кода: подтверждение может прийти из Telegram-бота, пока страница открыта.
+const POLL_MS = 3000;
+
+/**
+ * Вход в программу: программа открыла страницу с кодом. Без входа на сайт главный путь — подтвердить
+ * в Telegram-боте (кнопка или QR с телефона, /start login_<код>), вторичный — войти в аккаунт сайта.
+ */
 const ApproveProgramLogin = observer(({ code }: { code: string }) => {
   const { auth } = useStores();
   const location = useLocation();
   const request = useQuery({
     queryKey: ['app-login-request', code],
-    queryFn: () => api<{ deviceName: string; status: string; program?: string }>(`/api/app/login/request?code=${encodeURIComponent(code)}`),
+    queryFn: () => api<LoginRequest>(`/api/app/login/request?code=${encodeURIComponent(code)}`),
     retry: false,
+    // Снимок на момент открытия: свежий статус — в опросе ниже. Перечитывание при возврате на вкладку
+    // (человек подтвердил в Telegram) показало бы «код уже использован» вместо «Готово».
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
   const approve = useMutation({
     mutationFn: () => api<{ deviceName: string }>('/api/app/login/approve', { method: 'POST', body: JSON.stringify({ code }) }),
   });
+  const initiallyPending = request.data?.status === 'pending';
+  const status = useQuery({
+    queryKey: ['app-login-status', code],
+    queryFn: () => api<LoginRequest>(`/api/app/login/request?code=${encodeURIComponent(code)}&poll=1`),
+    enabled: initiallyPending && !approve.isSuccess,
+    refetchInterval: query => (query.state.data && query.state.data.status !== 'pending') || query.state.error ? false : POLL_MS,
+    retry: false,
+  });
+  // Код был свободен при открытии страницы, а теперь занят — его подтвердили (в боте или в другой вкладке).
+  const confirmedElsewhere = initiallyPending && Boolean(status.data && status.data.status !== 'pending');
+  const program = request.data?.program || 'Помощник ПВЗ';
 
   let body;
   if (request.isPending || auth.status === 'initializing') body = <><Spinner /><p className="muted">Проверяем код…</p></>;
   else if (request.isError) body = <Alert tone="error">{request.error.message}</Alert>;
-  else if (approve.isSuccess) body = (
+  else if (approve.isSuccess || confirmedElsewhere) body = (
     <>
       <CircleCheck size={40} color="var(--success)" style={{ margin: '0 auto' }} />
-      <h1 style={{ margin: 0 }}>Готово</h1>
-      <p className="muted" style={{ margin: 0 }}>Вернитесь в программу — вход выполнится автоматически через несколько секунд.</p>
+      <h1 style={{ margin: 0 }}>Готово, вернитесь в программу</h1>
+      <p className="muted" style={{ margin: 0 }}>Вход выполнится сам через несколько секунд. Эту вкладку можно закрыть.</p>
     </>
   );
-  else if (request.data.status !== 'pending') body = <Alert tone="warning">Этот код уже использован. Если вы не входили в программу, смените пароль в профиле.</Alert>;
+  else if (status.isError) body = <Alert tone="error">{status.error.message}</Alert>;
+  else if (request.data.status !== 'pending') body = <Alert tone="warning">Этот код уже использован. Если вы не входили в программу, напишите в поддержку.</Alert>;
   else if (!auth.user) body = (
     <>
-      <h1 style={{ margin: 0 }}>Вход в «{request.data.program || 'Помощник ПВЗ'}»</h1>
-      <p className="muted" style={{ margin: 0 }}>Чтобы подключить программу на компьютере «{request.data.deviceName}», войдите в аккаунт сайта.</p>
-      <Link to="/login" state={{ from: `${location.pathname}${location.search}` }}><Button block>Войти в аккаунт</Button></Link>
+      <h1 style={{ margin: 0 }}>Вход в «{program}»</h1>
+      <p className="muted" style={{ margin: 0 }}>Компьютер: <strong>{request.data.deviceName}</strong>. Код: <span className="mono">{code.slice(0, 4)}-{code.slice(4)}</span></p>
+      {request.data.telegramUrl ? (
+        <>
+          <p style={{ margin: 0 }}>Подтвердите вход в Telegram-боте — аккаунт на сайте не нужен.</p>
+          <a href={request.data.telegramUrl} target="_blank" rel="noopener noreferrer"><Button block>Подтвердить в Telegram-боте</Button></a>
+          {request.data.telegramQr && (
+            <>
+              <img src={request.data.telegramQr} alt="QR-код для входа через Telegram-бот" width={200} height={200} style={{ margin: '0 auto', display: 'block' }} />
+              <p className="muted" style={{ margin: 0 }}>Нет Telegram на этом компьютере? Наведите камеру телефона на QR.</p>
+            </>
+          )}
+          <Link to="/login" state={{ from: `${location.pathname}${location.search}` }}><Button block variant="secondary">Войти в аккаунт сайта</Button></Link>
+        </>
+      ) : (
+        <>
+          <p className="muted" style={{ margin: 0 }}>Чтобы подключить программу, войдите в аккаунт сайта.</p>
+          <Link to="/login" state={{ from: `${location.pathname}${location.search}` }}><Button block>Войти в аккаунт сайта</Button></Link>
+        </>
+      )}
     </>
   );
   else body = (
     <>
       <Laptop size={40} color="var(--accent)" style={{ margin: '0 auto' }} />
-      <h1 style={{ margin: 0 }}>Войти в «{request.data.program || 'Помощник ПВЗ'}»?</h1>
+      <h1 style={{ margin: 0 }}>Войти в «{program}»?</h1>
       <p style={{ margin: 0 }}>Компьютер: <strong>{request.data.deviceName}</strong></p>
       <p className="muted" style={{ margin: 0 }}>Аккаунт: {auth.user.email?.endsWith('@users.invalid') ? 'вход через Telegram' : auth.user.email}. Подтверждайте, только если сами нажали «Войти через сайт» в программе.</p>
       <p className="muted mono" style={{ margin: 0 }}>Код: {code.slice(0, 4)}-{code.slice(4)}</p>

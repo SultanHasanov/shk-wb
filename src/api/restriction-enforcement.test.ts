@@ -167,7 +167,8 @@ describe('программа при ограничении «Программа�
     function loginRoutes(appVersion: string) {
       return mockFetch((url, init) => {
         if (url.includes('app_login_requests?code=eq.')) {
-          if ((init.method || 'GET') === 'PATCH') return { body: [] };
+          // PATCH с return=representation отдаёт изменённую строку: пустой ответ значит «код уже подтвердил другой» (ALREADY_USED)
+          if ((init.method || 'GET') === 'PATCH') return { body: [{ code: CODE, status: 'approved' }] };
           return { body: [{ code: CODE, status: 'pending', device_name: 'Касса', app_version: appVersion, expires_at: '2099-01-01T00:00:00Z' }] };
         }
       });

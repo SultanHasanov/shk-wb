@@ -12,6 +12,8 @@ const { authConfig, getAuthUser, optionalUser } = require('./_user-auth');
 const deviceCache = require('./_app-device-cache');
 const { ADDONS, PLANS, accountLimits, addonAllowed, effectiveFeatures, isPlan, mirrorLimit } = require('./_app-plans');
 const { createNotification } = require('./_notifications');
+const { sendMessage } = require('./_telegram-api');
+const { identityForUser } = require('./_telegram-identity');
 const { appFreeMode, appFreeUntil, appFreeWindow } = require('./_app-free');
 const { crackFallbackEnabled, codeViaBotEnabled } = require('./_app-flags');
 const { CLUB_DISCOUNT_PERCENT, clubUserDiscount } = require('./_club');
@@ -186,19 +188,47 @@ function deviceHashFrom(req) {
   return DEVICE_RE.test(value) ? value : null;
 }
 
-// Письмо и уведомление в кабинете «вход с нового компьютера»: если это не вы — отключите ПК.
-async function notifyNewDevice(userId, name) {
+// callback_data кнопки «🚫 Это не я» под сообщением о новом ПК (обработчик — бот, handleDeviceNotMe): 42 байта.
+function deviceNotMeData(deviceId) {
+  return `dv:no:${deviceId}`;
+}
+
+/**
+ * То же уведомление в Telegram, если к аккаунту привязан Telegram: у профиля бота нет почты, и без этого
+ * о чужом входе владелец не узнает. Кнопка «🚫 Это не я» отключает ПК и завершает все сеансы. Сбой не мешает входу.
+ */
+async function notifyNewDeviceTelegram(userId, name, deviceId, when) {
+  const identity = await identityForUser(userId);
+  if (!identity?.telegram_user_id) return false;
+  const pc = String(name || 'Компьютер').slice(0, 80).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = [];
+  if (/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) rows.push([{ text: '🚫 Это не я', callback_data: deviceNotMeData(deviceId) }]);
+  rows.push([{ text: '☰ Меню', callback_data: 'menu:home' }]);
+  await sendMessage(Number(identity.telegram_user_id), [
+    '🖥 <b>Новый вход в «Помощник ПВЗ»</b>',
+    `Компьютер «${pc}» вошёл в ваш профиль ${when} (МСК).`,
+    'Если это не вы — нажмите «🚫 Это не я»: я отключу этот компьютер и завершу все входы.',
+  ].join('\n'), { reply_markup: { inline_keyboard: rows } });
+  return true;
+}
+
+// Письмо, уведомление в кабинете и сообщение в Telegram «вход с нового компьютера»: если это не вы — отключите ПК.
+async function notifyNewDevice(userId, name, deviceId) {
   const user = await getAuthUser(userId).catch(() => null);
   const when = new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
-  await createNotification({
-    userId,
-    kind: 'system',
-    title: 'Вход в «Помощник ПВЗ» с нового компьютера',
-    body: `Компьютер «${String(name || 'Компьютер').slice(0, 80)}» вошёл в ваш аккаунт ${when} (МСК). Если это были не вы — отключите его в кабинете (Подписка → Компьютеры) и смените пароль.`,
-    link: '/cabinet/subscription',
-    dedupeKey: `app-device:${userId}:${Date.now()}`,
-    email: technicalEmail(user?.email) ? null : user.email,
-  }).catch(() => {});
+  await Promise.all([
+    createNotification({
+      userId,
+      kind: 'system',
+      title: 'Вход в «Помощник ПВЗ» с нового компьютера',
+      body: `Компьютер «${String(name || 'Компьютер').slice(0, 80)}» вошёл в ваш аккаунт ${when} (МСК). Если это были не вы — отключите его в кабинете (Подписка → Компьютеры) и смените пароль.`,
+      link: '/cabinet/subscription',
+      dedupeKey: `app-device:${userId}:${Date.now()}`,
+      email: technicalEmail(user?.email) ? null : user.email,
+    }).catch(() => {}),
+    notifyNewDeviceTelegram(userId, name, deviceId, when)
+      .catch(error => console.warn('New device: Telegram notice failed', error?.message || error)),
+  ]);
 }
 
 async function deviceKnown(userId, deviceHash) {
@@ -232,7 +262,7 @@ async function registerDevice(userId, deviceHash, name, version) {
   const id = await registerDeviceLimited(userId, deviceHash, known ? '' : name, version);
   if (!known) {
     await assignInitialRole(userId, id);
-    await notifyNewDevice(userId, name);
+    await notifyNewDevice(userId, name, id);
   }
   return id;
 }
@@ -829,14 +859,57 @@ async function loginRequest(code) {
   return row;
 }
 
+// Какая программа просит вход: тот же код выдаёт и ПВЗ Принт (api/cell-print.js, app_version 'cell-print/…').
+// scope — область ограничения из админки: ПВЗ Принт — cell_print, Помощник — app.
+function loginProgram(row) {
+  return String(row?.app_version || '').startsWith('cell-print')
+    ? { scope: 'cell_print', name: 'ПВЗ Принт' }
+    : { scope: 'app', name: 'Помощник ПВЗ' };
+}
+
+/** Ограничение аккаунта, которое закрывает этот вход (или null). */
+async function loginRestriction(userId, row) {
+  const restriction = await controls.restrictionFor(userId);
+  return controls.covers(restriction, loginProgram(row).scope) ? restriction : null;
+}
+
+// Второй подтверждающий (вторая вкладка, бот и сайт одновременно) не получает ложный «успех»: строку
+// меняет только тот, кто застал её pending, остальным — 409 ALREADY_USED.
 async function approveBrowserLogin(userId, code) {
   const row = await loginRequest(code);
   if (row.status !== 'pending') throw appError(409, 'ALREADY_USED', 'Этот код уже использован');
-  await supabaseFetch(`app_login_requests?code=eq.${code}&status=eq.pending`, {
+  const updated = await supabaseFetch(`app_login_requests?code=eq.${code}&status=eq.pending&expires_at=gt.${new Date().toISOString()}`, {
     method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
     body: JSON.stringify({ user_id: userId, status: 'approved' }),
   });
+  if (!Array.isArray(updated) || !updated.length) throw appError(409, 'ALREADY_USED', 'Этот код уже использован');
   return { deviceName: row.device_name };
+}
+
+/**
+ * Подтверждение входа с проверкой ограничения из админки — общее для страницы сайта (login-approve)
+ * и бота (lg:ok). Ограничен — 403 ACCOUNT_RESTRICTED (не 401: программа не должна стирать сессию).
+ */
+async function approveLoginChecked(userId, code) {
+  const row = await loginRequest(code);
+  const restriction = await loginRestriction(userId, row);
+  if (restriction) throw appError(403, 'ACCOUNT_RESTRICTED', restriction.message, { until: restriction.until || null });
+  return approveBrowserLogin(userId, code);
+}
+
+/**
+ * Завершить все сеансы аккаунта (сайт и программы): у GoTrue Admin API нет «выйти везде», поэтому открываем
+ * сеанс от имени пользователя и зовём logout?scope=global его токеном (как logoutAll в админке).
+ * Неподтверждённую почту magic-ссылкой подтверждать нельзя — у такого аккаунта и сеансов нет.
+ */
+async function endAllSessions(userId) {
+  const user = await getAuthUser(userId);
+  if (!user) throw appError(404, 'USER_NOT_FOUND', 'Аккаунт не найден');
+  if (!user.email_confirmed_at) return { ended: false };
+  const session = await sessionForUser(userId);
+  await authRequest('logout?scope=global', { token: session.access_token });
+  return { ended: true };
 }
 
 // Программа опрашивает, пока человек не подтвердит вход на сайте.
@@ -1001,6 +1074,12 @@ module.exports = {
   accountSummary,
   appError,
   approveBrowserLogin,
+  approveLoginChecked,
+  deviceNotMeData,
+  endAllSessions,
+  loginProgram,
+  loginRestriction,
+  notifyNewDevice,
   claimKey,
   consumeCode,
   consumeKey,

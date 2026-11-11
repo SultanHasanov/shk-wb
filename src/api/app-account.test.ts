@@ -306,3 +306,74 @@ describe('оплата из программы по QR-коду СБП', () => {
     expect(payments).toContain("const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license'];");
   });
 });
+
+describe('вход в программу по коду: повторное подтверждение и ссылка в бота', () => {
+  const account = require('../../server/_app-account.js') as Record<string, any>;
+  const botLink = require('../../server/_bot-link.js') as { resetBotLinkCacheForTests: () => void };
+  const CODE = 'ABCDEFGH';
+  const pending = { code: CODE, status: 'pending', device_name: 'Касса', app_version: '1.12.0', expires_at: '2099-01-01T00:00:00Z' };
+  beforeEach(() => {
+    process.env.SUPABASE_URL = 'https://db.test';
+    process.env.SUPABASE_PUBLISHABLE_KEY = 'pub';
+    process.env.SUPABASE_SECRET_KEY = 'secret';
+    process.env.TELEGRAM_BOT_USERNAME = 'pvz_test_bot';
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    botLink.resetBotLinkCacheForTests();
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); delete process.env.TELEGRAM_BOT_USERNAME; });
+
+  it('второй подтверждающий получает 409 ALREADY_USED, а не ложный успех', async () => {
+    let patchUrl = '';
+    mockSupabase((url, init) => {
+      if (url.includes('app_login_requests?code=eq.') && init.method === 'PATCH') { patchUrl = url; return { body: [] }; }
+      if (url.includes('app_login_requests?code=eq.')) return { body: [pending] };
+    });
+    await expect(account.approveBrowserLogin('u1', CODE)).rejects.toMatchObject({ status: 409, code: 'ALREADY_USED' });
+    // меняем только живую строку: pending и не просроченную
+    expect(patchUrl).toContain('status=eq.pending');
+    expect(patchUrl).toContain('expires_at=gt.');
+  });
+
+  it('первый подтверждающий — успех с именем ПК', async () => {
+    mockSupabase((url, init) => {
+      if (url.includes('app_login_requests?code=eq.') && init.method === 'PATCH') return { body: [{ ...pending, status: 'approved' }] };
+      if (url.includes('app_login_requests?code=eq.')) return { body: [pending] };
+    });
+    await expect(account.approveBrowserLogin('u1', CODE)).resolves.toEqual({ deviceName: 'Касса' });
+  });
+
+  it('login-request отдаёт ссылку в бота и QR, а при опросе (poll=1) — только статус', async () => {
+    mockSupabase(url => (url.includes('app_login_requests?code=eq.') ? { body: [{ ...pending, app_version: 'cell-print/2.2.0' }] } : undefined));
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'login-request', code: CODE }, headers: {} }, res);
+    expect(res.statusCode).toBe(200);
+    const body = res.body as Record<string, string>;
+    expect(body).toMatchObject({ deviceName: 'Касса', status: 'pending', program: 'ПВЗ Принт', telegramUrl: `https://t.me/pvz_test_bot?start=login_${CODE}` });
+    expect(body.telegramQr).toMatch(/^data:image\/png;base64,/);
+
+    const poll = response();
+    await handler({ method: 'GET', query: { action: 'login-request', code: CODE, poll: '1' }, headers: {} }, poll);
+    expect(poll.body).toEqual({ deviceName: 'Касса', status: 'pending', program: 'ПВЗ Принт' });
+  });
+
+  it('login-start программы отдаёт telegramUrl и telegramQr рядом с прежними полями', async () => {
+    mockSupabase((url, init) => (url.endsWith('/rest/v1/app_login_requests') && init.method === 'POST' ? { body: [] } : undefined));
+    const res = response();
+    await handler(request('login-start', { method: 'POST', body: { deviceName: 'Касса' } }), res);
+    expect(res.statusCode).toBe(201);
+    const body = res.body as Record<string, string>;
+    expect(body.code).toMatch(/^[A-Z2-9]{8}$/);
+    expect(body.url).toContain(`/app-login?code=${body.code}`);
+    expect(body.telegramUrl).toBe(`https://t.me/pvz_test_bot?start=login_${body.code}`);
+    expect(body.telegramQr).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it('имя бота неизвестно — ссылки нет, вход через сайт работает как раньше', async () => {
+    delete process.env.TELEGRAM_BOT_USERNAME;
+    vi.stubEnv('VITE_TELEGRAM_BOT_USERNAME', '');
+    mockSupabase(url => (url.includes('app_login_requests?code=eq.') ? { body: [pending] } : undefined));
+    const res = response();
+    await handler({ method: 'GET', query: { action: 'login-request', code: CODE }, headers: {} }, res);
+    expect(res.body).toMatchObject({ status: 'pending', program: 'Помощник ПВЗ', telegramUrl: null, telegramQr: null });
+  });
+});

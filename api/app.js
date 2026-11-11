@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { sendApiError, supabaseFetch } = require('../server/_supabase');
 const approvals = require('../server/_code-approvals');
-const { telegramRequest } = require('../server/_telegram-api');
+const { botLoginLink, botUsername } = require('../server/_bot-link');
 const { enforceRateLimit } = require('../server/_rate-limit');
 const { enforceProgramVersion } = require('../server/_program-version');
 const { forgetUserToken, requireUser, optionalUser } = require('../server/_user-auth');
@@ -23,7 +23,6 @@ const permissions = require('../server/_app-permissions');
 const { generationPrices } = require('../server/_generation-billing');
 const { CELL_PRINT_PRICES } = require('../server/_payments');
 const cabinet = require('./cabinet');
-const controls = require('../server/_user-controls');
 
 // API программы «Помощник ПВЗ» (/api/app/*, rewrites в vercel.json).
 // Отдельный файл не заводим: на Vercel 12 функций — это лимит тарифа, поэтому
@@ -72,14 +71,6 @@ async function approvalRequired(req, res) {
   return false;
 }
 
-let cachedBotUsername = null;
-/** Имя бота для ссылки t.me/<бот>?start=… — getMe через релей с кэшем, запасной путь — TELEGRAM_BOT_USERNAME. */
-async function botUsername() {
-  if (cachedBotUsername) return cachedBotUsername;
-  const me = await telegramRequest('getMe', {}, { timeoutMs: 5000 }).catch(() => null);
-  cachedBotUsername = me?.username || process.env.TELEGRAM_BOT_USERNAME || process.env.VITE_TELEGRAM_BOT_USERNAME || null;
-  return cachedBotUsername;
-}
 
 function body(req) {
   return req.body && typeof req.body === 'object' ? req.body : {};
@@ -180,23 +171,22 @@ module.exports = async function handler(req, res) {
       const code = account.normalizeLoginCode(req.query.code);
       if (!code) return res.status(400).json({ error: 'Некорректный код', code: 'VALIDATION_ERROR' });
       const row = await account.loginRequest(code);
-      const program = String(row.app_version || '').startsWith('cell-print') ? 'Печать ячеек' : 'Помощник ПВЗ';
-      return res.status(200).json({ deviceName: row.device_name, status: row.status, program });
+      const program = account.loginProgram(row).name;
+      // Ссылка в бота и её QR — только пока код ждёт подтверждения и не для опроса статуса (poll=1, раз в 3 с).
+      const link = row.status === 'pending' && req.query.poll !== '1' ? await botLoginLink(code) : {};
+      return res.status(200).json({ deviceName: row.device_name, status: row.status, program, ...link });
     }
     if (action === 'login-approve' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-login-approve', limit: 20, windowSeconds: 600 })) return;
       // Вход программы по коду со страницы сайта. Тот же код выдаёт и ПВЗ Принт (api/cell-print.js,
       // app_version 'cell-print/…'), поэтому область ограничения берётся из самого запроса входа:
       // ПВЗ Принт — «ПВЗ Принт» (cell_print), Помощник — «Программа» (app). 403 ACCOUNT_RESTRICTED, не 401.
+      // Та же проверка у подтверждения в боте (lg:ok) — account.approveLoginChecked.
       const user = await requireUser(req, res);
       if (!user) return;
       const code = account.normalizeLoginCode(body(req).code);
       if (!code) return res.status(400).json({ error: 'Некорректный код', code: 'VALIDATION_ERROR' });
-      const loginRow = await account.loginRequest(code);
-      const loginScope = String(loginRow.app_version || '').startsWith('cell-print') ? 'cell_print' : 'app';
-      const restriction = await controls.restrictionFor(user.id);
-      if (controls.covers(restriction, loginScope)) return res.status(403).json(controls.restrictedBody(restriction));
-      return res.status(200).json(await account.approveBrowserLogin(user.id, code));
+      return res.status(200).json(await account.approveLoginChecked(user.id, code));
     }
     if (action === 'me' && req.method === 'GET' && !req.headers['x-device-id']) {
       // Кабинет на сайте: та же сводка, без привязки к ПК.
@@ -300,7 +290,9 @@ module.exports = async function handler(req, res) {
       const deviceHash = account.deviceHashFrom(req);
       if (!deviceHash) return res.status(400).json({ error: 'Обновите программу', code: 'DEVICE_REQUIRED' });
       const { code, secret } = await account.startBrowserLogin(deviceHash, body(req).deviceName, version);
-      return res.status(201).json({ code, secret, url: `${publicOrigin(req)}/app-login?code=${code}`, expiresIn: 600 });
+      // telegramUrl / telegramQr — подтвердить вход в боте без аккаунта сайта (старые версии их не читают).
+      const link = await botLoginLink(code);
+      return res.status(201).json({ code, secret, url: `${publicOrigin(req)}/app-login?code=${code}`, expiresIn: 600, ...link });
     }
     if (action === 'login-poll' && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-login-poll', limit: 200, windowSeconds: 600 })) return;

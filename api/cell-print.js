@@ -4,6 +4,7 @@ const { requireUser } = require('../server/_user-auth');
 const controls = require('../server/_user-controls');
 const { publicOrigin } = require('../server/_origin');
 const account = require('../server/_app-account');
+const { botLoginLink } = require('../server/_bot-link');
 const cellPrintLink = require('../server/_cell-print-link');
 const cellUpdate = require('../server/_cell-print-update');
 
@@ -65,9 +66,11 @@ async function accountAction(action,req,res){
     if(!await enforceRateLimit(req,res,{scope:'cell-login-start',limit:10,windowSeconds:600}))return;
     const deviceHash=String(body.deviceHash||'').toLowerCase();
     if(!HEX64.test(deviceHash))return res.status(400).json({error:'Обновите программу',code:'DEVICE_REQUIRED'});
-    // Метка программы в app_version — по ней страница /app-login пишет «Печать ячеек».
+    // Метка программы в app_version — по ней страница /app-login и бот пишут «ПВЗ Принт».
     const {code,secret}=await account.startBrowserLogin(deviceHash,body.deviceName,`cell-print/${String(body.appVersion||'').slice(0,16)}`);
-    return res.status(201).json({code,secret,url:`${publicOrigin(req)}/app-login?code=${code}`,expiresIn:600});
+    // telegramUrl / telegramQr — подтвердить вход в Telegram-боте (/start login_<код>) без аккаунта сайта.
+    const link=await botLoginLink(code);
+    return res.status(201).json({code,secret,url:`${publicOrigin(req)}/app-login?code=${code}`,expiresIn:600,...link});
   }
   if(action==='login-poll'&&req.method==='POST'){
     if(!await enforceRateLimit(req,res,{scope:'cell-login-poll',limit:200,windowSeconds:600}))return;
