@@ -25,8 +25,12 @@ function topupBackData(then) {
   return 'menu:home';
 }
 
-/** «Попробовать ещё раз» — то же пополнение с той же покупкой; не влезло в 64 байта — просто пополнение. */
+/**
+ * «Попробовать ещё раз» — то же пополнение с той же покупкой; не влезло в 64 байта — просто пополнение.
+ * Своя сумма с копейками («350,50») в tp:<рубли> не ложится — тогда снова «Своя сумма».
+ */
 function topupRetryData(amount, then) {
+  if (!Number.isInteger(Number(amount))) return 'topup:custom';
   const full = then ? `tp:${amount}:${then}` : `tp:${amount}`;
   return fits(full) ? full : `tp:${amount}`;
 }

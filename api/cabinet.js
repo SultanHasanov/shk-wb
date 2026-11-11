@@ -20,7 +20,18 @@ const { guardAttempts, recordFailures } = require('../server/_attempt-guard');
 const partners = require('../server/_partners');
 const { walletSummary } = require('../server/_wallet');
 const { CELL_PRINT_PRICES } = require('../server/_payments');
-const { isSalePlan, planPrice, PLANS } = require('../server/_app-plans');
+const { isSalePlan, planPrice, PLAN_ORDER, PLANS, SALE_PLANS } = require('../server/_app-plans');
+
+/**
+ * Что станет с тарифом не из продажи при покупке нового — как решит SQL (app_apply_subscription,
+ * 20261019_app_admin_grant.sql), так же, как subscriptionChangeLine в боте: все тарифы в продаже выше —
+ * повышение, остаток пересчитается в дни нового сразу. Иначе (тариф неизвестен) — без обещаний.
+ */
+function legacyPlanSwitchNote(planId) {
+  const rank = PLAN_ORDER.indexOf(planId);
+  if (rank < 0) return '';
+  return SALE_PLANS.every(id => PLAN_ORDER.indexOf(id) > rank) ? ': остаток пересчитаем в дни нового тарифа, ничего не сгорит' : '';
+}
 
 // Реферальная ссылка публичная и должна переживать каждый Vercel-деплой.
 // VERCEL_URL здесь использовать нельзя: он содержит технический адрес сборки.
@@ -840,7 +851,7 @@ async function notifyTelegramExpiry2d() {
       body: `Тариф «${plan?.title || sub.plan}» действует до ${day}.`,
       telegram: onSale
         ? `Тариф «${plan.title}». Продление на месяц — ${rubText(price)}, новый срок прибавится к текущему. Без продления разделы тарифа в программе закроются.`
-        : `Тариф «${plan?.title || sub.plan}» больше не продаётся — выберите новый, оплаченный срок начнётся после текущего. Без продления разделы тарифа в программе закроются.`,
+        : `Тариф «${plan?.title || sub.plan}» больше не продаётся — выберите новый${legacyPlanSwitchNote(sub.plan)}. Без продления разделы тарифа в программе закроются.`,
       price,
       button: onSale
         ? { text: '🔄 Продлить с баланса', callback_data: `shop:helper:${sub.plan}` }

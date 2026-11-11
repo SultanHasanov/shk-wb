@@ -145,6 +145,23 @@ async function notifyReferralReward(order){
   const rub=(Number(reward.amount_kopecks)/100).toLocaleString('ru-RU');
   await sendMessage(telegramId,`<b>💸 +${rub} ₽</b> — ваш коллега сделал оплату.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'👥 Мои приглашения',callback_data:'menu:ref'}]]})});
 }
+/**
+ * Итог пополнения в бот (и покупка после него, afterWalletTopup) — один раз на заказ. Вебхук ЮKassa на сайте и
+ * «🔄 Проверить оплату» (action=status на узле бота) могут завершить заказ одновременно: completeOrder заказ не
+ * захватывает, и без этой метки пришли бы два «Баланс пополнен ✅», а «пополнить и получить QR» списал бы код дважды.
+ * Метка — строка telegram_generation_requests (request_id первичный ключ). Сбой самой базы — сообщаем, как раньше:
+ * потерять итог оплаты хуже редкого дубля.
+ */
+async function claimTopupNotice(order,telegramId){
+  try{
+    const rows=await supabaseFetch('telegram_generation_requests?on_conflict=request_id',{method:'POST',headers:{Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify({request_id:`topup-done:${order.id}`,telegram_user_id:Number(telegramId),chat_id:Number(telegramId),user_id:order.user_id,status:'completed',draft:{orderId:order.id},completed_at:new Date().toISOString()})});
+    return !Array.isArray(rows)||rows.length>0;
+  }catch(error){
+    console.warn('Top-up notice claim failed',order.id,error.message);
+    return true;
+  }
+}
+
 async function notifyCompleted(order){
   // Покупку с баланса делает бот и сам показывает результат — письма и сообщения не нужны.
   if(Number(order.wallet_paid_kopecks||0)>0)return;
@@ -174,6 +191,7 @@ async function notifyCompleted(order){
   }else if(order.product_kind==='wallet_topup'){
     const telegramId=await telegramIdOf(order.user_id);
     if(!telegramId)return;
+    if(!await claimTopupNotice(order,telegramId))return;
     const amounts=topupScreen.topupAmounts(order);
     const head=`<b>Баланс пополнен ✅</b>\n${topupScreen.creditedLine(amounts)}`;
     const balanceRub=order.wallet_balance_kopecks!=null?Number(order.wallet_balance_kopecks)/100:null;

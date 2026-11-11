@@ -3255,8 +3255,12 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
       done = `Ключ «ПВЗ Принт» <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней. В программе ничего вводить не нужно.`;
     } else {
       // Ключ — отдельным сообщением без кнопок: его никто не отредактирует следующим нажатием, и он не пропадёт.
-      await sendMessage(chatId, cellKeyMessage(order.cell_print_license_key, item.fields)).catch(error => console.warn('Cell print key message failed', error.message));
-      done = 'Ключ «ПВЗ Принт» куплен — он в сообщении ниже ⬇️ Там же — как его включить.';
+      const keySent = await sendMessage(chatId, cellKeyMessage(order.cell_print_license_key, item.fields))
+        .then(() => true, error => { console.warn('Cell print key message failed', error.message); return false; });
+      // Сообщение с ключом не ушло — ключ прямо здесь, а не «в сообщении ниже», которого нет.
+      done = keySent
+        ? 'Ключ «ПВЗ Принт» куплен — он в сообщении ниже ⬇️ Там же — как его включить.'
+        : `Ключ «ПВЗ Принт» куплен: <code>${escapeHtml(order.cell_print_license_key)}</code> (нажмите, чтобы скопировать). В программе вставьте его в блок «Ключ без аккаунта» и нажмите «Активировать». Ключ всегда виден в «👤 Профиль и баланс».`;
     }
     rows = [[{ text: '🖨 Мои ключи', callback_data: 'shop:cp' }, { text: '👤 Профиль', callback_data: 'menu:profile' }], MENU_ROW];
   } else if (item.productKind === 'stickers') {
@@ -3325,6 +3329,19 @@ async function showShopFailure(from, chatId, screenId, userId, parts, item, erro
       `Напишите в поддержку и назовите код: <code>${incident}</code> — вернём ${wallet.formatRub(item.priceRub)} вручную.`,
       ...(balanceLine ? [balanceLine] : []),
     ].join('\n'), { reply_markup: choiceKeyboard([support, MENU_ROW]) });
+  }
+  if (error.walletOutcome === 'unknown') {
+    // Ответ списания потерялся: оно ещё может пройти позже, поэтому ни «не списаны», ни «попробуйте ещё раз».
+    sendToAdmins(`⚠️ Покупка с баланса: ответ списания потерялся, итог неясен (${wallet.formatRub(item.priceRub)}).\nTelegram ${Number(from.id)}, заказ ${error.orderId || '—'}, код ${incident}. Проверьте журнал баланса по заказу.`).catch(() => {});
+    return showScreen(chatId, screenId, [
+      '⚠️ Покупка не прошла — это сбой на нашей стороне. Списались ли деньги, пока не ясно.',
+      'Проверьте баланс через минуту в «👤 Профиль и баланс». Если деньги списались, а покупки нет — напишите в поддержку, вернём.',
+      `Код обращения: <code>${incident}</code>`,
+    ].join('\n'), { reply_markup: choiceKeyboard([
+      [{ text: '👤 Профиль и баланс', callback_data: 'menu:profile' }],
+      support,
+      MENU_ROW,
+    ]) });
   }
   const money = error.walletOutcome === 'refunded' ? 'Деньги за неё вернулись на баланс.'
     : error.walletOutcome === 'not_charged' ? 'Деньги за неё не списаны.'

@@ -104,9 +104,10 @@ async function grantBonus({ userId, kopecks, eventKey, note = '', adminTelegramI
 /**
  * Что стало с деньгами, когда покупка с баланса упала (error.walletOutcome) — по нему бот выбирает текст:
  * not_charged — до списания; refunded — списали и вернули; refund_failed — списали, а вернуть не вышло
- * (деньги возвращает поддержка вручную). error.orderId — заказ для поддержки, если он успел появиться.
+ * (деньги возвращает поддержка вручную); unknown — ответ списания потерялся, и списание ещё может пройти позже.
+ * error.orderId — заказ для поддержки, если он успел появиться.
  */
-const WALLET_OUTCOMES = Object.freeze(['not_charged', 'refunded', 'refund_failed']);
+const WALLET_OUTCOMES = Object.freeze(['not_charged', 'refunded', 'refund_failed', 'unknown']);
 
 function withOutcome(error, outcome, orderId = null) {
   const target = error instanceof Error ? error : new Error(String(error?.message || error || 'Wallet purchase failed'));
@@ -153,11 +154,13 @@ async function payWithWallet({ userId, productKind, fields = {}, priceRub, snaps
     paid = await supabaseFetch('rpc/wallet_pay_order', { method: 'POST', body: JSON.stringify({ p_order_id: order.id }) });
   } catch (error) {
     // Ответ потерялся — списание могло пройти. Возврат сам скажет: «не списано» (not_paid) или «вернули».
+    // Но «не списано» здесь не окончательно: запрос списания мог ещё не дойти до базы (PostgREST не отменяет его
+    // при обрыве), а wallet_pay_order статус заказа не смотрит — спишет и позже. Поэтому исход unknown: «проверьте баланс».
     const refund = await refundWalletOrder(order.id);
     if (refund.outcome === 'not_charged') {
       await supabaseFetch(`payment_orders?id=eq.${order.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }) }).catch(() => {});
     }
-    throw withOutcome(error, refund.outcome, order.id);
+    throw withOutcome(error, refund.outcome === 'not_charged' ? 'unknown' : refund.outcome, order.id);
   }
   if (!paid?.ok) {
     await supabaseFetch(`payment_orders?id=eq.${order.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }) }).catch(() => {});

@@ -29,7 +29,7 @@ let updateId = 30000;
 const message = (text: string) => ({ update_id: ++updateId, message: { message_id: updateId, text, from, chat: { id: TG, type: 'private' } } });
 const press = (data: string, messageId = 50) => ({ update_id: ++updateId, callback_query: { id: `cb${updateId}`, from, data, message: { message_id: messageId, chat: { id: TG, type: 'private' } } } });
 
-type World = { session: Record<string, any> | null; orders: Array<Record<string, any>>; newer: Array<Record<string, any>> };
+type World = { session: Record<string, any> | null; orders: Array<Record<string, any>>; newer: Array<Record<string, any>>; claimed: Set<string> };
 let world: World;
 let db: Array<{ method: string; path: string; body: any }>;
 let sent: Array<{ method: string; body: Record<string, any> }>;
@@ -43,7 +43,7 @@ beforeEach(() => {
   process.env.SUPABASE_SECRET_KEY = 'secret';
   process.env.TELEGRAM_BOT_TOKEN = '1:' + 'a'.repeat(30);
   process.env.STICKER_CLIENT_SECRET = 's'.repeat(32);
-  world = { session: null, orders: [], newer: [] };
+  world = { session: null, orders: [], newer: [], claimed: new Set() };
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -66,6 +66,11 @@ beforeEach(() => {
     if (path.startsWith('wallet_accounts')) return json([{ balance_kopecks: 12000 }]);
     if (path.startsWith('payment_orders?public_token=eq.')) return json(world.orders);
     if (path.startsWith('payment_orders?user_id=eq.') && path.includes('created_at=gt.')) return json(world.newer);
+    if (path.startsWith('telegram_generation_requests?on_conflict') && method === 'POST') {
+      if (world.claimed.has(body.request_id)) return json([]);
+      world.claimed.add(body.request_id);
+      return json([body]);
+    }
     if (path === 'rpc/complete_wallet_topup_order') return json(52500);
     if (path === 'rpc/consume_api_rate_limit') return json(true);
     if (path === 'rpc/app_entitlements') return json({});
@@ -256,6 +261,22 @@ describe('после оплаты и при отмене (сайт правит 
     expect(buttons(notice).map(button => button.callback_data)).toEqual(['n:code:ask:191607973', 'n:menu:home']);
   });
 
+  it('вебхук и «Проверить оплату» завершили заказ одновременно — итог и покупка после пополнения один раз', async () => {
+    const rpc = require('../../server/_bot-rpc.js') as { callBot: (...args: any[]) => Promise<unknown> };
+    const after = vi.spyOn(rpc, 'callBot').mockResolvedValue(true);
+    const order = topupOrder({ pricing_snapshot: { wallet: { amount: 50, then: 'qr:191607973', message: 50 } } });
+    await Promise.all([
+      payments.completeOrder({ ...order }, { status: 'succeeded', paid: true }),
+      payments.completeOrder({ ...order }, { status: 'succeeded', paid: true }),
+    ]);
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(sent.filter(call => call.method === 'sendMessage' && String(call.body.text).includes('Баланс пополнен'))).toHaveLength(1);
+    // Простое пополнение — тоже одно сообщение на заказ.
+    await payments.completeOrder(topupOrder({ id: 'aaaaaaaa-0000-4000-8000-000000000002' }), { status: 'succeeded', paid: true });
+    await payments.completeOrder(topupOrder({ id: 'aaaaaaaa-0000-4000-8000-000000000002' }), { status: 'succeeded', paid: true });
+    expect(sent.filter(call => call.method === 'sendMessage' && String(call.body.text).includes('Баланс пополнен'))).toHaveLength(2);
+  });
+
   it('после пополнения «и получить QR»: уведомление и старый экран оплаты — «итог ниже»', async () => {
     await bot.afterWalletTopup({ id: 'o2', user_id: USER, gross_amount: 50, wallet_topup_kopecks: 5000, pricing_snapshot: { wallet: { then: 'rv:5:0:3', message: 50 } } }, 99).catch(() => {});
     const edits = sent.filter(call => call.method === 'editMessageText');
@@ -268,6 +289,9 @@ describe('server/_topup-screen.js', () => {
   it('повтор и проверка оплаты укладываются в 64 байта', () => {
     expect(screen.topupRetryData(500, 'shop:cp:n:365:20:both')).toBe('tp:500:shop:cp:n:365:20:both');
     expect(screen.topupRetryData(500, `shop:${'a'.repeat(60)}`)).toBe('tp:500');
+    // tp: разбирает только целые рубли — сумма с копейками ведёт на «Своя сумма», а не на «кнопка устарела».
+    expect(screen.topupRetryData(350.5, 'gen')).toBe('topup:custom');
+    expect(screen.topupRetryData(350.5)).toBe('topup:custom');
     expect(Buffer.byteLength(screen.topupCheckData(TOKEN))).toBeLessThanOrEqual(64);
     expect(screen.topupCheckData('short')).toBeNull();
     expect(screen.topupCheckData(null)).toBeNull();

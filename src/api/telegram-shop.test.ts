@@ -185,6 +185,16 @@ describe('ошибка покупки — по исходу денег, без �
     expect(text).toContain('вернём 90 ₽ вручную');
     expect(datas().some(data => String(data).startsWith('shop:wbpk'))).toBe(false);
   });
+
+  it('итог неясен (ответ списания потерялся) — ни «не списаны», ни повтора: проверить баланс', async () => {
+    fail('unknown');
+    await bot.processUpdate(press('shop:pay:555555:wbpk:10'));
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('Списались ли деньги, пока не ясно');
+    expect(text).not.toContain('не списаны');
+    expect(datas().some(data => String(data).startsWith('shop:wbpk'))).toBe(false);
+    expect(datas()).toContain('menu:profile');
+  });
 });
 
 describe('ключ «ПВЗ Принт»', () => {
@@ -201,6 +211,21 @@ describe('ключ «ПВЗ Принт»', () => {
     expect(done.body.text).toContain('он в сообщении ниже');
     expect(done.body.text).not.toContain('CP-AAAA-BBBB');
     expect(datas(done)).toContain('shop:cp');
+  });
+
+  it('сообщение с ключом не ушло — ключ прямо в «Готово», без «в сообщении ниже»', async () => {
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (String(url).endsWith('/sendMessage') && String(init.body).includes('Ваш ключ')) {
+        return json({ ok: false, error_code: 500, description: 'Internal Server Error' }, 500);
+      }
+      return base(url, init);
+    }));
+    vi.spyOn(wallet, 'payWithWallet').mockResolvedValue({ ok: true, order: { id: 'o1', cell_print_license_key: 'CP-AAAA-BBBB' }, balanceKopecks: 0 });
+    await bot.processUpdate(press('shop:pay:454545:cp:n:30:1:wb'));
+    const done = sent.find(call => call.method === 'editMessageText' && String(call.body.text).includes('Готово'))!;
+    expect(done.body.text).toContain('<code>CP-AAAA-BBBB</code>');
+    expect(done.body.text).not.toContain('в сообщении ниже');
   });
 
   it('экран ключей: ключи строками; пробный — без «Продлить», с советом купить ключ', async () => {
@@ -288,10 +313,10 @@ describe('payWithWallet сообщает, что стало с деньгами'
     await expect(pay()).rejects.toMatchObject({ walletOutcome: 'refund_failed' });
   });
 
-  it('ответ списания потерялся, а списания не было — not_charged, заказ отменён', async () => {
+  it('ответ списания потерялся, а списания пока нет — unknown (оно ещё может дойти), заказ отменён', async () => {
     world.rpc.wallet_pay_order = () => json({ message: 'relay timeout' }, 500);
     world.rpc.wallet_refund_order = () => json({ ok: false, reason: 'not_paid' });
-    await expect(pay()).rejects.toMatchObject({ walletOutcome: 'not_charged' });
+    await expect(pay()).rejects.toMatchObject({ walletOutcome: 'unknown' });
     expect(db.some(call => call.method === 'PATCH' && call.path.startsWith('payment_orders?id=eq.order-1') && call.body.status === 'canceled')).toBe(true);
   });
 });
@@ -334,5 +359,25 @@ describe('напоминание за 2 дня (api/cabinet.js)', () => {
     expect(sub.body.text).toContain('не хватает 139 ₽');
     expect(datas(sub)[0]).toBe('n:shop:helper:standard');
     expect(messages.every(call => !String(call.body.text).includes('Печат'))).toBe(true);
+  });
+
+  it('тариф не из продажи («Базовый») — не «после текущего», а пересчёт остатка, как решит SQL', async () => {
+    const soon = new Date(Date.now() + 1.5 * 86400000).toISOString();
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      const address = String(url);
+      const body = init.body ? JSON.parse(String(init.body)) : null;
+      if (!address.startsWith('https://db.test')) { sent.push({ method: address.split('/').pop() || '', body: body || {} }); return json({ ok: true, result: { message_id: 1 } }); }
+      const path = decodeURIComponent(address.split('/rest/v1/')[1] || '');
+      if (path.startsWith('app_subscriptions') && path.includes('ends_at=gte.')) return json([{ id: 's2', user_id: USER, plan: 'basic', ends_at: soon }]);
+      if (path.startsWith('user_telegram_identities')) return json([{ telegram_user_id: TG }]);
+      if (path.startsWith('wallet_accounts')) return json([{ balance_kopecks: 0 }]);
+      if (path.startsWith('in_app_notifications')) return json([{ id: `n${Math.random()}` }]);
+      return json([]);
+    }));
+    await cabinet.notifyTelegramExpiry2d();
+    const sub = sent.find(call => call.method === 'sendMessage' && String(call.body.text).includes('Помощник ПВЗ'))!;
+    expect(sub.body.text).toContain('Тариф «Базовый» больше не продаётся — выберите новый: остаток пересчитаем в дни нового тарифа, ничего не сгорит.');
+    expect(sub.body.text).not.toContain('после текущего');
+    expect(datas(sub)[0]).toBe('n:shop:helper');
   });
 });
