@@ -10,7 +10,7 @@ const messages = require('../../server/_admin-messages.js') as {
   validateMessageBody: (body: unknown) => { error?: string; channels?: string[]; subject?: string; text?: string; link?: string | null; deviceIds?: string[]; idempotencyKey?: string };
   pcMessageText: (subject: string, body: string) => string;
   absoluteLink: (link: string) => string | null;
-  telegramText: (subject: string, body: string) => string;
+  telegramText: (subject: string, body: string, footer?: string) => string;
   deliver: (input: Record<string, unknown>) => Promise<ChannelResult[]>;
   message: (req: unknown, res: unknown, ctx: { userId: string }) => Promise<unknown>;
   notifyCompat: (req: unknown, res: unknown, ctx: { userId: string }) => Promise<unknown>;
@@ -465,6 +465,9 @@ describe('рассылки (_admin-cabinet.js)', () => {
       expect(res.body).toMatchObject({ sent: 2, failed: 0, blocked: 0, total: 3, alreadySent: 1 });
       const sentTo = calls.filter(c => c.url.includes('api.telegram.org')).map(c => c.body.chat_id).sort();
       expect(sentTo).toEqual([20, 30]);
+      // Под каждой рассылкой — «☰ Меню» (n: — меню новым сообщением, рассылка остаётся в чате).
+      const markups = calls.filter(c => c.url.includes('api.telegram.org')).map(c => c.body.reply_markup);
+      expect(markups.every(m => JSON.stringify(m) === JSON.stringify({ inline_keyboard: [[{ text: '☰ Меню', callback_data: 'n:menu:home' }]] }))).toBe(true);
       const claim = calls.find(c => c.url.startsWith('notification_deliveries?on_conflict=dedupe_key'))!;
       expect(claim.body[0]).toMatchObject({ channel: 'telegram', source: 'broadcast', status: 'pending', admin_action_id: 70, recipient: '10', channel_ref: '@u1' });
       const firstSend = calls.findIndex(c => c.url.includes('api.telegram.org'));
@@ -475,6 +478,60 @@ describe('рассылки (_admin-cabinet.js)', () => {
     } finally {
       delete process.env.TELEGRAM_BOT_TOKEN;
     }
+  });
+});
+
+describe('личное сообщение в Telegram: от кого и как ответить', () => {
+  it('message → Telegram: подпись поддержки, ссылка админа, «✉️ Ответить в поддержку» и «☰ Меню»', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'token';
+    delete process.env.TELEGRAM_API_BASE;
+    try {
+      stub((path, method) => {
+        if (path.startsWith('rpc/consume_api_rate_limit')) return true;
+        if (path.startsWith('admin_actions') && method === 'POST') return [{ id: 43 }];
+        if (path.startsWith('user_telegram_identities')) return [{ telegram_user_id: 55, username: 'ivan' }];
+        if (path.startsWith('telegram_bot_subscribers') && method === 'GET') return [{ telegram_user_id: 55, chat_id: 55, blocked_at: null }];
+        if (path.startsWith('notification_deliveries') && method === 'POST') return [{ id: 'd-tg' }];
+        if (path.includes('api.telegram.org')) return { ok: true, result: { message_id: 9 } };
+        return [];
+      });
+      const res = response();
+      await messages.message(req({ channels: ['telegram'], subject: 'Тема', body: 'Текст', link: '/cabinet', idempotencyKey: KEY }), res, { userId: USER });
+      expect(res.statusCode).toBe(201);
+      const send = calls.find(c => c.url.includes('api.telegram.org'))!;
+      expect(send.body.text).toBe('<b>Тема</b>\n\nТекст\n\n— Поддержка shk-wb.ru. Ответить можно по кнопке ниже.');
+      expect(send.body.reply_markup.inline_keyboard).toEqual([
+        [{ text: 'Открыть', url: 'https://shk-wb.ru/cabinet' }],
+        [{ text: '✉️ Ответить в поддержку', url: 'https://t.me/roma_denosov' }],
+        [{ text: '☰ Меню', callback_data: 'n:menu:home' }],
+      ]);
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN;
+    }
+  });
+
+  it('уведомления через deliver (баланс, ограничения) подпись поддержки не получают', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'token';
+    delete process.env.TELEGRAM_API_BASE;
+    try {
+      stub((path, method) => {
+        if (path.startsWith('user_telegram_identities')) return [{ telegram_user_id: 55, username: 'ivan' }];
+        if (path.startsWith('telegram_bot_subscribers') && method === 'GET') return [{ telegram_user_id: 55, chat_id: 55, blocked_at: null }];
+        if (path.startsWith('notification_deliveries') && method === 'POST') return [{ id: 'd-tg' }];
+        if (path.includes('api.telegram.org')) return { ok: true, result: { message_id: 9 } };
+        return [];
+      });
+      await messages.deliver({ userId: USER, channels: ['telegram'], subject: 'Доступ восстановлен', body: 'Всё работает', dedupeBase: 'lift:1' });
+      expect(calls.find(c => c.url.includes('api.telegram.org'))!.body.text).not.toContain('Поддержка shk-wb.ru');
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN;
+    }
+  });
+
+  it('telegramText: подпись остаётся, обрезается сам текст', () => {
+    const text = messages.telegramText('Т', 'я'.repeat(5000), '— Поддержка');
+    expect(text.length).toBeLessThanOrEqual(4096);
+    expect(text.endsWith('…\n\n— Поддержка')).toBe(true);
   });
 });
 

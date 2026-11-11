@@ -82,6 +82,8 @@ const restrictions = require('../../server/_admin-restrictions.js') as {
   liftRestrictionAction: (req: unknown, res: Res, ctx: { userId: string }) => Promise<unknown>;
   blockCompat: (req: unknown, res: Res, ctx: { userId: string }) => Promise<unknown>;
   unblockCompat: (req: unknown, res: Res, ctx: { userId: string }) => Promise<unknown>;
+  restrictionNotice: (r: { scopes?: string[]; until?: string | null; publicMessage?: string | null }) => { subject: string; body: string; telegram: { keyboard: any[] } };
+  liftNotice: () => { subject: string; body: string; telegram: { keyboard: any[] } };
   liftRestriction: (row: unknown, reason: string, opts?: Record<string, unknown>) => Promise<{ restored: Record<string, number>; restriction: any }>;
 };
 
@@ -150,6 +152,25 @@ describe('проверка тела ограничения', () => {
   });
 });
 
+describe('тексты для пользователя', () => {
+  it('ограничение: перечень областей словами, бессрочно, текст админа отдельной строкой', () => {
+    const notice = restrictions.restrictionNotice({ scopes: ['withdrawals', 'purchases'], until: null, publicMessage: 'Проверяем оплаты' });
+    expect(notice.subject).toBe('Доступ ограничен');
+    expect(notice.body).toBe([
+      'Закрыто: покупки и оплата с баланса, перевод и вывод вознаграждения за приглашения.',
+      'Срок: бессрочно.',
+      'Проверяем оплаты',
+      'Если считаете это ошибкой — напишите в поддержку.',
+    ].join('\n'));
+  });
+
+  it('«Полностью» — всё сразу; заголовок не повторяется в тексте снятия', () => {
+    expect(restrictions.restrictionNotice({ scopes: ['all'], until: '2026-12-01T12:00:00Z' }).body)
+      .toMatch(/^Закрыто: всё — сайт, Telegram-бот и программы\.\nСрок: до 01\.12\.2026\./);
+    expect(restrictions.liftNotice().body).not.toContain('Доступ восстановлен');
+  });
+});
+
 describe('restrict', () => {
   it('не ходит в базу при ошибке проверки', async () => {
     const calls = backend(() => []);
@@ -196,6 +217,10 @@ describe('restrict', () => {
     expect(calls.some(c => c.method === 'PUT')).toBe(false);
     // ограничение app не закрывает кабинет — пишем туда и в Telegram
     expect(deliver.mock.calls[0][0]).toMatchObject({ channels: ['cabinet', 'telegram'], subject: 'Доступ ограничен', dedupeBase: `restrict:${RID}` });
+    // Что закрыто — словами, срок, куда писать; в Telegram — кнопка-ссылка на поддержку, а не callback.
+    const notice = deliver.mock.calls[0][0] as any;
+    expect(notice.body).toMatch(/^Закрыто: программа «Помощник ПВЗ»\.\nСрок: до \d{2}\.\d{2}\.\d{4}\.\nЕсли считаете это ошибкой — напишите в поддержку\.$/);
+    expect(notice.telegram.keyboard).toEqual([[{ text: '✉️ Написать в поддержку', url: 'https://t.me/roma_denosov' }]]);
     expect(botRpc.callBot).toHaveBeenCalledWith('invalidateUserControls');
   });
 
@@ -319,7 +344,8 @@ describe('снятие ограничения', () => {
     expect(res.body).toHaveProperty('restored');
     expect(res.body.restriction.id).toBe(RID);
     expect(calls.filter(c => c.method === 'POST' && c.path === 'admin_actions')).toHaveLength(1);
-    expect(deliver.mock.calls[0][0]).toMatchObject({ subject: 'Доступ восстановлен', dedupeBase: `lift:${RID}` });
+    expect(deliver.mock.calls[0][0]).toMatchObject({ subject: 'Доступ восстановлен', body: 'Ограничение снято, всё снова работает.', dedupeBase: `lift:${RID}` });
+    expect((deliver.mock.calls[0][0] as any).telegram.keyboard).toEqual([[{ text: '☰ Меню', callback_data: 'menu:home' }]]);
   });
 
   it('нет действующего — 409 NOT_RESTRICTED', async () => {

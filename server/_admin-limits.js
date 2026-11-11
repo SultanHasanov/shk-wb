@@ -1,5 +1,6 @@
 const { supabaseFetch } = require('./_supabase');
 const { adminFingerprint, adminError, runIdempotent } = require('./_admin-grants');
+const { MONEY_KEYBOARD, supportMoneyNotice } = require('./_bot-texts');
 
 /**
  * Ручные лимиты и кошелёк из карточки пользователя админки.
@@ -255,21 +256,10 @@ function walletMessage(kopecks, comment, balanceKopecks) {
   };
 }
 
-// Тот же случай для Telegram: баланс тратится в боте — кнопки бота вместо ссылки в кабинет сайта,
-// и заголовок начисления не путается с оплатой картой.
-const WALLET_TELEGRAM_KEYBOARD = [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '☰ Меню', callback_data: 'menu:home' }]];
-
+// Тот же случай для Telegram — общий текст с начислением /bonus в боте (server/_bot-texts.js): одно событие —
+// один текст. Баланс тратится в боте — кнопки бота вместо ссылки в кабинет сайта.
 function walletTelegramMessage(kopecks, comment, balanceKopecks) {
-  const credit = kopecks > 0;
-  return {
-    subject: credit ? `🎁 Поддержка начислила вам ${rub(kopecks)}` : `С баланса списано ${rub(kopecks)}`,
-    body: [
-      `Причина: ${comment}`,
-      `💰 На балансе: ${rub(balanceKopecks)}`,
-      ...(credit ? [] : ['Есть вопросы — напишите в поддержку.']),
-    ].join('\n'),
-    keyboard: WALLET_TELEGRAM_KEYBOARD,
-  };
+  return { ...supportMoneyNotice({ kopecks, note: comment, balanceKopecks }), keyboard: MONEY_KEYBOARD };
 }
 
 async function walletAdjust(req, res, { userId }) {

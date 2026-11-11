@@ -232,10 +232,10 @@ function Broadcasts() {
           <Field label="Текст" help="Переменные: {name}, {first_name}, {last_name}, {username}">
             <Textarea name="text" rows={5} maxLength={3500} placeholder="Здравствуйте, {name}!" required />
           </Field>
-          <Field label="Подпись кнопки (необязательно)"><Input name="button" maxLength={64} /></Field>
+          <Field label="Подпись кнопки (необязательно)" help="Под рассылкой всегда есть «☰ Меню», ваша кнопка-ссылка — над ней"><Input name="button" maxLength={64} /></Field>
           <Field label="HTTPS-ссылка кнопки (необязательно)"><Input name="url" type="url" /></Field>
           <Checkbox checked={removeKeyboard} onChange={event => setRemoveKeyboard(event.currentTarget.checked)}>
-            Убрать у получателей старую нижнюю клавиатуру. Если кнопка-ссылка не задана, под сообщением будет «☰ Открыть меню»
+            Убрать у получателей старую нижнюю клавиатуру
           </Checkbox>
           <Checkbox checked={onlyLegacy} onChange={event => setOnlyLegacy(event.currentTarget.checked)}>
             Только активировавшим бота до {legacyDate || '…'} — у них ещё старая клавиатура

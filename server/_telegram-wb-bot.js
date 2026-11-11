@@ -70,7 +70,11 @@ const LEGACY_BUTTONS = new Set([
 // Ссылки на программы показываем текстом, а не кнопкой: их копируют и открывают на ПК пункта.
 const PROGRAM_URL = 'https://shk-wb.ru/program';
 const CELL_PRINT_URL = 'https://shk-wb.ru/cell-print';
-const SUPPORT_URL = 'https://t.me/roma_denosov';
+// Поддержка и проценты приглашений — общие с сообщениями сайта (оплаты, админка): server/_bot-texts.js.
+const botTexts = require('./_bot-texts');
+const { SUPPORT_URL, REFERRAL_PERCENT, REFERRAL_WITHDRAW_MIN_RUB } = botTexts;
+// Скидка клуба — до текстов меню: строки о ней собираются из CLUB_DISCOUNT_PERCENT и CLUB_REF_MS при загрузке.
+const { CLUB_DISCOUNT_PERCENT, CLUB_REF_MS, applyClubDiscount, clubDiscountInfo, clubPrice, markClubRef } = require('./_club');
 const CHANNEL_URL = 'https://t.me/wbtools_ru';
 const VPN_URL = 'https://t.me/wb_wpn_bot';
 
@@ -83,7 +87,7 @@ const BOT_COMMANDS = [
   { command: 'reviews', description: 'Отзывы ПВЗ' },
   { command: 'profile', description: 'Профиль и баланс' },
   { command: 'balance', description: 'Баланс и пополнение' },
-  { command: 'invite', description: 'Пригласить коллегу — 10% с его оплат вам' },
+  { command: 'invite', description: `Пригласить коллегу — ${REFERRAL_PERCENT}% с его оплат вам` },
   { command: 'help', description: 'Помощь и поддержка' },
   { command: 'cancel', description: 'Отменить текущее действие' },
 ];
@@ -400,14 +404,42 @@ function clubMenuLine(until) {
   return `🎁 Вам как участнику клуба — скидка ${CLUB_DISCOUNT_PERCENT}% на «Код клиента» и «Кто поставил оценку»${until ? ` до ${dayMonthShort(until)}` : ''}, пока активна подписка на клуб.`;
 }
 
+/** Короткая строка о действующей скидке на экранах с ценой: «🎁 Скидка участника клуба 20% — до 12.12.» */
+function clubLine(until) {
+  return `🎁 Скидка участника клуба ${CLUB_DISCOUNT_PERCENT}%${until ? ` — до ${dayMonthShort(until)}` : ''}.`;
+}
+
+const CLUB_REF_DAYS = Math.round(CLUB_REF_MS / (24 * 60 * 60 * 1000));
+const CLUB_EXPIRED_LINE = `Скидка клуба закончилась. Чтобы включить её снова на ${CLUB_REF_DAYS} дней, откройте бота по кнопке из группы клуба.`;
+const CLUB_INACTIVE_LINE = `Скидка ${CLUB_DISCOUNT_PERCENT}% для участников клуба действует при активной подписке на клуб.`;
+const CLUB_ERROR_LINE = 'Не получилось проверить подписку на клуб — скидку покажу, когда проверка пройдёт.';
+
+/** Скидка клуба этого человека (server/_club.js: clubDiscountInfo); сбой — reason 'error'. */
+function clubInfo(telegramId) {
+  return clubDiscountInfo(telegramId).catch(() => ({ active: false, until: null, reason: 'error' }));
+}
+
+/**
+ * Что сказать о скидке клуба: действует — на что и до какого числа (menu — длинная строка для приветствия);
+ * закончилась или подписка неактивна — как вернуть. Сбой проверки — не «подписка неактивна»: говорим о нём
+ * только сразу после перехода из группы (fromClub), иначе молчим. Не из клуба (no_ref, off) — ничего.
+ */
+function clubStatusLines(club, { fromClub = false, menu = false } = {}) {
+  if (club?.reason === 'active') return [menu ? clubMenuLine(club.until) : clubLine(club.until)];
+  if (club?.reason === 'expired') return [CLUB_EXPIRED_LINE];
+  if (club?.reason === 'inactive') return [CLUB_INACTIVE_LINE];
+  if (club?.reason === 'error' && fromClub) return [CLUB_ERROR_LINE];
+  return [];
+}
+
 /** Приветствие после /start: для кого бот, что умеет и сколько стоит. Цены — из констант, со скидкой клуба. */
-async function greetingLines(from) {
-  const club = await clubDiscountInfo(from?.id).catch(() => ({ active: false, until: null }));
+async function greetingLines(from, { fromClub = false } = {}) {
+  const club = await clubInfo(from?.id);
   const withClub = price => (club.active ? applyClubDiscount(price) : price);
   const custom = wallet.formatRub(GENERATION_PRICES.custom / 100), batch = wallet.formatRub(GENERATION_PRICES.batch / 100);
   return [
     greetingTitle(from),
-    ...(club.active ? [clubMenuLine(club.until)] : []),
+    ...clubStatusLines(club, { fromClub, menu: true }),
     'Я бот для сотрудников ПВЗ Wildberries. Что умею:',
     '',
     `🏷 Стикер с ШК товара (номер из 11 цифр) — ${custom}, пачка из ${BATCH_QUANTITY} новых — ${batch}. Можно просто прислать сюда фото или скриншот с номером.`,
@@ -424,9 +456,9 @@ async function greetingLines(from) {
  * greet — после /start: приветствие по имени вместо заголовка «Главное меню».
  * referral — исход перехода по приглашению (REFERRAL_LINES), notice — строка вместо заголовка (или под приветствием).
  */
-async function showMainMenu(from, chatId, messageId, { greet = false, referral = '', notice = '' } = {}) {
+async function showMainMenu(from, chatId, messageId, { greet = false, referral = '', notice = '', fromClub = false } = {}) {
   // Без ссылок в тексте: канал и VPN — кнопками на экране «Помощь».
-  const lines = greet ? await greetingLines(from) : [notice || '<b>Главное меню</b>'];
+  const lines = greet ? await greetingLines(from, { fromClub }) : [notice || '<b>Главное меню</b>'];
   if (greet && notice) lines.splice(1, 0, notice);
   if (REFERRAL_LINES[referral]) lines.push('', REFERRAL_LINES[referral]);
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard() });
@@ -466,6 +498,8 @@ const REPEAT_PAID_LINE = 'Каждое получение QR — отдельн�
 async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
   const userId = from?.id ? await findUser(from.id).catch(() => null) : null;
   const [charge, pending] = await Promise.all([nextClientCharge(from, userId), pendingApprovalRows(userId)]);
+  // О скидке — только когда платят деньгами; ответ проверки уже в кеше после nextClientCharge.
+  const club = ['wallet', 'unknown'].includes(charge.kind) ? await clubInfo(from?.id) : null;
   const text = [
     ...(notice ? [notice, ''] : []),
     '<b>🔑 Код клиента</b>',
@@ -473,7 +507,7 @@ async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
     'Пришлю QR клиента на сегодня — когда клиент не может сам показать свой QR из приложения WB.',
     'Найдите клиента по ячейке или телефону — или пришлите его ID цифрами, например <code>191607973</code>.',
     '',
-    ...(charge.club ? [clubLine] : []),
+    ...clubStatusLines(club),
     `<b>Что спишется:</b> ${approvals.chargeLine(charge)}`,
     ...(charge.kind === 'free' ? [] : [REPEAT_PAID_LINE]),
   ].join('\n');
@@ -578,7 +612,7 @@ async function afterTopupApproval(from, chatId, id, { noticeId = null, screenId 
   if (r.outcome === 'approved') {
     const b = r.row.billing || {};
     const spent = b.via === 'wallet' && b.duplicate ? 'Ничего не списано — деньги на балансе.'
-      : b.via === 'wallet' ? `Списано ${wallet.formatRub(Number(b.rub || 0))}${b.club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(b.balance || 0))}.`
+      : b.via === 'wallet' ? `Списано ${wallet.formatRub(Number(b.rub || 0))}${b.club ? CLUB_CHARGE_NOTE : ''} · на балансе ${wallet.formatRub(Number(b.balance || 0))}.`
       : b.via === 'reuse' ? 'Этого клиента сегодня уже выдавали — повтор без списания, деньги на балансе.'
       : 'Без списания с баланса.';
     // Нет уведомления «Баланс пополнен» — итог (сколько списано) пишем в подпись под фото.
@@ -871,17 +905,25 @@ function clientCodeFreeFor(telegramId) {
   return Boolean(unlimitedName(telegramId)) || envIdList('CLIENT_CODE_FREE_TELEGRAM_IDS').includes(String(telegramId));
 }
 
-// ── Скидка 20% участникам «Клуба вопросов» — server/_club.js ──
+// ── Скидка участникам «Клуба вопросов» — server/_club.js (подключён в начале файла) ──
 // В боте: человек пришёл по кнопке из группы клуба (/start club_code | club_reviews) → club_ref_at, скидка 30 дней
 // после перехода и только при активной подписке. Только «Код клиента» и «Кто поставил оценку»; ШК и магазин — без скидки.
 // Тот же модуль даёт скидку на тариф «Про» программы при оплате на сайте (api/payments.js).
-const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubDiscountInfo, clubPrice, markClubRef } = require('./_club');
-
 const clientCodePrice = telegramId => clubPrice(telegramId, CLIENT_CODE_PRICE);
+// Приписка к «Списано …» при скидке клуба.
+const CLUB_CHARGE_NOTE = ` (скидка клуба ${CLUB_DISCOUNT_PERCENT}%)`;
+// Разовая скидка на стикеры (GENERATION_DISCOUNT_PRICES к GENERATION_PRICES) — в процентах для текстов.
+const GENERATION_DISCOUNT_PERCENT = Math.round((1 - GENERATION_DISCOUNT_PRICES.custom / GENERATION_PRICES.custom) * 100);
+// Предел срока ключа «ПВЗ Принт» = CHECK duration_days в 20260823_cell_print.sql — менять вместе.
+const CELL_PRINT_MAX_DAYS = 4000;
 const clientCodeEventKey = (userId, qrText) => `qr:${userId}:${qrText}`;
 const reviewPrice = telegramId => clubPrice(telegramId, REVIEW_PRICE);
 
-const clubLine = '🎁 У вас скидка 20% как у участника клуба.';
+/** Цена «Кто поставил оценку» для экрана вместе со скидкой клуба: { price, club, info } — один запрос проверки. */
+async function reviewPriceInfo(telegramId) {
+  const info = await clubInfo(telegramId);
+  return { price: info.active ? applyClubDiscount(REVIEW_PRICE) : REVIEW_PRICE, club: info.active, info };
+}
 
 /** «· осталось 6 из 10 на этот месяц, в пакете 5» после списания кода; ошибка → пусто. */
 async function codesLeftText(userId) {
@@ -1020,7 +1062,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
   const duplicate = spent.duplicate === true;
   if (!duplicate) notifyAdminSpend({ userId, priceRub: price, title: `Код клиента (QR)${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
   const spentText = duplicate ? 'Повторная отправка — ничего не списано.'
-    : `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}.`;
+    : `Списано ${wallet.formatRub(price)}${club ? CLUB_CHARGE_NOTE : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}.`;
   try {
     await sendPhoto(chatId, clientQrUrl(qrText), { caption: clientQrCaption(sid, cell, spentText), reply_markup: CLIENT_QR_KEYBOARD });
   } catch (error) {
@@ -1302,7 +1344,7 @@ async function dropLegacyKeyboard(chatId) {
 const GEN_BACK = { text: '⬅️ Назад', callback_data: 'gen:back' };
 const GEN_CANCEL = { text: '✖️ Отмена', callback_data: 'gen:cancel' };
 const KIND_TITLES = { product: '🏷 Стикеры товаров', box: '📦 QR возвратных коробок' };
-const MODE_TITLES = { range: 'Пачка 50', custom: 'По номеру' };
+const MODE_TITLES = { range: `Пачка ${BATCH_QUANTITY}`, custom: 'По номеру' };
 // Что получает человек — одними словами во всех шагах (словарь плана: «стикер», «QR коробки», без «генерации»).
 const KIND_NOUNS = {
   product: { one: 'стикер товара', many: 'стикеров товаров', number: 'номер ШК', length: 11, example: '47671114039' },
@@ -1379,14 +1421,14 @@ function wizardView(state, draft) {
     const box = draft.category === 'box';
     const lines = [
       `<b>${box ? 'Какие QR коробок нужны?' : 'Какие стикеры нужны?'}</b>`,
-      `• Пачка 50 — ${BATCH_QUANTITY} ${box ? 'QR с новыми номерами коробок' : 'стикеров с новыми номерами ШК'} одним PDF, ${batchFromPackage ? `из вашего пакета (спишется ${BATCH_QUANTITY} шт.)` : `${batch} за всю пачку`}.`,
+      `• Пачка ${BATCH_QUANTITY} — ${BATCH_QUANTITY} ${box ? 'QR с новыми номерами коробок' : 'стикеров с новыми номерами ШК'} одним PDF, ${batchFromPackage ? `из вашего пакета (спишется ${BATCH_QUANTITY} шт.)` : `${batch} за всю пачку`}.`,
       `• Один по номеру — ${box ? 'QR с номером коробки' : 'стикер с номером ШК'}, который вы пришлёте, ${packageLeft > 0 ? 'из вашего пакета' : custom}.`,
     ];
-    if (prices.discount && !(batchFromPackage && packageLeft > 0)) lines.push('Цены — с разовой скидкой 20%.');
-    if (packageLeft > 0) lines.push(`В вашем пакете ${packageLeft} шт. — ${batchFromPackage ? 'и «Пачка 50», и «Один по номеру» спишутся' : '«Один по номеру» спишется'} из него, баланс не тронется.`);
+    if (prices.discount && !(batchFromPackage && packageLeft > 0)) lines.push(`Цены — с разовой скидкой ${GENERATION_DISCOUNT_PERCENT}%.`);
+    if (packageLeft > 0) lines.push(`В вашем пакете ${packageLeft} шт. — ${batchFromPackage ? `и «Пачка ${BATCH_QUANTITY}», и «Один по номеру» спишутся` : '«Один по номеру» спишется'} из него, баланс не тронется.`);
     else if (cheapest) lines.push(`Часто делаете по номеру? В пакете дешевле — от ${wallet.formatRub(cheapest)} за штуку.`);
     return { text: `${trail}${error}${lines.join('\n')}`, rows: [
-      [{ text: batchFromPackage ? 'Пачка 50 шт. — из пакета' : `Пачка 50 шт. — ${batch}`, callback_data: 'gen:mode:range' }],
+      [{ text: batchFromPackage ? `Пачка ${BATCH_QUANTITY} шт. — из пакета` : `Пачка ${BATCH_QUANTITY} шт. — ${batch}`, callback_data: 'gen:mode:range' }],
       [{ text: packageLeft > 0 ? 'Один по номеру — из пакета' : `Один по номеру — ${custom}`, callback_data: 'gen:mode:custom' }],
       [{ text: cheapest ? `💎 Пакеты по номеру — от ${wallet.formatRub(cheapest)}/шт.` : '💎 Пакеты по номеру', callback_data: 'shop:gen:wizard' }],
       [GEN_BACK],
@@ -1422,7 +1464,7 @@ function wizardView(state, draft) {
   // Без пакета — с общего рублёвого баланса.
   const cost = Number(draft.walletCost || 0), balance = Number(draft.balanceKopecks || 0) / 100;
   if (balance >= cost) {
-    return { text: `${head}<b>Проверьте и нажмите «Создать»</b>\n${result}\nСпишется с баланса: <b>${wallet.formatRub(cost)}</b>${draft.discountAvailable ? ' (скидка 20%)' : ''}, останется ${wallet.formatRub(balance - cost)}.`, rows: [
+    return { text: `${head}<b>Проверьте и нажмите «Создать»</b>\n${result}\nСпишется с баланса: <b>${wallet.formatRub(cost)}</b>${draft.discountAvailable ? ` (скидка ${GENERATION_DISCOUNT_PERCENT}%)` : ''}, останется ${wallet.formatRub(balance - cost)}.`, rows: [
       [{ text: `✅ Создать за ${wallet.formatRub(cost)}`, callback_data: 'gen:confirm' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
@@ -2010,7 +2052,7 @@ function generationCaption(draft, charge) {
   const what = draft.mode === 'range' ? `${BATCH_QUANTITY} ${noun.many} одним файлом` : `1 ${noun.one} (${draft.code})`;
   const paid = charge.paymentSource === 'package'
     ? `Списано из пакета: ${units} шт., в пакете осталось ${Number(charge.packageRemaining || 0)}.`
-    : `Списано ${wallet.formatRub(charge.priceKopecks / 100)}${charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(charge.balanceKopecks / 100)}.`;
+    : `Списано ${wallet.formatRub(charge.priceKopecks / 100)}${charge.discountApplied ? ` со скидкой ${GENERATION_DISCOUNT_PERCENT}%` : ''}, на балансе ${wallet.formatRub(charge.balanceKopecks / 100)}.`;
   const hint = draft.category === 'box' ? '' : '\nНужен новый вид — с маленькими QR по углам? Нажмите «🔁 Новый вид», пришлю без доплаты.';
   return `Готово: ${what}. ${paid}${hint}`;
 }
@@ -2678,11 +2720,11 @@ function reviewTopupMessage(telegramId, then) {
 async function showReviewPaywall(from, chatId, reason, messageId, then, reviewMessageId) {
   rememberReviewTopupMessage(from.id, then, reviewMessageId);
   const userId = await ensureUser(from);
-  const [balance, free, { price, club }] = await Promise.all([walletRub(userId), helperFreeText(), reviewPrice(from.id)]);
+  const [balance, free, { price, info: club }] = await Promise.all([walletRub(userId), helperFreeText(), reviewPriceInfo(from.id)]);
   const missing = Math.round((price - balance) * 100) / 100;
   const text = [
     `<b>👤 Кто поставил оценку — ${wallet.formatRub(price)}</b>`,
-    ...(club ? [clubLine] : []),
+    ...clubStatusLines(club),
     'Покажу ID клиента, телефон (WB может скрыть часть цифр), когда он забрал заказ или отказался, и ячейку.',
     'Того же клиента в этом ПВЗ повторно — бесплатно, даже по другому отзыву. Если WB не отдал данные — не списываю.',
     '',
@@ -2829,9 +2871,9 @@ async function showReviewFilters(from, chatId, messageId, { notice = '' } = {}) 
   }
   const free = reviewFreeFor(from.id);
   const userId = free ? null : await findUser(from.id);
-  const [balance, { price, club }] = await Promise.all([
+  const [balance, { price, info: club }] = await Promise.all([
     free ? null : userId ? walletRub(userId).catch(() => null) : 0,
-    reviewPrice(from.id),
+    reviewPriceInfo(from.id),
   ]);
   const text = [
     ...(notice ? [notice, ''] : []),
@@ -2841,7 +2883,7 @@ async function showReviewFilters(from, chatId, messageId, { notice = '' } = {}) 
       ? `👤 «Кто поставил оценку» — без оплаты. ${unlimitedLine(from.id)}`
       : `👤 «Кто поставил оценку» — ${wallet.formatRub(price)} за клиента: ID, телефон (WB может скрыть часть цифр), когда забрал или отказался, ячейка. Того же клиента в этом ПВЗ повторно — бесплатно.`,
     ...(balance == null ? [] : [`💰 На балансе: ${wallet.formatRub(balance)}`]),
-    ...(club && !free ? [clubLine] : []),
+    ...(free ? [] : clubStatusLines(club)),
     '',
     'Отзывы с какой оценкой показать?',
   ].join('\n');
@@ -3079,7 +3121,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then, r
     const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId, p_kopecks: price * 100 }) });
     if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then, reviewMessageId);
     if (!spent.free) notifyAdminSpend({ userId, priceRub: price, title: `Кто поставил оценку${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
-    footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
+    footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(price)}${club ? CLUB_CHARGE_NOTE : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
   }
   await sendAuthorHistory(from, chatId, info, footer, reviewMessageId);
 }
@@ -3505,7 +3547,7 @@ async function resolveShopItem(userId, parts) {
     // Старая кнопка «Продлить» под пробным ключом (из чата, из напоминания) не продаёт продление по цене «WB + Ozon».
     if (isTrialKey(key)) return { error: 'Пробный ключ не продлевается — купите новый: выберете срок, число компьютеров и площадку.', next: { text: '➕ Купить ключ', callback_data: 'shop:cp:n' } };
     if (!CP_DAYS.includes(days)) return { error: 'Такого срока нет.' };
-    if (Number(key.duration_days) + days > 4000) return { error: 'Суммарный срок ключа не может быть больше 4000 дней.' };
+    if (Number(key.duration_days) + days > CELL_PRINT_MAX_DAYS) return { error: `Суммарный срок ключа не может быть больше ${CELL_PRINT_MAX_DAYS} дней.` };
     // У старых ключей площадка не задана — продлеваем как WB и не передаём площадку в заказ.
     const legacy = !CP_SCOPES[key.marketplace_scope];
     const price = cellPrintPrice(days, key.device_limit, legacy ? 'wb' : key.marketplace_scope);
@@ -3906,9 +3948,6 @@ async function showShopFailure(from, chatId, screenId, userId, parts, item, erro
 
 // ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──
 
-const REFERRAL_PERCENT = 10; // = award_referral_order (0.10) в SQL — менять вместе
-// Минимум вывода реферальных денег на карту = WithdrawalInput в api/cabinet.js (50 000 коп.) — менять вместе.
-const REFERRAL_WITHDRAW_MIN_RUB = 500;
 const REFERRAL_PAYLOAD = /^r_([A-Za-z0-9]{6,16})$/;
 let cachedBotUsername = null;
 
@@ -3984,13 +4023,24 @@ async function bindTelegramReferral(telegramId, userId) {
   const tg = referrer ? await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(referrer)}&select=telegram_user_id&limit=1`).catch(() => []) : [];
   if (tg[0]?.telegram_user_id) {
     await sendMessage(tg[0].telegram_user_id, `<b>🎉 По вашей ссылке пришёл новый пользователь</b>\n\nС каждой его оплаты вам начисляется ${REFERRAL_PERCENT}% — деньги можно перевести на баланс бота или вывести на карту.`, {
-      reply_markup: noticeMarkup(choiceKeyboard([[{ text: '👥 Мои приглашения', callback_data: 'menu:ref' }]])),
+      reply_markup: noticeMarkup({ inline_keyboard: botTexts.REFERRAL_KEYBOARD }),
     }).catch(() => {});
   }
   return true;
 }
 
-async function showReferrals(from, chatId, messageId, notice) {
+const REFERRAL_NOTHING_TEXT = '⚠️ Переводить пока нечего — вознаграждение ещё не начислено.';
+
+/** Ограничение «Выводы» (или всё): перевод и вывод вознаграждения закрыты — строка для экрана приглашений. */
+function referralRestrictedText(restriction) {
+  return `⛔ Перевод и вывод вознаграждения сейчас недоступны. ${escapeHtml(restriction.message)}`;
+}
+
+/**
+ * Экран «👥 Пригласить коллегу»: механика одной фразой, ссылка, три числа и как забрать деньги.
+ * notice — строка сверху (итог перевода, ограничение); support — добавить кнопку поддержки (при ограничении).
+ */
+async function showReferrals(from, chatId, messageId, notice, { support = false } = {}) {
   const userId = await ensureUser(from);
   const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
   const [invited, links] = await Promise.all([
@@ -3999,40 +4049,73 @@ async function showReferrals(from, chatId, messageId, notice) {
   ]);
   const available = Number(account.available_kopecks || 0) / 100;
   const earned = Number(account.earned_kopecks || 0) / 100;
+  const minWithdraw = wallet.formatRub(REFERRAL_WITHDRAW_MIN_RUB);
   const text = [
     ...(notice ? [notice, ''] : []),
-    `<b>👥 Приглашайте коллег — ${REFERRAL_PERCENT}% с их оплат</b>`,
+    '<b>👥 Пригласить коллегу</b>',
+    // Не «с пополнений»: award_referral_order начисляет с любой оплаты картой, в том числе на сайте (база общая).
+    `Коллега открывает бота по вашей ссылке — вам ${REFERRAL_PERCENT}% с каждой его оплаты картой (в боте — с пополнений баланса).`,
+    'Засчитываются только те, кто раньше не пользовался ботом.',
     '',
     'Ваша ссылка (нажмите, чтобы скопировать):',
     // В <code> Telegram копирует текст по нажатию, а не открывает ссылку.
     `<code>${escapeHtml(links.telegram || links.site)}</code>`,
     '',
-    `Приглашено: <b>${invited.length}</b> · заработано: <b>${wallet.formatRub(earned)}</b>`,
-    `Доступно: <b>${wallet.formatRub(available)}</b>`,
-    `Вывод на карту — от ${wallet.formatRub(REFERRAL_WITHDRAW_MIN_RUB)}, через поддержку.`,
+    `Приглашено: <b>${invited.length}</b>`,
+    `Начислено всего: <b>${wallet.formatRub(earned)}</b>`,
+    `Можно забрать: <b>${wallet.formatRub(available)}</b> — на баланс бота или на карту (от ${minWithdraw}, через поддержку).`,
   ].join('\n');
   const share = links.telegram || links.site;
   const shareText = 'Стикеры и QR для возвратов WB, код клиента и отзывы ПВЗ — бот shk-wb.ru';
+  const canWithdraw = available >= REFERRAL_WITHDRAW_MIN_RUB;
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     // copy_text (Bot API 7.11) — кнопка кладёт ссылку в буфер обмена.
     [{ text: '📋 Скопировать ссылку', copy_text: { text: share } }],
     [{ text: '📤 Поделиться ссылкой', url: `https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent(shareText)}` }],
+    // Перевод — через подтверждение (ref:towallet → ref:towallet:yes): обратно на карту его уже не вывести.
     ...(available > 0 ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
     // Вывод — через поддержку (сайт для этого не нужен); кнопка только когда сумма уже доступна к выводу.
-    ...(available >= REFERRAL_WITHDRAW_MIN_RUB ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_URL }]] : []),
-    MENU_ROW,
+    ...(canWithdraw ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_URL }]] : []),
+    ...(support && !canWithdraw ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]] : []),
+    [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
+  ]) });
+}
+
+/** Ограничение вывода → экран приглашений с объяснением и кнопкой поддержки; иначе null. */
+async function referralRestricted(from, chatId, messageId, userId) {
+  const restriction = await controls.restrictionFor(userId);
+  if (!controls.covers(restriction, 'withdrawals')) return null;
+  await showReferrals(from, chatId, messageId, referralRestrictedText(restriction), { support: true });
+  return true;
+}
+
+/** «💰 Перевести на баланс» — сначала вопрос: с баланса деньги на карту уже не вывести. */
+async function confirmReferralToWallet(from, chatId, messageId) {
+  const userId = await findUser(from.id);
+  if (!userId) return showReferrals(from, chatId, messageId);
+  if (await referralRestricted(from, chatId, messageId, userId)) return;
+  const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
+  const available = Number(account?.available_kopecks || 0) / 100;
+  if (!(available > 0)) return showReferrals(from, chatId, messageId, REFERRAL_NOTHING_TEXT);
+  return showScreen(chatId, messageId, [
+    `<b>Перевести ${wallet.formatRub(available)} на баланс бота?</b>`,
+    '',
+    'С баланса деньги тратятся на покупки в боте. Вывести их на карту после перевода будет нельзя.',
+  ].join('\n'), { reply_markup: choiceKeyboard([
+    [{ text: '✅ Перевести на баланс', callback_data: 'ref:towallet:yes' }],
+    [{ text: '⬅️ Назад', callback_data: 'menu:ref' }, ...MENU_ROW],
   ]) });
 }
 
 async function referralToWallet(from, chatId, messageId) {
   const userId = await findUser(from.id);
   if (!userId) return showReferrals(from, chatId, messageId);
-  const restriction = await controls.restrictionFor(userId);
-  if (controls.covers(restriction, 'withdrawals')) return showReferrals(from, chatId, messageId, `⛔ ${escapeHtml(restriction.message)}`);
+  if (await referralRestricted(from, chatId, messageId, userId)) return;
+  // p_kopecks: null — вся доступная сумма на момент нажатия (rpc переводит атомарно; второе нажатие — «нечего»).
   const result = await supabaseFetch('rpc/referral_to_wallet', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: null }) });
   const notice = result?.ok
     ? `✅ Переведено ${wallet.formatRub(Number(result.moved) / 100)} на баланс. На балансе: ${wallet.formatRub(Number(result.wallet_balance) / 100)}.`
-    : '⚠️ Переводить нечего — доступных реферальных денег нет.';
+    : REFERRAL_NOTHING_TEXT;
   return showReferrals(from, chatId, messageId, notice);
 }
 
@@ -4176,7 +4259,7 @@ async function unknownInputNotice(from, text) {
 /** /start club_reviews: сначала польза и цена «Отзывов ПВЗ», потом (если нужно) вход в WB. */
 async function reviewsIntroText(from) {
   const [club, connection] = await Promise.all([
-    clubDiscountInfo(from.id).catch(() => ({ active: false, until: null })),
+    clubInfo(from.id),
     getWbConnection(from.id).catch(() => null),
   ]);
   const price = club.active ? applyClubDiscount(REVIEW_PRICE) : REVIEW_PRICE;
@@ -4186,7 +4269,8 @@ async function reviewsIntroText(from) {
     '',
     '<b>⭐ Отзывы ПВЗ</b>',
     `Покажу отзывы вашего пункта — смотреть бесплатно. Узнать, кто поставил оценку (ячейка, когда забрал, телефон — WB скрывает часть цифр), — ${wallet.formatRub(price)} с баланса.`,
-    ...(club.active ? [clubMenuLine(club.until)] : []),
+    // Сюда приходят только по кнопке из группы клуба (/start club_reviews) — сбой проверки тоже называем.
+    ...clubStatusLines(club, { fromClub: true, menu: true }),
     ...(ready ? [] : ['', 'Для этого нужен вход в WB — по номеру телефона и коду от WB, как в программе WB на пункте.']),
   ].join('\n');
 }
@@ -4241,14 +4325,9 @@ function bonusRecipientName(row) {
   return [name, row.username ? `@${row.username}` : ''].filter(Boolean).join(' ') || `ID ${row.telegram_user_id}`;
 }
 
+// Тот же текст, что у начисления из админки (walletAdjust): одно событие — один текст (server/_bot-texts.js).
 function bonusNoticeText({ kopecks, note, balanceKopecks }) {
-  return [
-    '<b>🎁 Вам начислен бонус!</b>',
-    '',
-    `+${wallet.formatRub(kopecks / 100)} зачислено на ваш счёт.`,
-    ...(note ? [`Комментарий: ${escapeHtml(note)}`] : []),
-    `💰 На балансе: <b>${wallet.formatRub(balanceKopecks / 100)}</b>`,
-  ].join('\n');
+  return botTexts.supportMoneyNoticeHtml({ kopecks, note, balanceKopecks });
 }
 
 async function startBonus(from, chatId, parsed) {
@@ -4284,7 +4363,7 @@ async function finishBonus(from, chatId, messageId, action, nonce) {
   const result = await wallet.grantBonus({ userId: bonus.targetUser, kopecks: bonus.kopecks, eventKey: `admin_bonus:${nonce}`, note: bonus.note, adminTelegramId: from.id });
   if (result.duplicate) return showScreen(chatId, messageId, 'Этот бонус уже начислен, повторно деньги не зачислялись.', { reply_markup: MENU_KEYBOARD });
   console.log(`bot bonus by ${from.id} to ${bonus.telegramId} ${bonus.kopecks} kopecks`);
-  const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: noticeMarkup(MENU_KEYBOARD) })
+  const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: noticeMarkup({ inline_keyboard: botTexts.MONEY_KEYBOARD }) })
     .then(() => true)
     .catch(error => { console.warn('Бонус: уведомление не доставлено', error?.message || error); return false; });
   return showScreen(chatId, messageId, [
@@ -4338,7 +4417,8 @@ async function handleCallback(callback) {
     await startTopupPayment(from, chatId, amount, topupMatch[3] || '', messageId, topupMatch[2] ? Number(topupMatch[2]) / 100 : null, data);
     return;
   }
-  if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
+  if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await confirmReferralToWallet(from, chatId, messageId); return; }
+  if (data === 'ref:towallet:yes') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
   if (data === 'topup:custom') { answerCallbackQuery(callback.id).catch(() => {}); await askTopupAmount(from, chatId, messageId); return; }
   const shopPay = data.match(/^shop:pay:(\d+):(.+)$/);
   if (shopPay) { answerCallbackQuery(callback.id).catch(() => {}); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
@@ -4648,7 +4728,7 @@ async function handleMessage(message) {
     // само называет скидку и срок; ?start=club_code | club_reviews — прежние кнопки: сразу нужный экран.
     if (clubTarget) {
       await markClubRef(from.id).catch(error => console.warn('Скидка клуба: отметка перехода', error?.message || error));
-      if (!clubTarget[1]) return showMainMenu(from, chatId, undefined, { greet: true, referral });
+      if (!clubTarget[1]) return showMainMenu(from, chatId, undefined, { greet: true, referral, fromClub: true });
       if (clubTarget[1] === 'code') {
         // Экран кода клиента пишет про скидку сам.
         await sendMessage(chatId, greetingTitle(from));

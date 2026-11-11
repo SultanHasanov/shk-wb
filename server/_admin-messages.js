@@ -80,13 +80,37 @@ function emailText(body, link) {
   return `${body}${url ? `\n\n${url}` : ''}${EMAIL_FOOTER}`;
 }
 
-/** HTML для Telegram не длиннее 4096: обрезаем экранированный текст, не разрывая сущность «&amp;». */
-function telegramText(subject, body) {
+/**
+ * HTML для Telegram не длиннее 4096: обрезаем экранированный текст, не разрывая сущность «&amp;».
+ * footer — строка после текста (подпись поддержки), её место оставляем всегда: обрезается сам текст.
+ */
+function telegramText(subject, body, footer = '') {
   const head = `<b>${escapeHtml(subject)}</b>\n\n`;
+  const tail = footer ? `\n\n${escapeHtml(footer)}` : '';
   let text = escapeHtml(body);
-  const room = MESSAGE_LIMITS.telegram - head.length;
+  const room = MESSAGE_LIMITS.telegram - head.length - tail.length;
   if (text.length > room) text = `${text.slice(0, Math.max(0, room - 1)).replace(/&[a-z]*$/i, '')}…`;
-  return head + text;
+  return head + text + tail;
+}
+
+// Личное сообщение из «Написать» в Telegram: от кого оно и как ответить. Без этого человек отвечает прямо боту,
+// а бот ответ никуда не пересылает. Только для действия message: тот же deliver шлёт уведомления о балансе
+// и ограничениях — у них свои тексты и кнопки.
+const PERSONAL_SIGNATURE = '— Поддержка shk-wb.ru. Ответить можно по кнопке ниже.';
+
+/** Кнопки личного сообщения: ссылка админа (если задана), «✉️ Ответить в поддержку», «☰ Меню». */
+function personalKeyboard(link) {
+  const url = absoluteLink(link);
+  return [
+    ...(url ? [[{ text: 'Открыть', url }]] : []),
+    [{ text: '✉️ Ответить в поддержку', url: require('./_bot-texts').SUPPORT_URL }],
+    [{ text: '☰ Меню', callback_data: 'menu:home' }],
+  ];
+}
+
+/** Telegram-вариант личного сообщения для deliver({ telegram }). */
+function personalTelegram(link) {
+  return { footer: PERSONAL_SIGNATURE, keyboard: personalKeyboard(link) };
 }
 
 /**
@@ -237,7 +261,7 @@ async function telegramTarget(userId) {
 }
 
 async function deliverTelegram({ userId, subject, body, link, key, source, actionId, telegram = null }) {
-  // Свой текст и кнопки для Telegram (telegram: { subject?, body?, keyboard? }); кабинет и письмо — прежние.
+  // Свой текст и кнопки для Telegram (telegram: { subject?, body?, footer?, keyboard? }); кабинет и письмо — прежние.
   if (telegram) {
     subject = telegram.subject ? String(telegram.subject) : subject;
     body = telegram.body ? String(telegram.body) : body;
@@ -253,7 +277,7 @@ async function deliverTelegram({ userId, subject, body, link, key, source, actio
   });
   if (delivery === 'duplicate') return { channel: 'telegram', recipient: ref, ...(await duplicateOutcome(`tg:${key}`)) };
   try {
-    const sent = await sendWithRetry(subscriber.chat_id, telegramText(subject, body), telegramOptions(link, telegram?.keyboard));
+    const sent = await sendWithRetry(subscriber.chat_id, telegramText(subject, body, telegram?.footer ? String(telegram.footer) : ''), telegramOptions(link, telegram?.keyboard));
     const providerId = sent?.message_id != null ? String(sent.message_id) : null;
     await patchDelivery(delivery.id, { status: 'sent', provider_id: providerId, sent_at: new Date().toISOString() });
     return { channel: 'telegram', status: 'sent', recipient: ref, ...(providerId ? { providerId } : {}), ...(delivery.id ? { deliveryId: delivery.id } : {}) };
@@ -308,7 +332,8 @@ async function deliverPc({ userId, subject, body, key, source, actionId, deviceI
 /**
  * Разослать одно сообщение по каналам. Ошибка одного канала не мешает другим: она уходит в его итог.
  * dedupeBase обязателен и уникален на действие (см. шапку файла).
- * telegram — необязательно: { subject?, body?, keyboard? } только для Telegram (keyboard — inline_keyboard бота).
+ * telegram — необязательно: { subject?, body?, footer?, keyboard? } только для Telegram (keyboard — inline_keyboard
+ * бота, footer — строка после текста, её не съедает обрезка до 4096).
  */
 async function deliver({ userId, channels, subject, body, link = null, deviceIds = [], actionId = null, source = 'admin', dedupeBase, telegram = null }) {
   if (dedupeBase == null || String(dedupeBase).trim() === '') throw new Error('deliver: dedupeBase is required');
@@ -389,7 +414,10 @@ async function message(req, res, { userId }) {
     action: 'message', key: idempotencyKey, userId,
     payload: { channels, subject, body: text, link, deviceIds },
   }, async ({ actionId }) => {
-    const results = await deliver({ userId, channels, subject, body: text, link, deviceIds, actionId, source: 'admin', dedupeBase: String(actionId) });
+    const results = await deliver({
+      userId, channels, subject, body: text, link, deviceIds, actionId, source: 'admin', dedupeBase: String(actionId),
+      telegram: personalTelegram(link),
+    });
     const { ok, total, result } = summarize(results);
     return {
       status: 201,
@@ -663,7 +691,9 @@ async function retryDelivery(req, res) {
       }
     } else {
       try {
-        const sent = await sendWithRetry(row.recipient, telegramText(subject, body), telegramOptions(payload.link));
+        // Повтор «Написать» — тем же видом, что и первая отправка (подпись и кнопка ответа в поддержку).
+        const personal = action?.action === 'message' ? personalTelegram(payload.link) : null;
+        const sent = await sendWithRetry(row.recipient, telegramText(subject, body, personal?.footer || ''), telegramOptions(payload.link, personal?.keyboard));
         patch = { status: 'sent', provider_id: sent?.message_id != null ? String(sent.message_id) : null, sent_at: now, last_error: null };
       } catch (error) {
         const blocked = isTelegramUnavailable(error);
@@ -701,5 +731,5 @@ module.exports = {
   MESSAGE_LIMITS, CHANNELS, escapeHtml, personalize, delay, sendWithRetry, pcMessageText, absoluteLink,
   validateMessageBody, deliver, messageTargets, message, notifyCompat, userSection, retryDelivery,
   // для _admin-audit.js (журнал и доставки) и тестов
-  deliveryDtos, userLabels, telegramText, emailText,
+  deliveryDtos, userLabels, telegramText, emailText, personalTelegram,
 };

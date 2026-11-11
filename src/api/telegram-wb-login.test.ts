@@ -119,7 +119,7 @@ describe('телефон и код', () => {
   beforeEach(() => { world.wb = { state: 'await_phone', session: { deviceId: 'dev' }, updated_at: new Date().toISOString() }; });
 
   it('10 цифр с девятки дополняются семёркой; в ответе только последние 4 цифры и кнопки нового кода', async () => {
-    const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: string) => ({ session: { ...session, phone, desktopLoginToken: 'lt' }, ttl: 60 }));
+    const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: any) => ({ session: { ...session, phone, desktopLoginToken: 'lt' }, ttl: 60 }));
     await bot.processUpdate(message('999 123-45-67'));
     expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567', { resend: false });
     const text = String(lastScreen().body.text);
@@ -222,7 +222,7 @@ describe('«Выслать код заново» и «Другой номер»'
   });
 
   it('новый код — по номеру из сессии, второй раз подряд не чаще 30 секунд', async () => {
-    const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: string) => ({ session: { ...session, phone, desktopLoginToken: 'lt2' }, ttl: 60 }));
+    const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: any) => ({ session: { ...session, phone, desktopLoginToken: 'lt2' }, ttl: 60 }));
     await bot.processUpdate(press('rv:resend', 70));
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567', { resend: true });

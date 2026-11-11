@@ -285,6 +285,50 @@ function countItems(items) {
   return out;
 }
 
+// Что закрыто — словами для человека (сообщение об ограничении: Telegram, кабинет, почта). Порядок — как в админке.
+const SCOPE_WORDS = Object.freeze({
+  site: 'сайт shk-wb.ru',
+  app: 'программа «Помощник ПВЗ»',
+  cell_print: 'программа «ПВЗ Принт»',
+  bot: 'Telegram-бот',
+  purchases: 'покупки и оплата с баланса',
+  withdrawals: 'перевод и вывод вознаграждения за приглашения',
+});
+const SCOPE_ORDER = Object.freeze(['site', 'app', 'cell_print', 'bot', 'purchases', 'withdrawals']);
+const noticeDate = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric' });
+
+/**
+ * Сообщение «Доступ ограничен»: что закрыто, срок, текст админа для пользователя (если задан) и куда писать.
+ * В Telegram — кнопка-ссылка на поддержку: callback при ограничении «бот» упёрся бы в само ограничение.
+ */
+function restrictionNotice({ scopes, until, publicMessage } = {}) {
+  const list = Array.isArray(scopes) ? scopes : [];
+  const closed = list.includes('all')
+    ? 'всё — сайт, Telegram-бот и программы'
+    : SCOPE_ORDER.filter(scope => list.includes(scope)).map(scope => SCOPE_WORDS[scope]).join(', ');
+  const ms = until ? Date.parse(until) : NaN;
+  const custom = String(publicMessage || '').trim();
+  return {
+    subject: 'Доступ ограничен',
+    body: [
+      `Закрыто: ${closed || 'часть возможностей'}.`,
+      `Срок: ${Number.isFinite(ms) ? `до ${noticeDate.format(new Date(ms))}` : 'бессрочно'}.`,
+      ...(custom ? [custom] : []),
+      'Если считаете это ошибкой — напишите в поддержку.',
+    ].join('\n'),
+    telegram: { keyboard: [[{ text: '✉️ Написать в поддержку', url: require('./_bot-texts').SUPPORT_URL }]] },
+  };
+}
+
+/** «Доступ восстановлен»: без повтора заголовка в тексте; в Telegram — сразу в меню бота. */
+function liftNotice() {
+  return {
+    subject: 'Доступ восстановлен',
+    body: 'Ограничение снято, всё снова работает.',
+    telegram: { keyboard: [[{ text: '☰ Меню', callback_data: 'menu:home' }]] },
+  };
+}
+
 /** Уведомление пользователю. Ошибка доставки ответ админке не портит. */
 async function notifyUser(payload) {
   try {
@@ -367,7 +411,7 @@ async function liftRestriction(row, reason, { req = null, by = 'admin', notify =
   let notifications;
   if (notify) {
     notifications = await notifyUser({
-      userId, channels: ['cabinet', 'telegram'], subject: 'Доступ восстановлен', body: 'Доступ восстановлен',
+      userId, channels: ['cabinet', 'telegram'], ...liftNotice(),
       actionId, dedupeBase: `lift:${row.id}`,
     });
   }
@@ -484,8 +528,7 @@ async function applyRestriction(req, userId, input, { actionId = null } = {}) {
       userId,
       // кабинет при ограничении сайта пользователь не откроет — туда не пишем
       channels: blocksSite ? ['telegram', 'email'] : ['cabinet', 'telegram'],
-      subject: 'Доступ ограничен',
-      body: restriction.message,
+      ...restrictionNotice(restriction),
       actionId,
       dedupeBase: `restrict:${created.id}`,
     });
@@ -723,5 +766,5 @@ async function unblockCompat(req, res, { userId }) {
 
 module.exports = {
   SCOPES, SCOPE_TABLES, validateRestrictBody, restrictionDto, loadActiveRestriction, setAuthBan, restrict, updateRestriction,
-  liftRestrictionAction, blockCompat, unblockCompat, liftRestriction,
+  liftRestrictionAction, blockCompat, unblockCompat, liftRestriction, restrictionNotice, liftNotice,
 };

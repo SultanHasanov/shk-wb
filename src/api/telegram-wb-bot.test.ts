@@ -200,9 +200,8 @@ describe('Telegram sticker generator bot', () => {
 
   it('уведомление о бонусе: сумма, баланс и экранированный комментарий', () => {
     const text = bot.bonusNoticeText({ kopecks: 10000, note: '<b>тест</b>', balanceKopecks: 35050 }).replace(/\s/g, ' ');
-    expect(text).toContain('Вам начислен бонус');
-    expect(text).toContain('+100 ₽ зачислено на ваш счёт');
-    expect(text).toContain('350,50 ₽');
+    expect(text).toContain('Поддержка начислила вам 100 ₽');
+    expect(text).toContain('На балансе: 350,50 ₽');
     expect(text).toContain('&lt;b&gt;тест');
   });
 

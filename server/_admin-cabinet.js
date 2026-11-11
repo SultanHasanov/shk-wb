@@ -12,21 +12,22 @@ const grants=require('./_admin-grants');
 // До этой даты бот слал постоянную (reply) клавиатуру; у активировавших бота раньше она висит до сих пор,
 // пока не придёт сообщение с remove_keyboard (семикнопочная ушла 20.10.2026, двухкнопочная — 26.10.2026).
 const LEGACY_KEYBOARD_BEFORE='2026-10-27T00:00:00Z';
-// Кнопка под рассылкой без ссылки — открыть главное меню бота (callback menu:home обрабатывает _telegram-wb-bot.js).
-// n:<callback> — меню откроется новым сообщением, а рассылка останется в чате (server/_bot-notice.js).
-const MENU_BUTTON={text:'☰ Открыть меню',callback_data:require('./_bot-notice').noticeData('menu:home')};
+// Под каждой рассылкой — «☰ Меню» (callback menu:home обрабатывает _telegram-wb-bot.js): без кнопок человек
+// отвечает на рассылку текстом, а бот такой ответ не понимает. n:<callback> — меню откроется новым сообщением,
+// а рассылка останется в чате (server/_bot-notice.js).
+const MENU_BUTTON={text:'☰ Меню',callback_data:require('./_bot-notice').noticeData('menu:home')};
 /**
  * У сообщения один reply_markup, поэтому снятие старой клавиатуры и инлайн-кнопка в одном сообщении невозможны.
  * При removeKeyboard сначала уходит служебное сообщение с remove_keyboard и тут же удаляется (клавиатура остаётся
- * снятой), а затем — само сообщение с кнопкой: ссылкой, если задана, иначе «☰ Открыть меню».
+ * снятой), а затем — само сообщение с кнопками: ссылкой админа (если задана) и «☰ Меню».
  */
 async function sendBroadcastMessage(subscriber,text,button,url,removeKeyboard=false){
   if(removeKeyboard){
     const service=await sendWithRetry(subscriber.chat_id,'Меню обновлено',{reply_markup:{remove_keyboard:true}});
     if(service?.message_id)await deleteMessage(subscriber.chat_id,service.message_id).catch(()=>{});
   }
-  const inline=button&&url?[[{text:button,url}]]:removeKeyboard?[[MENU_BUTTON]]:null;
-  return sendWithRetry(subscriber.chat_id,personalize(text,subscriber),inline?{reply_markup:{inline_keyboard:inline}}:{});
+  const inline=[...(button&&url?[[{text:button,url}]]:[]),[MENU_BUTTON]];
+  return sendWithRetry(subscriber.chat_id,personalize(text,subscriber),{reply_markup:{inline_keyboard:inline}});
 }
 
 // Рассылка идёт минутами, а «зависший» ключ повтора через 120 с можно забрать заново: пока рассылка с этим

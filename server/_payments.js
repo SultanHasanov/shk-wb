@@ -5,6 +5,8 @@ const { editMessageText, sendMessage } = require('./_telegram-api');
 const topupScreen = require('./_topup-screen');
 // Кнопки под уведомлениями — n:<callback>: бот откроет экран новым сообщением, уведомление останется (server/_bot-notice.js).
 const { noticeMarkup } = require('./_bot-notice');
+// Тексты, общие с ботом (вознаграждение за приглашение, проценты) — server/_bot-texts.js.
+const botTexts = require('./_bot-texts');
 const { notifyAdminOrder } = require('./_admin-alerts');
 const { ADDONS } = require('./_app-plans');
 const { shopCredentials } = require('./_sites');
@@ -142,8 +144,12 @@ async function notifyReferralReward(order){
   const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(reward.user_id)}&select=telegram_user_id&limit=1`);
   const telegramId=identities[0]?.telegram_user_id;
   if(!telegramId)return;
-  const rub=(Number(reward.amount_kopecks)/100).toLocaleString('ru-RU');
-  await sendMessage(telegramId,`<b>💸 +${rub} ₽</b> — ваш коллега сделал оплату.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'👥 Мои приглашения',callback_data:'menu:ref'}]]})});
+  // Вознаграждение лежит не на балансе, а в «Можно забрать» экрана приглашений — пишем, сколько там накоплено.
+  // Сбой чтения — без этой строки: сообщение о начислении важнее.
+  const accounts=await supabaseFetch(`referral_accounts?user_id=eq.${encodeURIComponent(reward.user_id)}&select=available_kopecks&limit=1`).catch(()=>[]);
+  const available=accounts[0]?.available_kopecks;
+  const text=botTexts.referralRewardHtml({rewardKopecks:Number(reward.amount_kopecks),availableKopecks:available==null?null:Number(available)});
+  await sendMessage(telegramId,text,{reply_markup:noticeMarkup({inline_keyboard:botTexts.REFERRAL_KEYBOARD})});
 }
 /**
  * Итог пополнения в бот (и покупка после него, afterWalletTopup) — один раз на заказ. Вебхук ЮKassa на сайте и
@@ -224,4 +230,4 @@ async function notifyCompleted(order){
     }
   }
 }
-module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, CUSTOM_GENERATION_PACKAGES, hasYookassa, LICENSE_PRICES, notifyTopupCanceled, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };
+module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, CUSTOM_GENERATION_PACKAGES, hasYookassa, LICENSE_PRICES, notifyReferralReward, notifyTopupCanceled, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };

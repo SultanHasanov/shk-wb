@@ -13,7 +13,7 @@ const { supabaseFetch } = require('./_supabase');
 const CLUB_DISCOUNT_PERCENT = 20;
 const CLUB_REF_MS = 30 * 24 * 60 * 60 * 1000;
 const CLUB_CACHE_MS = 10 * 60 * 1000;
-const clubCache = new Map(); // telegramId → { at, active }
+const clubCache = new Map(); // `ref:<id>` | `any:<id>` → { at, active, until, reason } (см. clubDiscountInfo)
 
 // Ключи кеша — как в clubDiscount: `ref:<id>` (с переходом из группы) и `any:<id>` (без него).
 function forgetClub(telegramId) {
@@ -42,29 +42,39 @@ async function clubActive(telegramId) {
 }
 
 /**
- * Скидка клуба для Telegram: { active, until }. requireRef (по умолчанию) — нужен переход из группы за последние
- * 30 дней (как в боте), until — когда скидка закончится (переход + 30 дней); без requireRef until = null.
+ * Скидка клуба для Telegram: { active, until, reason }. requireRef (по умолчанию) — нужен переход из группы за
+ * последние 30 дней (как в боте), until — когда скидка закончится (переход + 30 дней); без requireRef until = null.
+ * reason — почему так, чтобы бот не выдавал сбой проверки за «подписка неактивна»:
+ *   'active'   — скидка действует;
+ *   'off'      — проверка не настроена (нет ZARA_CLUB_CHECK_URL / CLUB_CHECK_SECRET);
+ *   'no_ref'   — перехода из группы клуба не было;
+ *   'expired'  — 30 дней после перехода прошли, подписка на клуб при этом активна (включить снова — кнопкой из группы);
+ *   'inactive' — переход был, но подписка на клуб неактивна;
+ *   'error'    — проверить не удалось (zara-bot или база не ответили).
  * Ошибка проверки — без скидки (и без кэша, чтобы повторить при следующем действии).
  */
 async function clubDiscountInfo(telegramId, { requireRef = true } = {}) {
-  if (!process.env.ZARA_CLUB_CHECK_URL || !process.env.CLUB_CHECK_SECRET || !telegramId) return { active: false, until: null };
+  if (!process.env.ZARA_CLUB_CHECK_URL || !process.env.CLUB_CHECK_SECRET || !telegramId) return { active: false, until: null, reason: 'off' };
   const key = `${requireRef ? 'ref' : 'any'}:${telegramId}`;
   const cached = clubCache.get(key);
-  if (cached && Date.now() - cached.at < CLUB_CACHE_MS) return { active: cached.active, until: cached.until };
+  if (cached && Date.now() - cached.at < CLUB_CACHE_MS) return { active: cached.active, until: cached.until, reason: cached.reason };
+  const remember = info => { clubCache.set(key, { at: Date.now(), ...info }); return info; };
   try {
-    let eligible = true, until = null;
+    let fresh = true, until = null;
     if (requireRef) {
       const rows = await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${encodeURIComponent(String(telegramId))}&select=club_ref_at&limit=1`);
       const refAt = Date.parse(rows[0]?.club_ref_at || '');
-      eligible = Boolean(refAt) && Date.now() - refAt < CLUB_REF_MS;
-      if (eligible) until = new Date(refAt + CLUB_REF_MS).toISOString();
+      if (!refAt) return remember({ active: false, until: null, reason: 'no_ref' });
+      fresh = Date.now() - refAt < CLUB_REF_MS;
+      if (fresh) until = new Date(refAt + CLUB_REF_MS).toISOString();
     }
-    const active = eligible ? await clubActive(telegramId) : false;
-    clubCache.set(key, { at: Date.now(), active, until: active ? until : null });
-    return { active, until: active ? until : null };
+    // Подписку спрашиваем и после 30 дней: «скидка закончилась — включите снова» говорим только участникам клуба.
+    const subscribed = await clubActive(telegramId);
+    const active = subscribed && fresh;
+    return remember({ active, until: active ? until : null, reason: active ? 'active' : subscribed ? 'expired' : 'inactive' });
   } catch (error) {
     console.warn('Скидка клуба: проверка не удалась', error?.message || error);
-    return { active: false, until: null };
+    return { active: false, until: null, reason: 'error' };
   }
 }
 

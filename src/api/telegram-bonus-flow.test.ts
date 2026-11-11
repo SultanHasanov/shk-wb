@@ -67,9 +67,10 @@ describe('команда /bonus целиком', () => {
     expect(moves).toHaveLength(1);
     expect(moves[0]).toMatchObject({ p_user: 'user-1', p_kopecks: 50000, p_kind: 'bonus', p_event_key: `admin_bonus:${nonce}`, p_details: { note: 'За тест', by: ADMIN } });
     const notice = textOf(RECIPIENT).join(' ');
-    expect(notice).toContain('Вам начислен бонус');
-    expect(notice).toContain('+500 ₽');
-    expect(notice).toContain('510 ₽');
+    // Тот же текст, что у начисления из админки (walletAdjust) — server/_bot-texts.js.
+    expect(notice).toContain('🎁 Поддержка начислила вам 500 ₽');
+    expect(notice).toContain('Причина: За тест');
+    expect(notice).toContain('На балансе: 510 ₽');
 
     // Повторное нажатие денег не добавляет.
     await bot.processUpdate(press(`bn:ok:${nonce}`, adminFrom, 3));

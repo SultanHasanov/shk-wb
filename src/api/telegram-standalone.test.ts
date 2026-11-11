@@ -230,7 +230,7 @@ describe('приглашения: вывод на карту через подд
   it('меньше 500 ₽ — только строка, от 500 ₽ — кнопка-ссылка в поддержку; Mini App кабинета нет', async () => {
     world.referral = { referral_code: 'ABC123', available_kopecks: 12000, earned_kopecks: 12000 };
     await bot.processUpdate(press('menu:ref'));
-    expect(lastScreen().body.text).toContain('Вывод на карту — от 500 ₽, через поддержку.');
+    expect(lastScreen().body.text).toContain('на карту (от 500 ₽, через поддержку)');
     expect(buttons().some(button => button.web_app)).toBe(false);
     expect(buttons().some(button => button.url === SUPPORT_URL)).toBe(false);
 

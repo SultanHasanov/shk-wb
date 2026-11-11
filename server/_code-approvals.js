@@ -10,7 +10,7 @@ const { supabaseFetch } = require('./_supabase');
 const { editMessageText, sendMessage, sendPhoto } = require('./_telegram-api');
 const { buildClientQr } = require('./_wb-code');
 const { CLIENT_CODE_PRICE } = require('./_payments');
-const { clubPrice } = require('./_club');
+const { CLUB_DISCOUNT_PERCENT, clubPrice } = require('./_club');
 const { appFreeMode } = require('./_app-free');
 const wallet = require('./_wallet');
 const account = require('./_app-account');
@@ -19,6 +19,7 @@ const { findIdentity, identityForUser, telegramLabel } = require('./_telegram-id
 const userCache = require('./_telegram-user-cache');
 
 const TTL_MS = 10 * 60 * 1000;          // сколько живёт запрос
+const TTL_MINUTES = Math.round(TTL_MS / 60000); // то же в текстах — «10 минут»
 const FLOOD_LIMIT = 10;                 // запросов с одного ПК …
 const FLOOD_WINDOW_MS = 10 * 60 * 1000; // … за это окно
 const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
@@ -116,7 +117,7 @@ function rub(value) { return wallet.formatRub(Number(value) || 0); }
 
 /** Одна строка «что спишется» по ответу nextCodeCharge. */
 function chargeLine(charge) {
-  const club = charge.club ? ' (скидка клуба 20%)' : '';
+  const club = charge.club ? ` (скидка клуба ${CLUB_DISCOUNT_PERCENT}%)` : '';
   if (charge.kind === 'free') return 'Сейчас бесплатно — ничего не спишется.';
   if (charge.kind === 'quota') return `Спишется 1 код из тарифа — останется ${charge.left - 1} из ${charge.limit} на этот месяц.`;
   if (charge.kind === 'pack') return `Спишется 1 код из пакета — останется ${charge.left - 1}.`;
@@ -199,7 +200,7 @@ function headerLines(row, deviceName) {
 function deadlineLine(row) {
   return Number.isFinite(Date.parse(row.expires_at))
     ? `Сотрудник ждёт у компьютера. Ответьте до ${moscowTime(row.expires_at)} (по Москве) — потом запрос отменится сам.`
-    : 'Сотрудник ждёт у компьютера. Запрос действует 10 минут.';
+    : `Сотрудник ждёт у компьютера. Запрос действует ${TTL_MINUTES} минут.`;
 }
 
 /**
@@ -239,7 +240,7 @@ async function finalText(row) {
     approved: `✅ Выдано${how}. QR показан на компьютере.`,
     declined: '❌ Отклонено. Ничего не списано.',
     cancelled: '↩️ Отменено с компьютера. Ничего не списано.',
-    expired: '⌛ Не выдан — истекло время (10 минут). Ничего не списано.',
+    expired: `⌛ Не выдан — истекло время (${TTL_MINUTES} минут). Ничего не списано.`,
     undeliverable: '⚠️ Сообщение не доставлено.',
     failed: `⚠️ Не удалось выдать: ${escapeHtml(row.error || 'ошибка')}`,
   }[row.status] || row.status;
@@ -385,7 +386,7 @@ function closedNotice(row) {
     approved: 'Этот запрос уже выдан — QR показан на компьютере.',
     declined: 'Этот запрос уже отклонён. Ничего не списано.',
     cancelled: 'Сотрудник отменил запрос на компьютере. Ничего не списано.',
-    expired: 'Запрос уже не действует — прошло больше 10 минут. Ничего не списано. Сотрудник может запросить заново.',
+    expired: `Запрос уже не действует — прошло больше ${TTL_MINUTES} минут. Ничего не списано. Сотрудник может запросить заново.`,
   }[row?.status] || 'Этот запрос уже закрыт. Ничего не списано.';
 }
 
