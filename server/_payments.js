@@ -202,7 +202,7 @@ async function notifyCompleted(order){
     if(telegramId){
       const quantity=Number(order.range_quantity||0)+Number(order.custom_quantity||0);
       const codeLine=order.access_code?`\nКод доступа: <code>${order.access_code}</code>\n`:'';
-      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно продолжить генерацию.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'➕ Создать ШК',callback_data:'gen:start'}]]})}).catch(()=>{});
+      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно создавать стикеры.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Создать стикер',callback_data:'menu:stickers'}],[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
     }
   }
 }

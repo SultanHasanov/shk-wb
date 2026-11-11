@@ -19,6 +19,8 @@ const { enforceRateLimit } = require('../server/_rate-limit');
 const { guardAttempts, recordFailures } = require('../server/_attempt-guard');
 const partners = require('../server/_partners');
 const { walletSummary } = require('../server/_wallet');
+const { CELL_PRINT_PRICES } = require('../server/_payments');
+const { isSalePlan, planPrice, PLANS } = require('../server/_app-plans');
 
 // Реферальная ссылка публичная и должна переживать каждый Vercel-деплой.
 // VERCEL_URL здесь использовать нельзя: он содержит технический адрес сборки.
@@ -774,25 +776,48 @@ async function notifyFreePeriodEnd() {
   return sent;
 }
 
+// Цена продления ключа «ПВЗ Принт» на 30 дней — как считает бот (cellPrintPrice в server/_telegram-wb-bot.js):
+// по числу ПК, «WB + Ozon» — ×1,8; у старых ключей без площадки — как WB.
+function cellRenewPrice(license) {
+  const base = CELL_PRINT_PRICES[30]?.[Number(license.device_limit) || 1];
+  return base == null ? null : Math.round(base * (license.marketplace_scope === 'both' ? 1.8 : 1));
+}
+
+const rubText = value => `${Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
+const escapeTelegram = value => String(value ?? '').replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char]);
+
 /**
- * Напоминание в Telegram-бот за 2 дня до конца подписки «Помощника ПВЗ» и ключа «Печати ячеек» —
- * всем, у кого кабинет связан с Telegram (где бы ни покупали), с кнопкой «Продлить с баланса».
+ * Напоминание в Telegram-бот за 2 дня до конца подписки «Помощника ПВЗ» и ключа «ПВЗ Принт» —
+ * всем, у кого аккаунт связан с Telegram (где бы ни покупали): что заканчивается, цена продления за месяц,
+ * баланс и сколько не хватает, кнопка «Продлить с баланса». Пробный ключ не продлевается — «Купить ключ».
  * Крон раз в сутки, поэтому окно — ровно сутки: [now+1д, now+2д). Дедуп — через createNotification.
+ * Кнопки обрабатывает узел бота: сообщение и бот выкладываются парой.
  */
 async function notifyTelegramExpiry2d() {
   const start = new Date(Date.now() + 86400000).toISOString(),
     end = new Date(Date.now() + 2 * 86400000).toISOString();
   const items = [];
   const licenses = await supabaseFetch(
-    `cell_print_licenses?owner_user_id=not.is.null&active=eq.true&expires_at=gte.${encodeURIComponent(start)}&expires_at=lt.${encodeURIComponent(end)}&select=id,key,owner_user_id,expires_at`,
+    `cell_print_licenses?owner_user_id=not.is.null&active=eq.true&expires_at=gte.${encodeURIComponent(start)}&expires_at=lt.${encodeURIComponent(end)}&select=id,key,source,device_limit,marketplace_scope,owner_user_id,expires_at`,
   ).catch(() => []);
   for (const license of licenses) {
+    const day = new Date(license.expires_at).toLocaleDateString('ru-RU');
+    const trial = license.source === 'trial';
+    const price = trial ? null : cellRenewPrice(license);
     items.push({
       userId: license.owner_user_id,
       dedupeKey: `tg-expiry-2d:cell:${license.id}:${String(license.expires_at).slice(0, 10)}`,
-      title: 'Через 2 дня заканчивается ключ «Печати ячеек»',
-      body: `Ключ ${license.key} действует до ${new Date(license.expires_at).toLocaleDateString('ru-RU')}.`,
-      button: { text: '🔄 Продлить с баланса', callback_data: `shop:cp:r:${license.id}` },
+      title: trial ? `Пробный период «ПВЗ Принт» заканчивается ${day}` : `Ключ «ПВЗ Принт» заканчивается ${day}`,
+      body: trial
+        ? 'Чтобы печать номеров ячеек не остановилась, купите ключ.'
+        : `Ключ ${license.key} действует до ${day}. Без продления печать номеров ячеек остановится.`,
+      telegram: trial
+        ? 'Чтобы печать номеров ячеек не остановилась, купите ключ — выберете срок, число компьютеров и площадку.'
+        : `Ключ <code>${escapeTelegram(license.key)}</code>.${price != null ? ` Продление на 30 дней — ${rubText(price)}.` : ''} Без продления печать номеров ячеек остановится.`,
+      price,
+      button: trial
+        ? { text: '🛒 Купить ключ', callback_data: 'shop:cp:n' }
+        : { text: '🔄 Продлить с баланса', callback_data: `shop:cp:r:${license.id}` },
     });
   }
   // В бесплатный период подписки не напоминаем: при его выключении они сдвинутся.
@@ -804,12 +829,22 @@ async function notifyTelegramExpiry2d() {
       `app_subscriptions?user_id=eq.${encodeURIComponent(sub.user_id)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(sub.ends_at)}&select=id&limit=1`,
     ).catch(() => []);
     if (later.length) continue;
+    const day = new Date(sub.ends_at).toLocaleDateString('ru-RU');
+    const plan = PLANS[sub.plan];
+    const onSale = isSalePlan(sub.plan);
+    const price = onSale ? planPrice(sub.plan, 1) : null;
     items.push({
       userId: sub.user_id,
       dedupeKey: `tg-expiry-2d:app:${sub.id}:${String(sub.ends_at).slice(0, 10)}`,
-      title: 'Через 2 дня заканчивается подписка «Помощник ПВЗ»',
-      body: `Тариф действует до ${new Date(sub.ends_at).toLocaleDateString('ru-RU')}.`,
-      button: { text: '🔄 Продлить с баланса', callback_data: `shop:helper:${sub.plan}` },
+      title: `Подписка «Помощник ПВЗ» заканчивается ${day}`,
+      body: `Тариф «${plan?.title || sub.plan}» действует до ${day}.`,
+      telegram: onSale
+        ? `Тариф «${plan.title}». Продление на месяц — ${rubText(price)}, новый срок прибавится к текущему. Без продления разделы тарифа в программе закроются.`
+        : `Тариф «${plan?.title || sub.plan}» больше не продаётся — выберите новый, оплаченный срок начнётся после текущего. Без продления разделы тарифа в программе закроются.`,
+      price,
+      button: onSale
+        ? { text: '🔄 Продлить с баланса', callback_data: `shop:helper:${sub.plan}` }
+        : { text: '🛒 Выбрать тариф', callback_data: 'shop:helper' },
     });
   }
   let sent = 0;
@@ -824,8 +859,10 @@ async function notifyTelegramExpiry2d() {
     if (!notification) continue;
     const wallet = await supabaseFetch(`wallet_accounts?user_id=eq.${encodeURIComponent(item.userId)}&select=balance_kopecks&limit=1`).catch(() => []);
     const balance = Number(wallet[0]?.balance_kopecks || 0) / 100;
-    await sendMessage(telegramId, `<b>${item.title}</b>\n\n${item.body}\n\n💰 На балансе: ${balance.toLocaleString('ru-RU')} ₽`, {
-      reply_markup: noticeMarkup({ inline_keyboard: [[item.button], [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] }),
+    const missing = item.price != null ? Math.round((item.price - balance) * 100) / 100 : 0;
+    const balanceLine = `💰 На балансе: ${rubText(balance)}${missing > 0 ? ` — не хватает ${rubText(missing)}` : ''}`;
+    await sendMessage(telegramId, `<b>${item.title}</b>\n\n${item.telegram}\n\n${balanceLine}`, {
+      reply_markup: noticeMarkup({ inline_keyboard: [[item.button], [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '☰ Меню', callback_data: 'menu:home' }]] }),
     }).then(() => { sent++; }).catch(() => {});
   }
   return sent;
@@ -1168,3 +1205,4 @@ module.exports = async function handler(req, res) {
 module.exports.getOrders = getOrders;
 module.exports.getAssets = getAssets;
 module.exports.getReferral = getReferral;
+module.exports.notifyTelegramExpiry2d = notifyTelegramExpiry2d;

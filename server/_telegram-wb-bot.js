@@ -11,9 +11,9 @@ const { buildClientQr } = require('./_wb-code');
 const approvals = require('./_code-approvals');
 const account = require('./_app-account');
 const { authUser, ensureTechnicalAccount, findIdentity, identityForUser, relinkIdentity, saveIdentity, telegramLabel } = require('./_telegram-identity');
-const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
+const { PLAN_ORDER, PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
-const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
+const { notifyAdminNewUser, notifyAdminSpend, sendToAdmins } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { accountMergeSummary } = require('./_telegram-account');
 const { NOTICE_PREFIX, keptRows, noticeMarkup } = require('./_bot-notice');
@@ -469,7 +469,7 @@ async function showApprovalPaywall(chatId, messageId, row, price, balance) {
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     enough ? [{ text: `💳 Выдать за ${wallet.formatRub(price)} с баланса`, callback_data: `cq:wallet:${row.id}` }] : topupAndBuyRow(price - balance, `cqa:${row.id}`),
-    [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
+    [{ text: '🔑 Пакет кодов клиента', callback_data: 'shop:wbpk' }],
     [{ text: '❌ Отклонить', callback_data: `cq:no:${row.id}` }],
   ]) });
 }
@@ -817,7 +817,7 @@ async function handleClientCode(from, chatId, sid) {
   const userId = await ensureUser(from);
   // Каждый ввод SID — новая платная операция, даже если этот SID уже вводили сегодня.
   const { qrText } = buildClientQr(sid);
-  // 1) квота тарифа или пакет подборов — без ПК (p_device = null, via = 'bot'); нет → 2) баланс
+  // 1) квота тарифа или пакет кодов клиента — без ПК (p_device = null, via = 'bot'); нет → 2) баланс
   let charged = null;
   try {
     charged = await account.chargeClientCode(userId, null, { requestId: crypto.randomUUID(), sid, qrText, meta: { via: 'bot' } });
@@ -993,22 +993,25 @@ async function showHelperInfo(chatId, messageId) {
     `Скачать: ${PROGRAM_URL}`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-    [{ text: '🛒 Оплатить с баланса', callback_data: 'shop:helper' }],
+    [{ text: '🛒 Купить подписку', callback_data: 'shop:helper' }],
     [{ text: '🔑 Как найти код клиента', callback_data: 'menu:code' }],
     MENU_ROW,
   ]) });
 }
 
+// Пробный период «ПВЗ Принт» включается в самой программе: один раз на компьютер и аккаунт и только до покупки
+// ключа (api/cell-print.js, маршрут trial) — поэтому не «первые 7 дней бесплатно», а «можно включить».
 async function showCellPrintInfo(chatId, messageId) {
   const text = [
-    '<b>🖨 Печать ячеек</b>',
+    '<b>🖨 ПВЗ Принт — печать ячеек</b>',
     'Сканируете товар — номер ячейки сразу печатается на термопринтере. Этикетки без лимита.',
     '',
-    `От ${CELL_PRINT_PRICES[7]?.[1]} ₽ в неделю · программа бесплатная`,
-    `Скачать: ${CELL_PRINT_URL}`,
+    'В программе можно включить 7 дней бесплатно — один раз, до покупки ключа.',
+    `Дальше нужен ключ — от ${wallet.formatRub(CELL_PRINT_PRICES[7]?.[1])} за 7 дней.`,
+    `Скачать на компьютер пункта: ${CELL_PRINT_URL}`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-    [{ text: '🛒 Купить или продлить с баланса', callback_data: 'shop:cp' }],
+    [{ text: '🛒 Купить или продлить ключ', callback_data: 'shop:cp' }],
     MENU_ROW,
   ]) });
 }
@@ -2126,19 +2129,25 @@ async function showProfile(from, chatId, messageId) {
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${id}&active=eq.true&select=generation_limit,generation_used`),
     walletRub(userId).catch(() => 0),
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
-    supabaseFetch(`cell_print_licenses?owner_user_id=eq.${id}&active=eq.true&select=activated_at,expires_at`).catch(() => []),
+    ownCellKeys(userId).catch(() => []),
     helperFreeText(),
     // Индивидуальные заказы — редкость: кнопка «Мои заказы» только у тех, у кого они есть. Сбой — без кнопки.
     supabaseFetch(`individual_sticker_orders?user_id=eq.${id}&select=id&limit=1`).catch(() => []),
   ]);
   const stickers = codes.reduce((sum, row) => sum + remainingOf(row), 0);
+  const clientCodes = Number(ent?.packs_left || 0);
   const text = [
     '<b>👤 Профиль</b>',
-    `💰 Баланс: <b>${wallet.formatRub(balance)}</b>`,
-    // Генерации на кодах — только если есть: кто работает в боте, обходится балансом.
-    ...(stickers ? [`🏷 Стикеры: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`,
+    // Остатки пакетов — только если есть: кто работает в боте, обходится балансом.
+    ...(stickers ? [`🏷 Стикеры в пакете: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
+    ...(clientCodes > 0 ? [`🔑 Коды клиента в пакете: ${clientCodes.toLocaleString('ru-RU')}`] : []),
+    '',
+    '<b>Программы для компьютера</b>',
     `🖥 Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
-    `🖨 Печать ячеек: ${cellPrintStatusLine(cellKeys)}`,
+    `🖨 ПВЗ Принт (печать ячеек): ${cellPrintStatusLine(cellKeys)}`,
+    // Ключ виден здесь всегда — сообщение с покупкой могло потеряться; нажатие на <code> копирует ключ.
+    ...cellKeys.slice(0, 3).map(key => `   ${cellKeyLine(key)}`),
     '',
     `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
   ].join('\n');
@@ -2868,13 +2877,55 @@ function cellPrintPrice(days, devices, scope) {
 }
 
 async function ownCellKeys(userId) {
-  return supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,duration_days,device_limit,marketplace_scope,activated_at,expires_at&order=created_at.desc&limit=5`);
+  return supabaseFetch(`cell_print_licenses?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,source,duration_days,device_limit,marketplace_scope,activated_at,expires_at&order=created_at.desc&limit=5`);
 }
+
+// Пробный ключ (7 дней, WB + Ozon) не продлеваем: цена продления по его площадке — «WB + Ozon» (×1,8), а площадку
+// выбирают заново при покупке. В программе у пробного тоже только «Купить ключ» (docs/cell-print.md).
+function isTrialKey(key) { return key?.source === 'trial'; }
 
 function cellKeyStatus(key) {
   if (!key.activated_at) return `не активирован, ${key.duration_days} дн.`;
   const ends = Date.parse(key.expires_at || '');
   return Number.isFinite(ends) && ends > Date.now() ? `до ${shortDate.format(new Date(ends))}` : 'срок закончился';
+}
+
+/** «<code>CP-…</code> — до 12.12 · 1 компьютер · Wildberries» (пробный — «пробный, до 19.11»). */
+function cellKeyLine(key) {
+  const scope = CP_SCOPES[key.marketplace_scope];
+  return `<code>${escapeHtml(key.key)}</code> — ${isTrialKey(key) ? 'пробный, ' : ''}${cellKeyStatus(key)} · ${devicesLabel(Number(key.device_limit) || 1)}${scope ? ` · ${scope}` : ''}`;
+}
+
+function lowerFirst(text) { return text ? text[0].toLowerCase() + text.slice(1) : ''; }
+function upperFirst(text) { return text ? text[0].toUpperCase() + text.slice(1) : ''; }
+
+function pointsLabel(count) { return count === 1 ? '1 пункт' : count < 5 ? `${count} пункта` : `${count} пунктов`; }
+
+/** Что входит в тариф — из PLANS: «2 компьютера, 1 пункт» и для «Про» — коды клиента и стикеры в месяц. */
+function planLimitsLine(id) {
+  const plan = PLANS[id];
+  const monthly = [
+    ...(plan.codes ? [`${plan.codes} кодов клиента`] : []),
+    ...(plan.stickers ? [`${plan.stickers} стикеров`] : []),
+  ];
+  return `${devicesLabel(plan.devices)}, ${pointsLabel(plan.points)}${monthly.length ? `; ${monthly.join(' и ')} в месяц` : ''}`;
+}
+
+/**
+ * Что станет с текущей подпиской при покупке тарифа planId — словами, как решит SQL (app_apply_subscription,
+ * миграция 20261019_app_admin_grant.sql): тот же тариф — срок прибавится; повышение — остаток всех отрезков
+ * пересчитается в дни нового; понижение — новый отрезок встанет в очередь после последнего. Точную дату до оплаты
+ * не считаем (в SQL — интервалы месяцев и пересчёт дней), её показывает «Готово» из app_entitlements.
+ */
+function subscriptionChangeLine(ent, planId) {
+  const current = ent?.plan && PLANS[ent.plan] ? ent.plan : null;
+  if (!current) return 'Подписка начнётся сразу после оплаты.';
+  const last = ent.next_plan && PLANS[ent.next_plan] ? ent.next_plan : current;
+  const until = ent.paid_until || ent.ends_at;
+  const rankNew = PLAN_ORDER.indexOf(planId), rankCur = PLAN_ORDER.indexOf(current);
+  if (last === planId && rankNew <= rankCur) return `Срок прибавится к текущему${until ? ` (сейчас до ${dayMonthShort(until)})` : ''}.`;
+  if (rankNew > rankCur) return `Остаток «${PLANS[current].title}» пересчитаем в дни «${PLANS[planId].title}» — ничего не сгорит.`;
+  return `«${PLANS[planId].title}» начнётся после окончания текущей подписки${until ? ` — с ${dayMonthShort(until)}` : ''}.`;
 }
 
 async function ownLicenseKey(userId) {
@@ -2910,17 +2961,19 @@ async function resolveShopItem(userId, parts) {
   }
   if (kind === 'cp' && a === 'r') {
     const days = Number(c);
-    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,duration_days,device_limit,marketplace_scope&limit=1`);
+    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,source,duration_days,device_limit,marketplace_scope&limit=1`);
     const key = rows[0];
     if (!key) return { error: 'Ключ не найден или отключён.' };
+    // Старая кнопка «Продлить» под пробным ключом (из чата, из напоминания) не продаёт продление по цене «WB + Ozon».
+    if (isTrialKey(key)) return { error: 'Пробный ключ не продлевается — купите новый: выберете срок, число компьютеров и площадку.', next: { text: '➕ Купить ключ', callback_data: 'shop:cp:n' } };
     if (!CP_DAYS.includes(days)) return { error: 'Такого срока нет.' };
     if (Number(key.duration_days) + days > 4000) return { error: 'Суммарный срок ключа не может быть больше 4000 дней.' };
     // У старых ключей площадка не задана — продлеваем как WB и не передаём площадку в заказ.
     const legacy = !CP_SCOPES[key.marketplace_scope];
     const price = cellPrintPrice(days, key.device_limit, legacy ? 'wb' : key.marketplace_scope);
-    if (price == null) return { error: 'Для этого ключа цена не найдена — продлите на сайте.' };
+    if (price == null) return { error: 'Этот ключ не получается продлить в боте. Напишите в поддержку — продлим вручную.' };
     return {
-      title: `<b>🔄 Продление ключа на ${days} дней</b>\n<code>${escapeHtml(key.key)}</code>`,
+      title: `<b>🔄 Продление ключа «ПВЗ Принт» на ${days} дней</b>\n<code>${escapeHtml(key.key)}</code>`,
       priceRub: price, productKind: 'cell_print_license', back: `shop:cp:r:${key.id}`, renewal: true,
       fields: { cell_print_duration_days: days, cell_print_device_limit: key.device_limit, cell_print_marketplace_scope: legacy ? null : key.marketplace_scope, renewal_target_key: key.key },
       snapshot: { cellPrint: { durationDays: days, deviceLimit: key.device_limit, program: false, bonusDays: 0 }, total: price },
@@ -2931,7 +2984,7 @@ async function resolveShopItem(userId, parts) {
     const price = CP_SCOPES[scope] ? cellPrintPrice(days, devices, scope) : null;
     if (!CP_DAYS.includes(days) || price == null) return { error: 'Такого варианта нет.' };
     return {
-      title: `<b>🖨 Ключ: ${days} дней, ${devicesLabel(devices)}, ${CP_SCOPES[scope]}</b>`,
+      title: `<b>🖨 Ключ «ПВЗ Принт»: ${days} дней, ${devicesLabel(devices)}, ${CP_SCOPES[scope]}</b>`,
       priceRub: price, productKind: 'cell_print_license', back: `shop:cp:n:${days}:${devices}`,
       fields: { cell_print_duration_days: days, cell_print_device_limit: devices, cell_print_marketplace_scope: scope },
       snapshot: { cellPrint: { durationDays: days, deviceLimit: devices, program: false, bonusDays: 0 }, total: price },
@@ -2942,7 +2995,7 @@ async function resolveShopItem(userId, parts) {
     if (!price) return { error: 'Такого пакета нет.' };
     const target = await ownLicenseKey(userId);
     return {
-      title: `<b>🔑 ${count} подборов кода</b>`,
+      title: `<b>🔑 Пакет кодов клиента: ${count} шт.</b>`,
       priceRub: price, productKind: 'program_license', back: 'shop:wbpk',
       fields: { license_iterations: count, ...(target ? { renewal_target_key: target.key } : {}) },
       snapshot: { license: { iterations: count, total: price }, total: price },
@@ -2956,7 +3009,8 @@ async function showShop(from, chatId, messageId, parts) {
   const userId = await ensureUser(from);
   const balance = await walletRub(userId);
   const balanceLine = `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`;
-  const back = data => [{ text: '⬅️ Назад', callback_data: data }];
+  // Нижний ряд каждого экрана магазина: «⬅️ Назад» на предыдущий шаг и «☰ Меню».
+  const back = data => [{ text: '⬅️ Назад', callback_data: data }, ...MENU_ROW];
   const [kind, a, b, c, d] = parts;
 
   if (!kind || kind === 'home') {
@@ -3012,32 +3066,65 @@ async function showShop(from, chatId, messageId, parts) {
       helperFreeText(),
     ]);
     const freeNote = free ? '\nОплата начнёт действовать после бесплатного периода.' : '';
-    return showScreen(chatId, messageId, `<b>🖥 Подписка «Помощник ПВЗ»</b>\nСейчас: ${helperStatusLine(ent, free)}${freeNote}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+    const plans = SALE_PLANS.map(id => `<b>${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес</b>: ${lowerFirst(PLANS[id].summary)}. ${upperFirst(planLimitsLine(id))}.`);
+    const text = [
+      '<b>🖥 Подписка «Помощник ПВЗ»</b>',
+      `Сейчас: ${helperStatusLine(ent, free)}${freeNote}`,
+      '',
+      ...plans,
+      '',
+      balanceLine,
+    ].join('\n');
+    return showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
       ...SALE_PLANS.map(id => [{ text: `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес`, callback_data: `shop:helper:${id}` }]),
       back('shop:home'),
     ]) });
   }
   if (kind === 'helper' && a && !b) {
     if (!isSalePlan(a)) return showShop(from, chatId, messageId, ['helper']);
-    return showScreen(chatId, messageId, `<b>🖥 «${PLANS[a].title}»</b> — ${PLANS[a].summary.toLowerCase()}\n${balanceLine}\n\nНа какой срок?`, { reply_markup: choiceKeyboard([
-      ...Object.keys(TERMS).map(Number).map(months => [{ text: `${monthsLabel(months)} — ${planPrice(a, months)} ₽${TERMS[months] ? ` (−${TERMS[months]}%)` : ''}`, callback_data: `shop:helper:${a}:${months}` }]),
+    const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
+    const text = [
+      `<b>🖥 «${PLANS[a].title}»</b> — ${lowerFirst(PLANS[a].summary)}.`,
+      `${upperFirst(planLimitsLine(a))}.`,
+      subscriptionChangeLine(ent, a),
+      balanceLine,
+      '',
+      'На какой срок?',
+    ].join('\n');
+    return showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+      ...Object.keys(TERMS).map(Number).map(months => {
+        const total = planPrice(a, months);
+        const perMonth = months > 1 ? `, ${Math.round(total / months)} ₽/мес` : '';
+        return [{ text: `${monthsLabel(months)} — ${total} ₽${TERMS[months] ? ` (−${TERMS[months]}%${perMonth})` : ''}`, callback_data: `shop:helper:${a}:${months}` }];
+      }),
       back('shop:helper'),
     ]) });
   }
   if (kind === 'cp' && !a) {
+    // Ключи — строками в <code> (нажатие копирует), кнопки — только для продления; пробный не продлевается.
     const keys = await ownCellKeys(userId);
-    return showScreen(chatId, messageId, `<b>🖨 Ключ «Печать ячеек»</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
-      ...keys.map(key => [{ text: `🔄 Продлить ${key.key} (${cellKeyStatus(key)})`, callback_data: `shop:cp:r:${key.id}` }]),
-      [{ text: '➕ Новый ключ', callback_data: 'shop:cp:n' }],
+    const renewable = keys.filter(key => !isTrialKey(key));
+    const trial = keys.find(isTrialKey);
+    const text = [
+      '<b>🖨 Ключ «ПВЗ Принт» (печать ячеек)</b>',
+      ...(keys.length ? ['Ваши ключи (нажмите, чтобы скопировать):', ...keys.map(cellKeyLine)] : ['Ключей пока нет.']),
+      ...(trial && !renewable.length ? ['', `Пробный период${trial.expires_at ? ` до ${dayMonthShort(trial.expires_at)}` : ''}. Чтобы печать не остановилась, купите ключ — выберете срок, число компьютеров и площадку.`] : []),
+      '',
+      balanceLine,
+    ].join('\n');
+    return showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+      ...renewable.map(key => [{ text: `🔄 Продлить ${key.key}`, callback_data: `shop:cp:r:${key.id}` }]),
+      [{ text: keys.length ? '➕ Купить новый ключ' : '➕ Купить ключ', callback_data: 'shop:cp:n' }],
       back('shop:home'),
     ]) });
   }
   if (kind === 'cp' && a === 'r' && b && !c) {
-    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,device_limit,marketplace_scope,activated_at,expires_at,duration_days&limit=1`);
+    const rows = await supabaseFetch(`cell_print_licenses?id=eq.${Number(b)}&owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,key,source,device_limit,marketplace_scope,activated_at,expires_at,duration_days&limit=1`);
     const key = rows[0];
-    if (!key) return showShop(from, chatId, messageId, ['cp']);
+    if (!key || isTrialKey(key)) return showShop(from, chatId, messageId, ['cp']);
     const scope = CP_SCOPES[key.marketplace_scope] ? key.marketplace_scope : 'wb';
-    return showScreen(chatId, messageId, `<b>🔄 Продление ключа</b> <code>${escapeHtml(key.key)}</code>\n${cellKeyStatus(key)} · ${devicesLabel(key.device_limit)} · ${CP_SCOPES[scope]}\n\n${balanceLine}\n\nНа сколько продлить?`, { reply_markup: choiceKeyboard([
+    // Цена продления — по числу компьютеров и площадке самого ключа; «WB + Ozon» дороже (×1,8).
+    return showScreen(chatId, messageId, `<b>🔄 Продление ключа «ПВЗ Принт»</b> <code>${escapeHtml(key.key)}</code>\n${cellKeyStatus(key)} · ${devicesLabel(key.device_limit)} · ${CP_SCOPES[scope]}\nЦена — для ${devicesLabel(key.device_limit)} и площадки ${CP_SCOPES[scope]}, как у ключа.\n\n${balanceLine}\n\nНа сколько продлить?`, { reply_markup: choiceKeyboard([
       ...CP_DAYS.map(days => ({ days, price: cellPrintPrice(days, key.device_limit, scope) })).filter(item => item.price != null)
         .map(item => [{ text: `${item.days} дней — ${item.price} ₽`, callback_data: `shop:cp:r:${key.id}:${item.days}` }]),
       back('shop:cp'),
@@ -3066,9 +3153,17 @@ async function showShop(from, chatId, messageId, parts) {
     ]) });
   }
   if (kind === 'wbpk' && !a) {
+    // Пакет — это коды license_keys: их списывает и «Код <ID>» в боте (account.chargeClientCode), и программа.
+    // Сам ключ пакета человеку не нужен — только остаток.
     const key = await ownLicenseKey(userId);
-    const keyLine = key ? `Ваш ключ: осталось ${Math.max(0, Number(key.usage_limit) - Number(key.used))} — пакет добавится к нему.` : '';
-    return showScreen(chatId, messageId, `<b>🔑 Пакет подборов кода</b>\nДля «Помощника ПВЗ» сверх тарифа.${keyLine ? `\n${keyLine}` : ''}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+    const left = key ? Math.max(0, Number(key.usage_limit) - Number(key.used)) : 0;
+    const text = [
+      '<b>🔑 Пакет кодов клиента</b>',
+      'Один код — один QR-код клиента. Работает и здесь в боте, и в программе «Помощник ПВЗ»: коды из пакета спишутся сами.',
+      ...(left > 0 ? [`В вашем пакете осталось: ${left} — новые добавятся к ним.`] : []),
+      balanceLine,
+    ].join('\n');
+    return showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
       ...Object.keys(LICENSE_PRICES).map(Number).map(count => [{ text: `${count} шт. — ${LICENSE_PRICES[count]} ₽`, callback_data: `shop:wbpk:${count}` }]),
       back('shop:home'),
     ]) });
@@ -3077,23 +3172,51 @@ async function showShop(from, chatId, messageId, parts) {
   return showShopConfirm(from, chatId, messageId, userId, parts);
 }
 
+/**
+ * Пополнить с запасом и купить: готовые суммы больше нехватки (500 ₽ и 1000 ₽ с бонусом) с той же покупкой then —
+ * покупка пройдёт сама, остаток останется на балансе. Кнопка без then («другая сумма») потеряла бы покупку.
+ */
+function largerTopupRows(missingRub, then, minAmount) {
+  const steps = [...wallet.TOPUP_BONUS_STEPS].map(([amount]) => amount).sort((a, b) => a - b);
+  const buttons = steps.filter(amount => amount > minAmount && amount + wallet.topupBonus(amount) >= missingRub).map(amount => {
+    const detailed = `tp:${amount}~${Math.round(Number(missingRub) * 100)}:${then}`;
+    const data = Buffer.byteLength(detailed) <= 64 ? detailed : `tp:${amount}:${then}`;
+    const bonus = wallet.topupBonus(amount);
+    return Buffer.byteLength(data) <= 64 ? { text: `${wallet.formatRub(amount)}${bonus ? ` (+${wallet.formatRub(bonus)})` : ''}`, callback_data: data } : null;
+  }).filter(Boolean);
+  return buttons.length ? [buttons] : [];
+}
+
 async function showShopConfirm(from, chatId, messageId, userId, parts, error) {
   const item = await resolveShopItem(userId, parts);
-  if (item.error) return showScreen(chatId, messageId, `⚠️ ${item.error}`, { reply_markup: choiceKeyboard([[{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
+  if (item.error) return showScreen(chatId, messageId, `⚠️ ${item.error}`, { reply_markup: choiceKeyboard([...(item.next ? [[item.next]] : []), [{ text: '⬅️ В магазин', callback_data: 'shop:home' }, ...MENU_ROW]]) });
   const balance = await walletRub(userId);
-  const lines = [`${error ? `⚠️ ${error}\n` : ''}${item.title}`, `Цена: <b>${wallet.formatRub(item.priceRub)}</b> · 💰 ${wallet.formatRub(balance)}`];
+  const lines = [`${error ? `⚠️ ${error}\n` : ''}${item.title}`, `Цена: <b>${wallet.formatRub(item.priceRub)}</b>`];
+  const backRow = [{ text: '⬅️ Назад', callback_data: item.back }, ...MENU_ROW];
   if (balance >= item.priceRub) {
+    lines.push(`💰 На балансе: ${wallet.formatRub(balance)}`);
     // Метка на кнопке оплаты: повторное нажатие той же кнопки не спишет деньги второй раз.
     const nonce = crypto.randomInt(100000, 1000000);
     return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
       [{ text: `✅ Оплатить ${wallet.formatRub(item.priceRub)} с баланса`, callback_data: `shop:pay:${nonce}:${parts.join(':')}` }],
-      [{ text: '⬅️ Назад', callback_data: item.back }],
+      backRow,
     ]) });
   }
-  lines.push(`Не хватает <b>${wallet.formatRub(item.priceRub - balance)}</b> — после пополнения покупка пройдёт сама.`);
+  const missing = item.priceRub - balance;
+  const then = `shop:${parts.join(':')}`;
+  const main = topupAndBuyRow(missing, then);
+  const mainAmount = Math.max(wallet.MIN_TOPUP, Math.ceil(Number(missing) - 1e-9));
+  const larger = largerTopupRows(missing, then, mainAmount);
+  lines.push(`💰 На балансе: ${wallet.formatRub(balance)} — не хватает <b>${wallet.formatRub(missing)}</b>`);
+  lines.push('После пополнения покупка пройдёт сама, ничего нажимать не нужно.');
+  if (larger.length) {
+    const bonusFrom = Math.min(...wallet.TOPUP_BONUS_STEPS.map(([amount]) => amount));
+    lines.push(`Или пополните с запасом кнопками ниже: остаток останется на балансе, от ${wallet.formatRub(bonusFrom)} — с бонусом.`);
+  }
   return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
-    topupAndBuyRow(item.priceRub - balance, `shop:${parts.join(':')}`),
-    [{ text: '⬅️ Назад', callback_data: item.back }],
+    main,
+    ...larger,
+    backRow,
   ]) });
 }
 
@@ -3114,7 +3237,7 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
     if (error.code === 'ACCOUNT_RESTRICTED') {
       return showScreen(chatId, screenId, `⛔ ${escapeHtml(error.message)}`, { reply_markup: choiceKeyboard([[{ text: '⬅️ В магазин', callback_data: 'shop:home' }], MENU_ROW]) });
     }
-    return showScreen(chatId, screenId, `⚠️ Не удалось оформить покупку: ${escapeHtml(error.message)}\n\nДеньги вернулись на баланс. Если повторится — напишите в поддержку.`, { reply_markup: choiceKeyboard([[{ text: '🆘 Поддержка', callback_data: 'menu:support' }], [{ text: '⬅️ В магазин', callback_data: 'shop:home' }]]) });
+    return showShopFailure(from, chatId, screenId, userId, parts, item, error);
   }
   if (!result.ok) {
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
@@ -3122,24 +3245,99 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
   }
   await completeGenerationRequest(requestId, { orderId: result.order.id });
   const order = result.order;
+  const balanceLine = `💰 На балансе: ${wallet.formatRub(result.balanceKopecks / 100)}`;
   let done;
+  let rows = [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }], MENU_ROW];
   if (item.productKind === 'app_subscription') {
-    const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
-    const until = ent?.paid_until || ent?.ends_at;
-    done = `Подписка оплачена${until ? ` до <b>${dayMonthShort(until)}</b>` : ''}.`;
+    done = await subscriptionDoneText(userId, item.fields.app_plan);
   } else if (item.productKind === 'cell_print_license') {
-    done = item.renewal
-      ? `Ключ <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней.`
-      : `Ваш ключ: <code>${escapeHtml(order.cell_print_license_key)}</code>\nСрок пойдёт с первой активации.`;
+    if (item.renewal) {
+      done = `Ключ «ПВЗ Принт» <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней. В программе ничего вводить не нужно.`;
+    } else {
+      // Ключ — отдельным сообщением без кнопок: его никто не отредактирует следующим нажатием, и он не пропадёт.
+      await sendMessage(chatId, cellKeyMessage(order.cell_print_license_key, item.fields)).catch(error => console.warn('Cell print key message failed', error.message));
+      done = 'Ключ «ПВЗ Принт» куплен — он в сообщении ниже ⬇️ Там же — как его включить.';
+    }
+    rows = [[{ text: '🖨 Мои ключи', callback_data: 'shop:cp' }, { text: '👤 Профиль', callback_data: 'menu:profile' }], MENU_ROW];
   } else if (item.productKind === 'stickers') {
     done = `Пакет куплен: ${item.fields.custom_quantity} стикеров по номеру. Вводить ничего не нужно — они спишутся сами при создании.`;
   } else {
-    done = `+${item.fields.license_iterations} подборов — уже в «Помощнике ПВЗ».`;
+    done = `+${item.fields.license_iterations} кодов клиента в пакете. Они спишутся сами — здесь в боте («Код» и ID клиента) и в «Помощнике ПВЗ».`;
   }
-  const doneRows = item.returnToGenerator
-    ? [[{ text: '🏷 Создать стикер', callback_data: 'gen:return-mode' }], MENU_ROW]
-    : [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }], MENU_ROW];
-  await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard(doneRows) });
+  if (item.returnToGenerator) rows = [[{ text: '🏷 Создать стикер', callback_data: 'gen:return-mode' }], MENU_ROW];
+  await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n${balanceLine}`, { reply_markup: choiceKeyboard(rows) });
+}
+
+/** Сообщение с купленным ключом «ПВЗ Принт»: ключ в <code>, что куплено и два шага, как включить. */
+function cellKeyMessage(key, fields) {
+  const scope = CP_SCOPES[fields.cell_print_marketplace_scope];
+  return [
+    '<b>🖨 Ваш ключ «ПВЗ Принт»</b> (нажмите, чтобы скопировать):',
+    `<code>${escapeHtml(key)}</code>`,
+    `${fields.cell_print_duration_days} дней · ${devicesLabel(Number(fields.cell_print_device_limit) || 1)}${scope ? ` · ${scope}` : ''}. Срок начнётся, когда вы первый раз включите ключ в программе.`,
+    '',
+    'Как включить:',
+    `1. Скачайте «ПВЗ Принт» на компьютер пункта: ${CELL_PRINT_URL}`,
+    '2. В программе вставьте ключ в блок «Ключ без аккаунта» и нажмите «Активировать».',
+    '',
+    'Ключ всегда виден в «👤 Профиль и баланс».',
+  ].join('\n');
+}
+
+/**
+ * «Готово» подписки «Помощника»: до какого числа (а при понижении — с какого начнётся) и что дальше — скачать
+ * программу и войти через этого бота (страница входа /app-login → «Подтвердить в Telegram-боте», этап A2).
+ */
+async function subscriptionDoneText(userId, planId) {
+  const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
+  const title = PLANS[planId]?.title || '';
+  const until = ent?.paid_until || ent?.ends_at;
+  // Понижение встаёт в очередь: сейчас действует прежний тариф, купленный начнётся после него.
+  const queued = ent?.plan && ent.plan !== planId && ent.ends_at;
+  const when = queued
+    ? ` Начнётся ${dayMonthShort(ent.ends_at)}, после текущей подписки${until ? `, и будет действовать до <b>${dayMonthShort(until)}</b>` : ''}.`
+    : until ? ` Действует до <b>${dayMonthShort(until)}</b>.` : '';
+  return [
+    `Подписка «Помощник ПВЗ» оплачена: тариф «${title}».${when}`,
+    '',
+    'Что дальше:',
+    `1. Скачайте «Помощник ПВЗ» на компьютер пункта: ${PROGRAM_URL}`,
+    '2. В программе нажмите «Войти через сайт», на открывшейся странице — «Подтвердить в Telegram-боте», и подтвердите вход здесь. Подписка подключится сама.',
+    '',
+    'Уже входите в программу по почте и паролю? Напишите в поддержку — перенесём подписку на тот аккаунт.',
+  ].join('\n');
+}
+
+/**
+ * Покупка с баланса упала. Текст — по тому, что стало с деньгами (error.walletOutcome, server/_wallet.js), баланс —
+ * перечитанный, без текста ошибки (он в журнал). Возврат не удался — деньги вернёт поддержка, админам сигнал.
+ */
+async function showShopFailure(from, chatId, screenId, userId, parts, item, error) {
+  const incident = crypto.randomBytes(3).toString('hex');
+  console.error(`Wallet purchase failed [${incident}]`, item.productKind, error.walletOutcome || 'unknown', error.orderId || '', error.message);
+  const balance = await walletRub(userId).catch(() => null);
+  const balanceLine = balance != null ? `💰 На балансе: ${wallet.formatRub(balance)}` : '';
+  const support = [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }];
+  if (error.walletOutcome === 'refund_failed') {
+    sendToAdmins(`⚠️ Покупка с баланса: списано ${wallet.formatRub(item.priceRub)}, выдача не прошла, возврат не удался.\nTelegram ${Number(from.id)}, заказ ${error.orderId || '—'}, код ${incident}. Верните деньги вручную.`).catch(() => {});
+    return showScreen(chatId, screenId, [
+      '⚠️ Покупка не прошла, и деньги за неё пока не вернулись на баланс — это сбой на нашей стороне.',
+      `Напишите в поддержку и назовите код: <code>${incident}</code> — вернём ${wallet.formatRub(item.priceRub)} вручную.`,
+      ...(balanceLine ? [balanceLine] : []),
+    ].join('\n'), { reply_markup: choiceKeyboard([support, MENU_ROW]) });
+  }
+  const money = error.walletOutcome === 'refunded' ? 'Деньги за неё вернулись на баланс.'
+    : error.walletOutcome === 'not_charged' ? 'Деньги за неё не списаны.'
+      : 'Проверьте баланс ниже.';
+  return showScreen(chatId, screenId, [
+    `⚠️ Покупка не прошла — это сбой на нашей стороне. ${money}`,
+    ...(balanceLine ? [balanceLine] : []),
+    `Попробуйте ещё раз. Если повторится — напишите в поддержку и назовите код: <code>${incident}</code>`,
+  ].join('\n'), { reply_markup: choiceKeyboard([
+    [{ text: '🔄 Попробовать снова', callback_data: `shop:${parts.join(':')}` }],
+    support,
+    [{ text: '⬅️ В магазин', callback_data: 'shop:home' }, ...MENU_ROW],
+  ]) });
 }
 
 // ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──

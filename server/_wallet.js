@@ -102,18 +102,78 @@ async function grantBonus({ userId, kopecks, eventKey, note = '', adminTelegramI
 }
 
 /**
+ * Что стало с деньгами, когда покупка с баланса упала (error.walletOutcome) — по нему бот выбирает текст:
+ * not_charged — до списания; refunded — списали и вернули; refund_failed — списали, а вернуть не вышло
+ * (деньги возвращает поддержка вручную). error.orderId — заказ для поддержки, если он успел появиться.
+ */
+const WALLET_OUTCOMES = Object.freeze(['not_charged', 'refunded', 'refund_failed']);
+
+function withOutcome(error, outcome, orderId = null) {
+  const target = error instanceof Error ? error : new Error(String(error?.message || error || 'Wallet purchase failed'));
+  target.walletOutcome = outcome;
+  if (orderId) target.orderId = orderId;
+  return target;
+}
+
+/** Вернуть деньги за заказ: { outcome, balanceKopecks? }. «Не списано» (not_paid) — тоже исход, а не ошибка. */
+async function refundWalletOrder(orderId) {
+  try {
+    const result = await supabaseFetch('rpc/wallet_refund_order', { method: 'POST', body: JSON.stringify({ p_order_id: orderId }) });
+    if (result?.ok) return { outcome: 'refunded', balanceKopecks: Number(result.balance) };
+    if (result?.reason === 'not_paid') return { outcome: 'not_charged' };
+    return { outcome: 'refund_failed' };
+  } catch (error) {
+    console.error('Wallet refund failed', orderId, error.message);
+    return { outcome: 'refund_failed' };
+  }
+}
+
+/**
  * Купить с баланса. fields — колонки заказа для выдачи (range_quantity, renewal_target_key,
  * cell_print_*, license_iterations, app_plan…). Возвращает { ok:true, order, balanceKopecks }
- * или { ok:false, error:'INSUFFICIENT', balanceKopecks, missingKopecks }.
+ * или { ok:false, error:'INSUFFICIENT', balanceKopecks, missingKopecks }. Сбой — Error с walletOutcome (см. выше);
+ * ограничение аккаунта (ACCOUNT_RESTRICTED) — как было, до заказа.
  */
 async function payWithWallet({ userId, productKind, fields = {}, priceRub, snapshot = {} }) {
   const priceKopecks = Math.round(Number(priceRub) * 100);
-  if (!userId || !(priceKopecks > 0)) throw new Error('Invalid wallet purchase');
+  if (!userId || !(priceKopecks > 0)) throw withOutcome(new Error('Invalid wallet purchase'), 'not_charged');
   // ограничение «Покупки» из админки: 403 ACCOUNT_RESTRICTED до вставки заказа
   await controls.assertAllowed(userId, 'purchases');
-  const balance = await getBalanceKopecks(userId);
-  if (balance < priceKopecks) return { ok: false, error: 'INSUFFICIENT', balanceKopecks: balance, missingKopecks: priceKopecks - balance };
-  const inserted = await supabaseFetch('payment_orders', {
+  let order;
+  try {
+    const balance = await getBalanceKopecks(userId);
+    if (balance < priceKopecks) return { ok: false, error: 'INSUFFICIENT', balanceKopecks: balance, missingKopecks: priceKopecks - balance };
+    order = (await insertWalletOrder({ userId, productKind, fields, priceKopecks, snapshot }))[0];
+    if (!order?.id) throw new Error('Wallet order was not created');
+  } catch (error) {
+    throw withOutcome(error, 'not_charged');
+  }
+  let paid;
+  try {
+    paid = await supabaseFetch('rpc/wallet_pay_order', { method: 'POST', body: JSON.stringify({ p_order_id: order.id }) });
+  } catch (error) {
+    // Ответ потерялся — списание могло пройти. Возврат сам скажет: «не списано» (not_paid) или «вернули».
+    const refund = await refundWalletOrder(order.id);
+    if (refund.outcome === 'not_charged') {
+      await supabaseFetch(`payment_orders?id=eq.${order.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }) }).catch(() => {});
+    }
+    throw withOutcome(error, refund.outcome, order.id);
+  }
+  if (!paid?.ok) {
+    await supabaseFetch(`payment_orders?id=eq.${order.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }) }).catch(() => {});
+    return { ok: false, error: 'INSUFFICIENT', balanceKopecks: Number(paid?.balance || 0), missingKopecks: priceKopecks - Number(paid?.balance || 0) };
+  }
+  try {
+    const completed = await completeOrder(order, { status: 'succeeded', paid: true });
+    return { ok: true, order: completed, balanceKopecks: Number(paid.balance) };
+  } catch (error) {
+    const refund = await refundWalletOrder(order.id);
+    throw withOutcome(error, refund.outcome, order.id);
+  }
+}
+
+function insertWalletOrder({ userId, productKind, fields, priceKopecks, snapshot }) {
+  return supabaseFetch('payment_orders', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
     body: JSON.stringify({
@@ -131,23 +191,10 @@ async function payWithWallet({ userId, productKind, fields = {}, priceRub, snaps
       wallet_paid_kopecks: priceKopecks,
     }),
   });
-  const order = inserted[0];
-  const paid = await supabaseFetch('rpc/wallet_pay_order', { method: 'POST', body: JSON.stringify({ p_order_id: order.id }) });
-  if (!paid?.ok) {
-    await supabaseFetch(`payment_orders?id=eq.${order.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'canceled', updated_at: new Date().toISOString() }) }).catch(() => {});
-    return { ok: false, error: 'INSUFFICIENT', balanceKopecks: Number(paid?.balance || 0), missingKopecks: priceKopecks - Number(paid?.balance || 0) };
-  }
-  try {
-    const completed = await completeOrder(order, { status: 'succeeded', paid: true });
-    return { ok: true, order: completed, balanceKopecks: Number(paid.balance) };
-  } catch (error) {
-    await supabaseFetch('rpc/wallet_refund_order', { method: 'POST', body: JSON.stringify({ p_order_id: order.id }) }).catch(() => {});
-    throw error;
-  }
 }
 
 module.exports = {
-  MAX_TOPUP, MIN_TOPUP, TOPUP_AMOUNTS, TOPUP_BONUS_STEPS,
+  MAX_TOPUP, MIN_TOPUP, TOPUP_AMOUNTS, TOPUP_BONUS_STEPS, WALLET_OUTCOMES,
   affordableGenerations, formatRub, generationCost, getBalanceKopecks, grantBonus, walletSummary, payWithWallet,
   topupBonus, topupBonusPercent, validTopup,
 };
