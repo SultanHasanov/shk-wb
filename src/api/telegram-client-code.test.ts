@@ -149,6 +149,39 @@ describe('экран «Код клиента»', () => {
   });
 });
 
+describe('«Найти ID клиента в Помощнике ПВЗ»', () => {
+  it('кнопка — второй на экране «Код клиента», после поиска', async () => {
+    await bot.processUpdate(press('menu:code'));
+    const data = buttons().map(button => button.callback_data);
+    expect(data.slice(0, 2)).toEqual(['code:find', 'code:app']);
+  });
+
+  it('без подписки — инструкция с шагом «оформите подписку», тарифы с ценами и кнопки покупки', async () => {
+    await bot.processUpdate(press('code:app'));
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('ID клиента в «Помощнике ПВЗ»');
+    expect(text).toContain('Ваша подписка: нет подписки');
+    expect(text).toContain('1. Оформите подписку');
+    expect(text).toContain('Откройте раздел «Код клиента», выберите «По ячейке» или «По телефону»');
+    expect(text).toContain('<b>SID</b>: это и есть ID клиента');
+    expect(text).toContain('Стандарт — 239 ₽/мес');
+    expect(text).toContain('Про — 399 ₽/мес</b>: поиск клиента и 10 QR клиента в месяц включено');
+    const all = buttons();
+    expect(all.map(button => button.callback_data).filter(Boolean)).toEqual(['shop:helper:standard', 'shop:helper:pro', 'menu:code', 'menu:home']);
+    expect(all.find(button => button.url)?.url).toBe('https://shk-wb.ru/program');
+  });
+
+  it('подписка есть — без покупки, шаги начинаются со скачивания', async () => {
+    world.ent = { plan: 'pro', paid_until: '2026-12-20T00:00:00Z', codes_limit: 10, codes_used: 0, packs_left: 0 };
+    await bot.processUpdate(press('code:app'));
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('Ваша подписка: «Про» до 20.12');
+    expect(text).not.toContain('Оформите подписку');
+    expect(text).toContain('1. Скачайте программу');
+    expect(buttons().map(button => button.callback_data)).not.toContain('shop:helper:pro');
+  });
+});
+
 describe('«Код N» в чате', () => {
   it.each(['Код 191 607 973', 'код: 191607973', 'Код191607973', 'Код клиента 191607973'])('«%s» — QR клиента с подписью и кнопками', async text => {
     await bot.processUpdate(message(text));

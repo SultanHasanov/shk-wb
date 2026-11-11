@@ -517,8 +517,48 @@ async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     ...pending.rows,
     [{ text: '🔎 Найти клиента по ячейке или телефону', callback_data: 'code:find' }],
+    [{ text: '🖥 Найти ID клиента в Помощнике ПВЗ', callback_data: 'code:app' }],
     ...(short ? [[{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] : []),
     MENU_ROW,
+  ]) });
+}
+
+/**
+ * «Найти ID клиента в Помощнике ПВЗ»: как найти ID (в программе он подписан «SID») и купить подписку.
+ * Названия разделов и кнопок — как в программе (_local-only/pvz-tauri: nav.ts, screens/CodeClient.tsx);
+ * поиск по ячейке и телефону открыт с «Стандарта» (FEATURE_PLAN), коды клиента в месяц — только в «Про».
+ * Переименуют раздел или кнопки в программе — поправить текст здесь.
+ */
+async function showClientIdInHelper(chatId, messageId, from) {
+  const userId = from?.id ? await findUser(from.id).catch(() => null) : null;
+  const [ent, free] = await Promise.all([
+    userId ? supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null) : null,
+    helperFreeText(),
+  ]);
+  const active = Boolean(ent?.plan && PLANS[ent.plan]);
+  const plans = SALE_PLANS.map(id => `• <b>${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес</b>: ${PLANS[id].codes
+    ? `поиск клиента и ${PLANS[id].codes} QR клиента в месяц включено`
+    : 'поиск клиента по ячейке и телефону; QR — из пакета кодов клиента или здесь, в боте'}.`);
+  const text = [
+    '<b>🖥 ID клиента в «Помощнике ПВЗ»</b>',
+    'Программа для компьютера пункта сама находит клиента по номеру ячейки или последним 4 цифрам телефона — по базе пункта на этом компьютере.',
+    '',
+    `Ваша подписка: ${helperStatusLine(ent, free)}`,
+    '',
+    '<b>Как найти ID:</b>',
+    ...(active ? [] : ['1. Оформите подписку — кнопки ниже.']),
+    `${active ? '1' : '2'}. Скачайте программу на компьютер пункта, где работает программа WB: ${PROGRAM_URL}`,
+    `${active ? '2' : '3'}. Войдите: «Войти через сайт» → «Подтвердить в Telegram-боте» — и подтвердите вход здесь.`,
+    `${active ? '3' : '4'}. Откройте раздел «Код клиента», выберите «По ячейке» или «По телефону», введите значение и нажмите «Найти».`,
+    `${active ? '4' : '5'}. В строке клиента — <b>SID</b>: это и есть ID клиента. QR можно получить там же кнопкой «QR код клиента» или прислать ID сюда.`,
+    '',
+    ...(active ? [] : [...plans, ...(free ? [`🎁 Сейчас ${free}`] : []), '']),
+    'Ещё ID видно в разделах «Ячейки» (карточка клиента) и «Клиенты».',
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+    ...(active ? [] : SALE_PLANS.map(id => [{ text: `🛒 «${PLANS[id].title}» — ${PLANS[id].monthlyPrice} ₽/мес`, callback_data: `shop:helper:${id}` }])),
+    [{ text: '⬇️ Скачать программу', url: PROGRAM_URL }],
+    [{ text: '⬅️ Назад', callback_data: 'menu:code' }, ...MENU_ROW],
   ]) });
 }
 
@@ -4590,6 +4630,7 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }
+  if (data === 'code:app') { answerCallbackQuery(callback.id).catch(() => {}); await showClientIdInHelper(chatId, messageId, from); return; }
   // Запрос QR с компьютера: выдать / отклонить / выдать с баланса / снова экран выдачи («⬅️ Назад» с оплаты);
   // подтверждение замены привязки Telegram.
   const approvalMatch = data.match(/^cq:(ok|no|wallet|view):([0-9a-f-]{36})$/);
