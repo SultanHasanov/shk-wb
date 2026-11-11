@@ -273,6 +273,12 @@ module.exports = async function handler(req, res) {
     if (String(error.message).includes('TARGET_ACCOUNT_HAS_TELEGRAM')) {
       return json(res, 409, { error: 'К этому кабинету уже привязан другой Telegram', code: 'TARGET_ACCOUNT_HAS_TELEGRAM' });
     }
+    // Отказы объединения (20261120_account_merge_full.sql): MERGE_BUSY, MERGE_POINT_CONFLICT,
+    // MERGE_CLOUD_DATA, MERGE_PARTNER_CONFLICT — автоматически не решить, только поддержка.
+    const mergeRefusal = /\bMERGE_[A-Z_]+/.exec(String(error.message));
+    if (mergeRefusal) {
+      return json(res, 409, { error: 'Объединить кабинеты автоматически не получилось. Напишите в поддержку — объединим вручную.', code: mergeRefusal[0] });
+    }
     if (String(error.message).includes('TARGET_ACCOUNT_')) {
       return json(res, 400, { error: 'Войдите по электронной почте в подтверждённый кабинет', code: 'INVALID_TARGET_ACCOUNT' });
     }

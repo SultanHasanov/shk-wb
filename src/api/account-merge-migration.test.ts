@@ -161,6 +161,31 @@ describe('merge_telegram_account', () => {
     expect(merge.body).toMatch(/from public\.wallet_accounts\s+where user_id in \(source_user_id, p_target_user_id\) order by user_id for update;/);
   });
 
+  it('порядок замков как у оплат и возвратов: заказы → advisory → брони генераций → счета', () => {
+    // wallet_pay_order / complete_*_order: заказ → счёт или app_subs:; refund_sticker_generation: бронь → счёт;
+    // reserve_sticker_generation: advisory → бронь → счёт. Иначе слияние и оплата зажмут друг друга.
+    const orders = merge.body.search(/perform 1 from public\.payment_orders\s+where user_id in \(source_user_id, p_target_user_id\) order by id for update;/);
+    const advisory = merge.body.indexOf('perform pg_advisory_xact_lock(hashtext(lock_key));');
+    const charges = merge.body.search(/perform 1 from public\.sticker_generation_charges\s+where user_id in \(source_user_id, p_target_user_id\) order by id for update;/);
+    const wallets = merge.body.search(/perform 1 from public\.wallet_accounts\s+where user_id in/);
+    const firstWrite = merge.body.search(/\b(update|delete from|insert into) public\./);
+    expect(orders).toBeGreaterThan(-1);
+    expect(charges).toBeGreaterThan(-1);
+    expect(orders).toBeLessThan(advisory);
+    expect(advisory).toBeLessThan(charges);
+    expect(charges).toBeLessThan(wallets);
+    expect(wallets).toBeLessThan(firstWrite);
+  });
+
+  it('отметка пробного периода «ПВЗ Принт» компьютера бота не уходит каскадом', () => {
+    expect(sql).toContain('alter table public.cell_print_trial_claims alter column user_id drop not null;');
+    expect(sql.indexOf('alter table public.cell_print_trial_claims')).toBeLessThan(sql.indexOf('create or replace function'));
+    expect(merge.body).toMatch(/update public\.cell_print_trial_claims set user_id=p_target_user_id where user_id=source_user_id;\s+else\s+update public\.cell_print_trial_claims set user_id=null where user_id=source_user_id;/);
+    // запрет второго пробного держится по компьютеру
+    const trial = readFileSync(resolve(migrationsDir, '20261108_cell_print_trial_pause.sql'), 'utf8');
+    expect(trial).toContain('where device_hash=p_device_hash or user_id=p_user');
+  });
+
   it('удаляет сессию мастера этого Telegram и отвечает суммами переноса', () => {
     expect(merge.body).toContain('delete from public.telegram_generator_sessions where telegram_user_id=p_telegram_user_id;');
     for (const key of ['movedWalletKopecks', 'movedSubscriptions', 'movedDevices', 'movedOrders', 'deleteSource']) {
@@ -324,6 +349,7 @@ describe('relinkIdentity / mergeTelegramAccount в server/_telegram-identity.js'
   it('перепривязка: сохраняет связку и удаляет пустой технический аккаунт', async () => {
     const calls = backend((call) => {
       if (call.path === 'rpc/relink_telegram_identity') return { sourceUserId: SOURCE, deleteSource: true };
+      if (call.path === 'rpc/account_merge_summary') return { empty: true };
       if (call.path.startsWith('user_telegram_identities')) return [{ user_id: USER }];
       return {};
     });
@@ -332,6 +358,10 @@ describe('relinkIdentity / mergeTelegramAccount в server/_telegram-identity.js'
     const save = calls.find((c) => c.method === 'POST' && c.path.startsWith('user_telegram_identities?on_conflict=telegram_user_id'))!;
     expect(save.body).toMatchObject({ user_id: USER, telegram_user_id: 777001, username: 'pvz' });
     expect(calls.find((c) => c.method === 'DELETE')!.path).toBe(`auth:admin/users/${SOURCE}`);
+    // перед удалением — свежая сводка исходного аккаунта
+    const check = calls.findIndex((c) => c.path === 'rpc/account_merge_summary');
+    expect(calls[check].body).toEqual({ p_user: SOURCE });
+    expect(check).toBeLessThan(calls.findIndex((c) => c.method === 'DELETE'));
   });
 
   it('аккаунт с почтой при перепривязке не удаляется', async () => {
@@ -344,11 +374,51 @@ describe('relinkIdentity / mergeTelegramAccount в server/_telegram-identity.js'
     const answer = { sourceUserId: SOURCE, deleteSource: true, movedWalletKopecks: 51750, movedSubscriptions: 2, movedDevices: 1 };
     const calls = backend((call) => {
       if (call.path === 'rpc/merge_telegram_account') return answer;
+      if (call.path === 'rpc/account_merge_summary') return { empty: true };
       if (call.method === 'DELETE') return reply(500, { msg: 'auth down' });
       return [{}];
     });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(identity.mergeTelegramAccount(USER, TELEGRAM)).resolves.toEqual(answer);
     expect(calls.find((c) => c.method === 'DELETE')!.path).toBe(`auth:admin/users/${SOURCE}`);
+  });
+
+  it('исходный аккаунт, в котором после переноса снова что-то появилось, не удаляется', async () => {
+    // Начисление, ждавшее замка счёта во время слияния, заново создаёт счёт исходного аккаунта —
+    // удаление унесло бы деньги каскадом.
+    const answer = { sourceUserId: SOURCE, deleteSource: true, movedWalletKopecks: 0, movedSubscriptions: 0, movedDevices: 0 };
+    const calls = backend((call) => {
+      if (call.path === 'rpc/merge_telegram_account') return answer;
+      if (call.path === 'rpc/account_merge_summary') return { empty: false, walletKopecks: 5000 };
+      return [{}];
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(identity.mergeTelegramAccount(USER, TELEGRAM)).resolves.toEqual({ ...answer, sourceKept: true });
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('сбой проверки перед удалением — аккаунт остаётся, перепривязка всё равно успешна', async () => {
+    const calls = backend((call) => {
+      if (call.path === 'rpc/relink_telegram_identity') return { sourceUserId: SOURCE, deleteSource: true };
+      if (call.path === 'rpc/account_merge_summary') return reply(500, { code: 'XX000', message: 'boom' });
+      return [{}];
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(identity.relinkIdentity(USER, TELEGRAM)).resolves.toMatchObject({ deleteSource: true, sourceKept: true });
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+  });
+});
+
+describe('api/auth.js: отказы объединения', () => {
+  it('MERGE_* — 409 «напишите в поддержку» с кодом отказа, а не 500 «не удалось выполнить вход»', () => {
+    const auth = readFileSync(resolve(root, 'api/auth.js'), 'utf8');
+    const at = auth.indexOf('/\\bMERGE_[A-Z_]+/');
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(auth.indexOf("'Не удалось выполнить вход через Telegram'"));
+    expect(auth).toContain("json(res, 409, { error: 'Объединить кабинеты автоматически не получилось. Напишите в поддержку — объединим вручную.', code: mergeRefusal[0] })");
+    // все отказы объединения из миграции попадают под это правило и дают чистый код
+    const codes = [...raw.matchAll(/raise exception '(MERGE_[^']*)'/g)].map((m) => /\bMERGE_[A-Z_]+/.exec(m[1])![0]);
+    expect(new Set(codes)).toEqual(new Set(['MERGE_BUSY', 'MERGE_POINT_CONFLICT', 'MERGE_CLOUD_DATA', 'MERGE_PARTNER_CONFLICT']));
   });
 });

@@ -20,7 +20,12 @@ begin;
 -- ключом, выведенным из user_id (server/_app-crypto.js: HKDF(APP_DATA_KEY, user_id)). Перевесить их
 -- в SQL нельзя: под другим user_id они не расшифруются, а строки зеркала без данных программа примет
 -- за удалённые и сотрёт их на других ПК. Поэтому объединение с такими данными отказывает
--- (MERGE_CLOUD_DATA) — их нужно сначала перешифровать на сервере (отдельная задача).
+-- (MERGE_CLOUD_DATA) — их нужно сначала перешифровать на сервере (отдельная задача; как поступать
+-- с такими аккаунтами, решает владелец — см. план, A1).
+
+-- Отметка пробного периода «ПВЗ Принт» может остаться без аккаунта (см. merge_telegram_account):
+-- запрет второго пробного на том же компьютере держится по device_hash.
+alter table public.cell_print_trial_claims alter column user_id drop not null;
 
 -- ---------------------------------------------------------------------------------------------
 -- Сводка аккаунта
@@ -243,7 +248,15 @@ begin
 
   -- Те же замки, что берут списания и выдачи (wallet_move — строкой счёта, остальные — advisory):
   -- пока идёт слияние, ни у одного из двух аккаунтов не пройдёт параллельное списание или выдача
-  -- подписки. Порядок фиксированный (по тексту ключа), чтобы два слияния не зажали друг друга.
+  -- подписки. Порядок — как у соседних функций, иначе взаимная блокировка:
+  --   1) строки заказов: wallet_pay_order, wallet_refund_order, complete_*_order берут заказ, потом
+  --      счёт или app_subs:/app_addons:;
+  --   2) advisory по пользователю (между собой — по тексту ключа, чтобы два слияния не зажали друг друга);
+  --   3) брони генераций: reserve_sticker_generation берёт advisory → бронь → счёт,
+  --      refund_sticker_generation — бронь → счёт;
+  --   4) строки счетов.
+  perform 1 from public.payment_orders
+   where user_id in (source_user_id, p_target_user_id) order by id for update;
   for lock_key in
     select k from (
       select p || u::text as k
@@ -253,6 +266,8 @@ begin
   loop
     perform pg_advisory_xact_lock(hashtext(lock_key));
   end loop;
+  perform 1 from public.sticker_generation_charges
+   where user_id in (source_user_id, p_target_user_id) order by id for update;
   perform 1 from public.wallet_accounts
    where user_id in (source_user_id, p_target_user_id) order by user_id for update;
 
@@ -547,10 +562,13 @@ begin
    and exists(select 1 from public.cell_print_devices t
                where t.user_id=p_target_user_id and t.device_hash=s.device_hash);
   update public.cell_print_devices set user_id=p_target_user_id where user_id=source_user_id;
-  -- Пробный период «ПВЗ Принт»: одна отметка на аккаунт; у основного своя — отметка бота уходит
-  -- вместе с исходным аккаунтом, как и раньше.
+  -- Пробный период «ПВЗ Принт»: одна отметка на аккаунт (unique user_id) и одна на компьютер
+  -- (device_hash). У основного своя — отметка компьютера бота остаётся без аккаунта (user_id=null),
+  -- иначе она ушла бы каскадом и этот ПК получил бы пробный период ещё раз.
   if not exists(select 1 from public.cell_print_trial_claims where user_id=p_target_user_id) then
     update public.cell_print_trial_claims set user_id=p_target_user_id where user_id=source_user_id;
+  else
+    update public.cell_print_trial_claims set user_id=null where user_id=source_user_id;
   end if;
 
   -- Ручные лимиты из админки (user_overrides) не теряются вместе с техническим аккаунтом:

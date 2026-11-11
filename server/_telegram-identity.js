@@ -3,6 +3,7 @@
 const { supabaseFetch } = require('./_supabase');
 const userCache = require('./_telegram-user-cache');
 const { fetchWithRetry } = require('./_fetch-retry');
+const { accountHasValuableData } = require('./_telegram-account');
 
 function technicalEmail(telegramId) { return `telegram-${Number(telegramId)}@users.invalid`; }
 
@@ -123,12 +124,32 @@ async function identityRpc(name, body) {
   }
 }
 
+/**
+ * Удалить технический аккаунт после перепривязки/объединения. true — удалён (или попытка удаления
+ * сделана), false — оставлен.
+ * Связь уже перенесена транзакцией. Неудачное удаление оставит только недоступную auth-запись
+ * и не откатит рабочий аккаунт пользователя.
+ * Перед удалением — свежая сводка: списание или начисление на исходный аккаунт, ждавшее замка счёта
+ * во время слияния, после него заново создаёт счёт (wallet_move: insert … on conflict do nothing)
+ * с деньгами, и удаление унесло бы их каскадом. Непустой аккаунт (и при сбое проверки) не удаляем —
+ * остаток переносит поддержка вручную: повторное слияние его уже не найдёт, Telegram привязан к основному.
+ */
 async function deleteSourceAccount(sourceUserId, label) {
-  // Связь уже перенесена транзакцией. Неудачное удаление оставит только недоступную auth-запись
-  // и не откатит рабочий аккаунт пользователя.
+  let valuable;
+  try {
+    valuable = await accountHasValuableData(sourceUserId);
+  } catch (error) {
+    console.warn(label, `check of ${sourceUserId} failed, account kept:`, error.message);
+    return false;
+  }
+  if (valuable) {
+    console.warn(label, `account ${sourceUserId} is not empty after the move, kept for manual review`);
+    return false;
+  }
   await authAdmin(`/users/${encodeURIComponent(sourceUserId)}`, { method: 'DELETE' })
     .catch(error => console.warn(label, error.message));
   userCache.forgetSiteUser(sourceUserId);
+  return true;
 }
 
 /**
@@ -141,7 +162,7 @@ async function relinkIdentity(userId, telegram) {
   const details = result || {};
   await saveIdentity(userId, telegram);
   if (details.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
-    await deleteSourceAccount(details.sourceUserId, 'Unable to delete empty Telegram account');
+    if (!await deleteSourceAccount(details.sourceUserId, 'Unable to delete empty Telegram account')) details.sourceKept = true;
   }
   return details;
 }
@@ -152,12 +173,12 @@ async function relinkIdentity(userId, telegram) {
  * (movedWalletKopecks, movedSubscriptions, movedDevices…).
  */
 async function mergeTelegramAccount(userId, telegram) {
-  const details = await identityRpc('merge_telegram_account', { p_telegram_user_id: telegram.id, p_target_user_id: userId });
+  const details = (await identityRpc('merge_telegram_account', { p_telegram_user_id: telegram.id, p_target_user_id: userId })) || {};
   await saveIdentity(userId, telegram);
-  if (details?.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
-    await deleteSourceAccount(details.sourceUserId, 'Unable to delete merged Telegram account');
+  if (details.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
+    if (!await deleteSourceAccount(details.sourceUserId, 'Unable to delete merged Telegram account')) details.sourceKept = true;
   }
-  return details || {};
+  return details;
 }
 
 module.exports = {
