@@ -68,4 +68,23 @@ describe('WB PVZ reviews client', () => {
     expect(url).toBe('https://s-point.wb.ru/s42/api/v2/pickpoint/146183/switch');
     expect(session).toMatchObject({ desktopToken: 'point-token', desktopPointId: 50160457 });
   });
+
+  // Бот отличает ошибку WB от нашей (Supabase) по имени ошибки и показывает текст WB только если его написал WB.
+  const pointSession = () => ({ deviceId: 'd', token: 't', pointId: 1, desktopOfficeId: 1, desktopShard: 42, authKind: 'desktop' });
+
+  it('сеть до WB недоступна — WbPvzError с пометкой network, а не голый TypeError', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+    const error = await wb.switchDesktopPoint(pointSession()).catch(caught => caught);
+    expect(error).toMatchObject({ name: 'WbPvzError', network: true });
+  });
+
+  it('ответ WB с ошибкой: свой текст WB — в wbMessage, запасная строка — нет', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Нет доступа к пункту' }), { status: 403 }))
+      .mockResolvedValueOnce(new Response('oops', { status: 502 }));
+    const said = await wb.switchDesktopPoint(pointSession()).catch(caught => caught);
+    expect(said).toMatchObject({ name: 'WbPvzError', status: 403, wbMessage: 'Нет доступа к пункту' });
+    const plain = await wb.switchDesktopPoint(pointSession()).catch(caught => caught);
+    expect(plain).toMatchObject({ status: 502, message: 'Ошибка WB HTTP 502', wbMessage: null });
+  });
 });

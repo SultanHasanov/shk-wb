@@ -79,10 +79,24 @@ async function request(session, url, options = {}) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(options.body);
   }
-  const response = await fetch(url, init);
+  let response;
+  try {
+    response = await fetch(url, init);
+  } catch (cause) {
+    // Сеть до WB (таймаут, сброс соединения) — та же ошибка WB, что и ответ 5xx: боту не путать её со сбоем Supabase.
+    const error = new WbPvzError(`WB не ответил: ${cause?.message || cause}`);
+    error.network = true;
+    throw error;
+  }
   rememberCookies(session, response.headers);
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new WbPvzError(messageFrom(data, `Ошибка WB HTTP ${response.status}`), response.status, response.headers.get('x-pow'));
+  if (!response.ok) {
+    // wbMessage — текст, который написал сам WB (а не наша запасная строка): его можно показать человеку.
+    const wbMessage = messageFrom(data, null);
+    const error = new WbPvzError(wbMessage || `Ошибка WB HTTP ${response.status}`, response.status, response.headers.get('x-pow'));
+    error.wbMessage = wbMessage;
+    throw error;
+  }
   if (data == null) throw new WbPvzError('WB вернул ответ не в формате JSON', response.status);
   return { data, powHeader: response.headers.get('x-pow') };
 }
