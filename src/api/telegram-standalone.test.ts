@@ -194,13 +194,14 @@ describe('индивидуальные заказы в боте', () => {
 });
 
 describe('ошибки пополнения без сырого текста', () => {
-  it('сбой — общий текст, «Попробовать снова» и поддержка; исходная ошибка не видна', async () => {
+  it('сбой — общий текст, «Попробовать снова» (то же пополнение) и поддержка; исходная ошибка не видна', async () => {
     vi.spyOn(checkout, 'createTopupPayment').mockRejectedValue(Object.assign(new Error('Не удалось создать оплату (502)'), { status: 502 }));
     await bot.processUpdate(press('tp:500'));
     const text = String(lastScreen().body.text);
     expect(text).toContain('Не получилось создать оплату. Деньги не списаны');
     expect(text).not.toContain('502');
-    expect(buttons().map(button => button.callback_data || button.url)).toEqual(['topup:home', SUPPORT_URL, 'menu:home']);
+    // Повтор — та же кнопка tp:…: с ней сохраняется и покупка после оплаты (then), а не общий экран пополнения.
+    expect(buttons().map(button => button.callback_data || button.url)).toEqual(['tp:500', SUPPORT_URL, 'menu:home']);
   });
 
   it('лимит попыток — подождать 10 минут, без кнопки повтора; ограничение — его текст', async () => {
@@ -257,7 +258,8 @@ describe('код доступа: ответы без сайта и с кнопк
     sent = [];
     await bot.processUpdate(message('654321'));
     expect(texts().join('\n')).toContain('Код не найден');
-    expect(allButtons().map(button => button.callback_data || button.url)).toEqual(['gen:cancel', SUPPORT_URL]);
+    // Своя отмена ввода кода (code:cancel → профиль), а не отмена мастера стикеров.
+    expect(allButtons().map(button => button.callback_data || button.url)).toEqual(['code:cancel', SUPPORT_URL]);
   });
 });
 

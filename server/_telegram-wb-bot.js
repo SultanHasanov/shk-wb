@@ -4,8 +4,8 @@ const path = require('path');
 const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const shkVision = require('./_shk-vision');
-const { generateStickers, getAccessStatus, selectAccessCode } = require('./_sticker-generation');
-const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, finalizeGeneration, refundGeneration, reserveGeneration } = require('./_generation-billing');
+const { customStickerLinks, generateStickers, getAccessStatus, selectAccessCode } = require('./_sticker-generation');
+const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, finalizeGeneration, generationPrices, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
 const approvals = require('./_code-approvals');
@@ -1046,22 +1046,65 @@ async function dropLegacyKeyboard(chatId) {
 // ── Мастер стикеров: одно сообщение, шаги сменяют друг друга, «⬅️ Назад» — на шаг раньше ──
 
 const GEN_BACK = { text: '⬅️ Назад', callback_data: 'gen:back' };
-const GEN_CANCEL = { text: 'Отмена', callback_data: 'gen:cancel' };
+const GEN_CANCEL = { text: '✖️ Отмена', callback_data: 'gen:cancel' };
 const KIND_TITLES = { product: '🏷 Стикеры товаров', box: '📦 QR возвратных коробок' };
+const MODE_TITLES = { range: 'Пачка 50', custom: 'По номеру' };
+// Что получает человек — одними словами во всех шагах (словарь плана: «стикер», «QR коробки», без «генерации»).
+const KIND_NOUNS = {
+  product: { one: 'стикер товара', many: 'стикеров товаров', number: 'номер ШК', length: 11, example: '47671114039' },
+  box: { one: 'QR коробки', many: 'QR коробок', number: 'номер коробки', length: 10, example: '1234567890' },
+};
 
-/** Выбранные параметры над вопросом шага — видно, что уже выбрано. */
-function wizardTrail(draft) {
+function kindNoun(category) { return KIND_NOUNS[category === 'box' ? 'box' : 'product']; }
+
+/** 1 цифра, 2 цифры, 5 цифр — для любого слова с тремя формами. */
+function plural(count, one, few, many) {
+  const n = Math.abs(Number(count)) % 100, last = n % 10;
+  if (n > 10 && n < 20) return many;
+  if (last === 1) return one;
+  if (last >= 2 && last <= 4) return few;
+  return many;
+}
+
+/** Самая низкая цена за штуку в пакетах по номеру — для строки «в пакете дешевле — от 3 ₽ за штуку». */
+function cheapestPackageUnit() {
+  const units = Object.entries(CUSTOM_GENERATION_PACKAGES).filter(([count]) => Number(count) > 1).map(([count, price]) => price / Number(count));
+  return units.length ? Math.min(...units) : null;
+}
+
+/**
+ * Цены мастера для этого человека (копейки) и остаток его пакета стикеров по номеру. wizardView синхронная,
+ * а скидка и пакет — запросы, поэтому цены кладутся в черновик, когда мастер доходит до выбора «Пачка / По номеру».
+ * Пакет считается как в reserve_sticker_generation: коды с режимом custom или без режима. Сбой — обычные цены.
+ */
+async function wizardPrices(userId) {
+  const [prices, codes] = await Promise.all([
+    generationPrices(userId).catch(() => ({ batch: GENERATION_PRICES.batch, custom: GENERATION_PRICES.custom, discountAvailable: false })),
+    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&or=(generation_mode.eq.custom,generation_mode.is.null)&select=generation_limit,generation_used`).catch(() => []),
+  ]);
+  const packageLeft = (Array.isArray(codes) ? codes : []).reduce((sum, row) => sum + remainingOf(row), 0);
+  return { batch: prices.batch, custom: prices.custom, discount: Boolean(prices.discountAvailable), packageLeft };
+}
+
+/** Выбранные параметры над вопросом шага — теми же словами, что на кнопках. */
+function wizardTrail(draft, { withCode = true } = {}) {
   const lines = [];
-  if (draft.category) lines.push(`Тип: <b>${KIND_TITLES[draft.category]}</b>`);
-  if (draft.mode) lines.push(`Режим: <b>${draft.mode === 'range' ? 'пачка по количеству' : 'конкретный номер'}</b>`);
-  if (draft.mode === 'range' && draft.quantity) lines.push(`Количество: <b>${draft.quantity}</b>`);
-  if (draft.mode === 'custom' && draft.code) lines.push(`Номер: <code>${escapeHtml(draft.code)}</code>`);
+  if (draft.category) lines.push(`Что: <b>${KIND_TITLES[draft.category]}${draft.mode ? ` · ${MODE_TITLES[draft.mode]}` : ''}</b>`);
+  if (withCode && draft.mode === 'custom' && draft.code) lines.push(`Номер: <code>${escapeHtml(draft.code)}</code>`);
   return lines.length ? `${lines.join('\n')}\n\n` : '';
+}
+
+/** «Получите: …» на подтверждении. */
+function wizardResultLine(draft) {
+  const noun = kindNoun(draft.category);
+  if (draft.mode === 'range') return `${BATCH_QUANTITY} ${noun.many} с новыми номерами одним PDF.`;
+  return `1 ${noun.one} с номером <code>${escapeHtml(draft.code || '')}</code> — картинку и PDF для печати.`;
 }
 
 function wizardView(state, draft) {
   const error = draft.error ? `⚠️ ${draft.error}\n\n` : '';
   const trail = wizardTrail(draft);
+  const noun = kindNoun(draft.category);
   if (state === 'choose_kind') {
     return { text: `${error}<b>Что нужно создать?</b>`, rows: [
       [{ text: KIND_TITLES.product, callback_data: 'gen:kind:product' }],
@@ -1070,78 +1113,142 @@ function wizardView(state, draft) {
     ] };
   }
   if (state === 'choose_mode') {
-    return { text: `${trail}${error}<b>Выберите режим</b>`, rows: [
-      [{ text: 'Пачка 50', callback_data: 'gen:mode:range' }],
-      [{ text: 'По номеру', callback_data: 'gen:mode:custom' }],
-      [{ text: '💎 Купить пакет по номеру', callback_data: 'shop:gen:wizard' }],
+    const prices = draft.prices || { batch: GENERATION_PRICES.batch, custom: GENERATION_PRICES.custom, discount: false, packageLeft: 0 };
+    const batch = wallet.formatRub(prices.batch / 100), custom = wallet.formatRub(prices.custom / 100);
+    const packageLeft = Number(prices.packageLeft || 0), cheapest = cheapestPackageUnit();
+    const box = draft.category === 'box';
+    const lines = [
+      `<b>${box ? 'Какие QR коробок нужны?' : 'Какие стикеры нужны?'}</b>`,
+      `• Пачка 50 — ${BATCH_QUANTITY} ${box ? 'QR с новыми номерами коробок' : 'стикеров с новыми номерами ШК'} одним PDF, ${batch} за всю пачку.`,
+      `• Один по номеру — ${box ? 'QR с номером коробки' : 'стикер с номером ШК'}, который вы пришлёте, ${packageLeft > 0 ? 'из вашего пакета' : custom}.`,
+    ];
+    if (prices.discount) lines.push('Цены — с разовой скидкой 20%.');
+    if (packageLeft > 0) lines.push(`В вашем пакете ${packageLeft} шт. — «Один по номеру» спишется из него, баланс не тронется.`);
+    else if (cheapest) lines.push(`Часто делаете по номеру? В пакете дешевле — от ${wallet.formatRub(cheapest)} за штуку.`);
+    return { text: `${trail}${error}${lines.join('\n')}`, rows: [
+      [{ text: `Пачка 50 шт. — ${batch}`, callback_data: 'gen:mode:range' }],
+      [{ text: packageLeft > 0 ? 'Один по номеру — из пакета' : `Один по номеру — ${custom}`, callback_data: 'gen:mode:custom' }],
+      [{ text: cheapest ? `💎 Пакеты по номеру — от ${wallet.formatRub(cheapest)}/шт.` : '💎 Пакеты по номеру', callback_data: 'shop:gen:wizard' }],
       [GEN_BACK],
     ] };
   }
-  if (state === 'await_quantity') {
-    return { text: `${trail}${error}<b>Пачка содержит ровно 50 кодов</b>\nСтоимость — ${wallet.formatRub(GENERATION_PRICES.batch / 100)}, результат придёт одним PDF-файлом.`, rows: [
-      [{ text: 'Продолжить — 50 шт.', callback_data: `gen:qty:${BATCH_QUANTITY}` }],
-      [GEN_BACK, GEN_CANCEL],
-    ] };
-  }
   if (state === 'await_code') {
-    const length = draft.category === 'box' ? 10 : 11;
-    // С фото распознано несколько номеров — выбрать кнопкой (или прислать номер цифрами).
+    // Несколько номеров (с фото или в одном сообщении) — выбрать кнопкой или прислать номер цифрами.
     if (Array.isArray(draft.photoCodes) && draft.photoCodes.length) {
-      return { text: `${trail}${error}<b>На фото несколько номеров — какой нужен?</b>\nИли отправьте номер цифрами.`, rows: [
+      const title = draft.pickFromText
+        ? `<b>Вы прислали несколько номеров</b>\nЗа один раз делаю один ${noun.one.split(' ')[0]} — выберите номер.`
+        : '<b>На фото несколько номеров — какой нужен?</b>\nИли пришлите номер цифрами.';
+      return { text: `${trail}${error}${title}`, rows: [
         ...draft.photoCodes.map(code => [{ text: code, callback_data: `gen:pick:${code}` }]),
         [GEN_BACK, GEN_CANCEL],
       ] };
     }
-    const what = draft.category === 'box' ? 'Номер коробки' : 'ШК';
-    const photoHint = draft.category === 'box' ? '' : '\n📷 Или пришлите фото/скриншот экрана с номером — прочитаю сам.';
-    return { text: `${trail}${error}<b>Отправьте номер сообщением</b>\n${what} — ровно ${length} цифр.${photoHint}`, rows: [[GEN_BACK, GEN_CANCEL]] };
+    // Подсказку про фото для коробок не даём: 10 цифр подряд на снимке — это и телефон без +7, будут ложные номера.
+    const lines = draft.category === 'box'
+      ? ['<b>Пришлите номер коробки</b>', `10 цифр без букв TRBX, например <code>${noun.example}</code>. Один номер — один QR.`]
+      : ['<b>Пришлите номер ШК</b>', `ШК — номер товара из 11 цифр, например <code>${noun.example}</code>. Один номер — один стикер.`, '📷 Можно прислать скриншот или фото экрана, где виден номер, — прочитаю сам.'];
+    return { text: `${trail}${error}${lines.join('\n')}`, rows: [[GEN_BACK, GEN_CANCEL]] };
   }
   // state === 'confirm'
-  if (draft.unlimited) {
-    return { text: `${trail}${error}<b>Проверьте параметры</b>\nУ вас, ${escapeHtml(draft.unlimited)}, безлимитный тариф — генерация бесплатная.`, rows: [
-      [{ text: '✅ Подтвердить', callback_data: 'gen:confirm' }],
-      [GEN_BACK, GEN_CANCEL],
-    ] };
-  }
+  const head = `${wizardTrail(draft, { withCode: false })}${error}`;
+  const result = `Получите: ${wizardResultLine(draft)}`;
   if (draft.accessCode) {
-    return { text: `${trail}${error}<b>Всё готово</b>\nОплата: пакет генераций\nПосле создания останется: <b>${Number(draft.packageRemaining || 0)}</b>.`, rows: [
-      [{ text: '✅ Создать', callback_data: 'gen:confirm' }],
+    const units = draft.mode === 'range' ? BATCH_QUANTITY : 1;
+    return { text: `${head}<b>Проверьте и нажмите «Создать»</b>\n${result}\nСпишется из вашего пакета: ${units} шт., в пакете останется ${Number(draft.packageRemaining || 0)}. Баланс не изменится.`, rows: [
+      [{ text: '✅ Создать (из пакета)', callback_data: 'gen:confirm' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
-  // Новые генерации всегда оплачиваются с общего рублёвого баланса.
+  // Без пакета — с общего рублёвого баланса.
   const cost = Number(draft.walletCost || 0), balance = Number(draft.balanceKopecks || 0) / 100;
   if (balance >= cost) {
-    return { text: `${trail}${error}<b>Всё готово</b>\nЦена: <b>${wallet.formatRub(cost)}</b>\nОплата: баланс · останется ${wallet.formatRub(balance - cost)}.`, rows: [
-      [{ text: '✅ Создать', callback_data: 'gen:confirm' }],
+    return { text: `${head}<b>Проверьте и нажмите «Создать»</b>\n${result}\nСпишется с баланса: <b>${wallet.formatRub(cost)}</b>${draft.discountAvailable ? ' (скидка 20%)' : ''}, останется ${wallet.formatRub(balance - cost)}.`, rows: [
+      [{ text: `✅ Создать за ${wallet.formatRub(cost)}`, callback_data: 'gen:confirm' }],
       [GEN_BACK, GEN_CANCEL],
     ] };
   }
-  return { text: `${trail}${error}<b>Нужно пополнить баланс</b>\nЦена: ${wallet.formatRub(cost)} · на балансе: ${wallet.formatRub(balance)}.\nПосле оплаты стикеры создадутся автоматически.`, rows: [
-    topupAndBuyRow(cost - balance, 'gen'),
-    [GEN_BACK],
+  const missing = cost - balance;
+  const amount = Math.max(wallet.MIN_TOPUP, Math.ceil(missing - 1e-9));
+  const left = Math.round((balance + amount + wallet.topupBonus(amount) - cost) * 100) / 100;
+  const lines = [
+    `${head}<b>На балансе не хватает денег</b>`,
+    result,
+    `Нужно ${wallet.formatRub(cost)}, на балансе ${wallet.formatRub(balance)}.`,
+    ...(amount === wallet.MIN_TOPUP && amount > missing ? [`Минимальное пополнение — ${wallet.formatRub(wallet.MIN_TOPUP)}, после создания на балансе останется ${wallet.formatRub(left)}.`] : []),
+    'После оплаты всё создастся само — нажимать ничего не нужно.',
+  ];
+  return { text: lines.join('\n'), rows: [
+    topupAndBuyRow(missing, 'gen', { verb: 'создать' }),
+    [GEN_BACK, GEN_CANCEL],
   ] };
 }
 
-/** Перерисовать шаг мастера в его сообщении и сохранить состояние. */
+/**
+ * Номер из сообщения в шаге «По номеру». Буквы TRBX, пробелы и дефисы срезаем («TRBX-1234-567-890»).
+ * → { code } | { codes } — несколько номеров нужной длины | { error } — что не так, со счётом цифр.
+ */
+function parseWizardNumber(text, category) {
+  const noun = kindNoun(category), length = noun.length;
+  const raw = String(text || '');
+  const strip = value => value.replace(/TRBX/gi, '').replace(/[\s\-‐-―]/g, '');
+  const whole = strip(raw);
+  if (new RegExp(`^\\d{${length}}$`).test(whole)) return { code: whole };
+  // Несколько номеров через пробел, запятую или с новой строки — каждый по отдельности.
+  const tokens = raw.split(/[\s,;]+/).map(strip).filter(Boolean);
+  const codes = [...new Set(tokens.filter(token => new RegExp(`^\\d{${length}}$`).test(token)))];
+  if (codes.length > 1) return { codes: codes.slice(0, 5) };
+  if (codes.length === 1) return { code: codes[0] };
+  const digits = (whole.match(/\d/g) || []).length;
+  const shown = escapeHtml(raw.trim().slice(0, 24));
+  const hint = `Пришлите номер ещё раз, например <code>${noun.example}</code>.`;
+  if (!digits) return { error: `В сообщении нет цифр. ${noun.number[0].toUpperCase()}${noun.number.slice(1)} — ${length} цифр. ${hint}` };
+  const box = category === 'box' ? ' (без букв TRBX)' : '';
+  return { error: `В «${shown}» ${digits} ${plural(digits, 'цифра', 'цифры', 'цифр')}, а в ${category === 'box' ? 'номере коробки' : 'номере ШК'} их ${length}${box}. ${hint}` };
+}
+
+/**
+ * Старый экран мастера уходит из чата: удаляем, а если Telegram не дал (сообщению больше 48 часов) — снимаем
+ * кнопки, чтобы по нему больше не нажимали.
+ */
+async function retireMessage(chatId, messageId) {
+  if (!messageId) return;
+  try {
+    await telegramRequest('deleteMessage', { chat_id: chatId, message_id: messageId });
+  } catch {
+    await telegramRequest('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  }
+}
+
+/**
+ * Перерисовать шаг мастера и сохранить состояние. messageId — нажатая кнопка: экран правится на месте.
+ * Без messageId — шаг вызван текстом или фото: экран уходит новым сообщением вниз, прежний экран удаляется
+ * (иначе ответ появлялся бы в сообщении выше по чату, а внизу — ничего).
+ */
 async function renderWizard(from, chatId, state, draft, messageId) {
   const view = wizardView(state, draft);
   delete draft.error;
-  const expectedId = messageId || draft.msgId || null;
   const options = { reply_markup: choiceKeyboard(view.rows) };
-  if (!expectedId) {
+  if (!messageId) {
+    const previousId = draft.msgId || null;
     draft.msgId = await showScreen(chatId, null, view.text, options);
     await saveSession(from, chatId, state, draft);
+    if (previousId && previousId !== draft.msgId) await retireMessage(chatId, previousId);
     return;
   }
   // Экран правится в известном сообщении — его id в черновике уже есть, поэтому Telegram и Supabase
   // идут параллельно. Если сообщение не удалось отредактировать и ушло новое, сохраняем ещё раз с новым id.
-  draft.msgId = expectedId;
-  const [shownId] = await Promise.all([showScreen(chatId, expectedId, view.text, options), saveSession(from, chatId, state, draft)]);
-  if (shownId && shownId !== expectedId) {
+  draft.msgId = messageId;
+  const [shownId] = await Promise.all([showScreen(chatId, messageId, view.text, options), saveSession(from, chatId, state, draft)]);
+  if (shownId && shownId !== messageId) {
     draft.msgId = shownId;
     await saveSession(from, chatId, state, draft);
   }
+}
+
+/** Выбор «Пачка / По номеру» с ценами этого человека (скидка, пакет) — цены кладутся в черновик здесь. */
+async function renderChooseMode(from, chatId, draft, messageId) {
+  draft.prices = await wizardPrices(draft.userId);
+  return renderWizard(from, chatId, 'choose_mode', draft, messageId);
 }
 
 /** Шаг назад: куда возвращаться из каждого состояния. */
@@ -1149,19 +1256,19 @@ async function wizardBack(from, chatId, session, messageId) {
   const draft = session.draft || {};
   const state = session.state;
   if (state === 'choose_mode') { delete draft.category; return renderWizard(from, chatId, 'choose_kind', draft, messageId); }
-  // Выбор из нескольких номеров с фото → «Назад» возвращает к вводу номера.
+  // Выбор из нескольких номеров → «Назад» возвращает к вводу номера.
   if (state === 'await_code' && draft.photoCodes) {
-    delete draft.photoCodes;
+    delete draft.photoCodes; delete draft.pickFromText;
     return renderWizard(from, chatId, 'await_code', draft, messageId);
   }
-  if (state === 'await_quantity' || state === 'await_code') {
-    delete draft.mode; delete draft.quantity; delete draft.code; delete draft.prefix; delete draft.photoCodes;
-    return renderWizard(from, chatId, 'choose_mode', draft, messageId);
+  if (state === 'await_code') {
+    delete draft.mode; delete draft.quantity; delete draft.code; delete draft.prefix; delete draft.photoCodes; delete draft.pickFromText;
+    return renderChooseMode(from, chatId, draft, messageId);
   }
   if (state === 'confirm') {
-    delete draft.accessCode; delete draft.packageRemaining; delete draft.walletCost; delete draft.balanceKopecks; delete draft.unlimited;
-    if (draft.mode === 'range') { delete draft.mode; delete draft.quantity; return renderWizard(from, chatId, 'choose_mode', draft, messageId); }
-    delete draft.code; delete draft.photoCodes;
+    delete draft.accessCode; delete draft.packageRemaining; delete draft.walletCost; delete draft.balanceKopecks;
+    if (draft.mode === 'range') { delete draft.mode; delete draft.quantity; return renderChooseMode(from, chatId, draft, messageId); }
+    delete draft.code; delete draft.photoCodes; delete draft.pickFromText;
     return renderWizard(from, chatId, 'await_code', draft, messageId);
   }
   return renderWizard(from, chatId, 'choose_kind', draft, messageId);
@@ -1189,13 +1296,13 @@ function topupRows(missing = 0) {
  * then — что сделать после оплаты пополнения (afterWalletTopup): 'gen' | 'rv:<фильтр>:<стр>:<№>' | 'shop:<части>';
  * messageId — экран покупки, который после оплаты станет «Готово ✅».
  */
-function topupAndBuyRow(missingRub, then) {
+function topupAndBuyRow(missingRub, then, { verb = 'купить' } = {}) {
   const amount = Math.max(wallet.MIN_TOPUP, Math.ceil(Number(missingRub) - 1e-9));
   // ~<копейки> — сколько не хватает, для пояснения на экране оплаты. Лимит callback_data у Telegram — 64 байта;
   // не влезло — кнопка без пояснения, покупка от этого не зависит.
   const detailed = `tp:${amount}~${Math.round(Number(missingRub) * 100)}:${then}`;
   const callbackData = Buffer.byteLength(detailed) <= 64 ? detailed : `tp:${amount}:${then}`;
-  return [{ text: `💳 Пополнить на ${amount} ₽ и купить`, callback_data: callbackData }];
+  return [{ text: `💳 Пополнить на ${amount} ₽ и ${verb}`, callback_data: callbackData }];
 }
 
 /** Почему сумма пополнения не равна цене: цена, баланс, нехватка, минимум и остаток. Числа неизвестны — пустой список. */
@@ -1252,7 +1359,20 @@ function paymentErrorKeyboard(view, retryData) {
   ]);
 }
 
-async function startTopupPayment(from, chatId, amount, then, screenId, missing = null) {
+/**
+ * «⬅️ Назад» с экрана оплаты — туда, откуда пришли, без потери выбора: из мастера стикеров — снова подтверждение
+ * (gen:recheck перечитает баланс в том же сообщении), из магазина — экран товара. menu:home здесь стирал черновик,
+ * и после оплаты стикер уже не создавался сам.
+ */
+function topupBackData(then) {
+  if (!then) return 'topup:home';
+  if (then === 'gen') return 'gen:recheck';
+  if (then.startsWith('shop:')) return then;
+  return 'menu:home';
+}
+
+/** retryData — исходная кнопка tp:…: «Попробовать снова» повторяет то же пополнение с той же покупкой. */
+async function startTopupPayment(from, chatId, amount, then, screenId, missing = null, retryData = 'topup:home') {
   const bonus = wallet.topupBonus(amount);
   let userId, payment;
   try {
@@ -1260,7 +1380,7 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
   } catch (error) {
     console.warn('Telegram topup payment failed', error.code || '', error.message);
     const view = paymentErrorView(error);
-    await showScreen(chatId, screenId, view.text, { reply_markup: paymentErrorKeyboard(view, 'topup:home') });
+    await showScreen(chatId, screenId, view.text, { reply_markup: paymentErrorKeyboard(view, retryData) });
     return;
   }
   const balance = then && missing != null ? await walletRub(userId).catch(() => null) : null;
@@ -1274,7 +1394,7 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
   ].join('\n');
   await showScreen(chatId, screenId, text, { reply_markup: choiceKeyboard([
     [{ text: `💳 Перейти к оплате ${wallet.formatRub(amount)}`, url: payment.confirmationUrl }],
-    [{ text: '⬅️ Назад', callback_data: then ? 'menu:home' : 'topup:home' }],
+    [{ text: '⬅️ Назад', callback_data: topupBackData(then) }],
   ]) });
 }
 
@@ -1282,7 +1402,7 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
 function profileKeyboard({ orders = false } = {}) {
   const rows = [
     [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '🛒 Купить с баланса', callback_data: 'shop:home' }],
-    [{ text: '👥 Пригласить коллегу', callback_data: 'menu:ref' }, { text: '🔑 Ввести код доступа', callback_data: 'code:enter' }],
+    [{ text: '👥 Пригласить коллегу', callback_data: 'menu:ref' }, { text: '🎟 Ввести код доступа', callback_data: 'code:enter' }],
   ];
   if (orders) rows.push([{ text: '📦 Мои заказы', callback_data: 'orders:list' }]);
   rows.push(MENU_ROW);
@@ -1306,8 +1426,10 @@ function claimErrorText(error) {
 }
 
 // Под ответами о коде доступа: отмена ввода и поддержка (раньше ответ приходил без кнопок, выйти — только /cancel).
+// Отмена своя (code:cancel → профиль): общая gen:cancel отвечала «создание стикера отменено», хотя стикер не начинали.
+const ACCESS_CODE_CANCEL = { text: '✖️ Отмена', callback_data: 'code:cancel' };
 const ACCESS_CODE_REPLY_KEYBOARD = choiceKeyboard([
-  [{ text: '✖️ Отмена', callback_data: 'gen:cancel' }],
+  [ACCESS_CODE_CANCEL],
   [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
 ]);
 
@@ -1336,13 +1458,17 @@ function consumeCodeAttempt(telegramId) {
 }
 
 /**
- * Ввод кода доступа — например, кода от партнёра. Черновик генерации сохраняется,
- * чтобы после привязки кода сразу вернуться к подтверждению, а не начинать заново.
+ * Ввод кода доступа — например, кода от партнёра. Черновик мастера сохраняется, чтобы после привязки кода
+ * сразу вернуться к подтверждению, а не начинать заново. Экран — в том же сообщении, где нажата кнопка.
  */
-async function askAccessCode(from, chatId, draft = {}) {
+async function askAccessCode(from, chatId, draft = {}, messageId) {
   const userId = draft.userId || await ensureUser(from);
   await saveSession(from, chatId, 'await_access_code', { ...draft, userId });
-  await sendMessage(chatId, '<b>Введите код доступа</b>\n\nОтправьте код сообщением — например, <code>123456</code>. Генерации из кода добавятся к вашему остатку.', { reply_markup: choiceKeyboard([[{ text: 'Отмена', callback_data: 'gen:cancel' }]]) });
+  await showScreen(chatId, messageId, [
+    '<b>🎟 Код доступа</b>',
+    'Код доступа — 6 цифр: пакет стикеров от партнёра или поддержки.',
+    'Пришлите его сообщением, например <code>123456</code>. Стикеры из кода добавятся в ваш пакет.',
+  ].join('\n'), { reply_markup: choiceKeyboard([[ACCESS_CODE_CANCEL]]) });
 }
 
 async function redeemAccessCode(from, chatId, session, text) {
@@ -1367,7 +1493,7 @@ async function redeemAccessCode(from, chatId, session, text) {
     return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> добавлен, но сейчас отключён. Обратитесь к тому, кто его выдал.`, { reply_markup: supportKeyboard() });
   }
   const left = row ? Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)) : 0;
-  await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: MENU_KEYBOARD });
+  await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> принят: в вашем пакете <b>+${left}</b> ${plural(left, 'стикер', 'стикера', 'стикеров')}.`, { reply_markup: MENU_KEYBOARD });
   // Пришли из генерации, где не хватило остатка, — продолжаем с тем же черновиком.
   if (draft.mode) {
     // Старый экран мастера остался выше в чате — подтверждение показываем новым сообщением под кодом.
@@ -1387,7 +1513,6 @@ function telegramRequesterHash(telegramId) {
 /** Подтверждение: сначала генерации на кодах доступа, если их нет — оплата с баланса. */
 async function requestConfirmation(from, chatId, draft, messageId) {
   const units = requiredUnits(draft);
-  delete draft.unlimited;
   delete draft.accessCode;
   delete draft.packageRemaining;
   const packageMode = draft.mode === 'range' ? 'batch' : 'custom';
@@ -1418,23 +1543,6 @@ async function requestConfirmation(from, chatId, draft, messageId) {
 async function ownTopupCode(userId, mode = 'custom') {
   const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&or=(generation_mode.eq.${mode},generation_mode.is.null)&select=code,generation_mode&order=created_at.desc&limit=1`);
   return rows[0]?.code || null;
-}
-
-const UNLIMITED_CODE_NAME = 'Безлимитный тариф (Telegram)';
-
-/** Код безлимитного тарифа владельца: создаём при первой генерации, лимит держим с большим запасом. */
-async function unlimitedAccessCode(userId, units) {
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&name=eq.${encodeURIComponent(UNLIMITED_CODE_NAME)}&select=code,active,generation_limit,generation_used&order=created_at.asc&limit=1`);
-  const row = rows[0];
-  if (!row) {
-    const code = `STK-${crypto.randomBytes(16).toString('hex').toUpperCase()}`;
-    await supabaseFetch('sticker_access_codes', { method: 'POST', body: JSON.stringify({ code, name: UNLIMITED_CODE_NAME, active: true, owner_user_id: userId, generation_limit: 100000, generation_used: 0 }) });
-    return code;
-  }
-  if (!row.active || remainingOf(row) < units + 1000) {
-    await supabaseFetch(`sticker_access_codes?code=eq.${encodeURIComponent(row.code)}`, { method: 'PATCH', body: JSON.stringify({ active: true, generation_limit: Number(row.generation_used || 0) + units + 100000 }) });
-  }
-  return row.code;
 }
 
 /** Купить с баланса ровно нужное число генераций; возвращает код, на который они легли. */
@@ -1473,14 +1581,46 @@ function resultItems(result) {
   return result.items || (result.imageUrl ? [{ code: result.code, imageUrl: result.imageUrl }] : []);
 }
 
+/**
+ * Результат для повторной выдачи: у стикера по номеру ссылки подписаны на час (server/_sticker-generation.js),
+ * к смене вида или «прислать ещё раз» они уже просрочены — подписываем заново тем же форматом. У пачки ссылки
+ * идут по id пачки и не истекают.
+ */
+function freshResult(result) {
+  if (!result || result.items || !result.code) return result;
+  const boxMode = result.variant === 'box';
+  return { ...result, ...customStickerLinks(String(result.code), { boxMode, prefix: result.prefix || 'TRBX' }) };
+}
+
+/** Листание предпросмотра — только когда страниц больше одной (сейчас стикер по номеру всегда один). */
 function pageKeyboard(requestId, page, totalPages, style = 'old') {
   const row = [];
-  if (page > 0) row.push({ text: '⬅️ Назад', callback_data: `gen:page:${style}:${requestId}:${page - 1}` });
-  if (page + 1 < totalPages) row.push({ text: 'Далее ➡️', callback_data: `gen:page:${style}:${requestId}:${page + 1}` });
-  return choiceKeyboard([row, [
-    { text: style === 'new' ? 'Старый формат' : 'Новый формат', callback_data: `gen:format:${style === 'new' ? 'old' : 'new'}:${requestId}` },
-    { text: '➕ Создать ещё', callback_data: 'gen:start' },
-  ], MENU_ROW].filter(items => items.length));
+  if (page > 0) row.push({ text: '⬅️ Предыдущие', callback_data: `gen:page:${style}:${requestId}:${page - 1}` });
+  if (page + 1 < totalPages) row.push({ text: 'Следующие ➡️', callback_data: `gen:page:${style}:${requestId}:${page + 1}` });
+  return choiceKeyboard([row, MENU_ROW].filter(items => items.length));
+}
+
+/**
+ * Кнопки под готовым файлом — на самом PDF, последнем сообщении: смена вида (у QR коробок вид один — кнопки нет),
+ * «ещё один по номеру» сразу на ввод номера того же типа, меню.
+ */
+function resultKeyboard(requestId, result, style = 'old') {
+  const rows = [];
+  if (result.variant !== 'box') {
+    rows.push([{ text: style === 'new' ? '🔁 Обычный вид' : '🔁 Новый вид (QR по углам)', callback_data: `gen:format:${style === 'new' ? 'old' : 'new'}:${requestId}` }]);
+  }
+  const again = Number(result.quantity || 1) === BATCH_QUANTITY
+    ? { text: '➕ Создать ещё', callback_data: 'gen:start' }
+    : { text: '➕ Ещё один по номеру', callback_data: `gen:again:${result.variant === 'box' ? 'box' : 'product'}` };
+  rows.push([again, ...MENU_ROW]);
+  return choiceKeyboard(rows);
+}
+
+/** Подпись к повторной выдаче: тот же результат, денег второй раз не берём — и слова «Списано» в ней нет. */
+function repeatCaption(result, style) {
+  if (result.variant === 'box') return 'Тот же QR коробки ещё раз. Повторно ничего не списано.';
+  const what = Number(result.quantity || 1) === BATCH_QUANTITY ? `Те же ${BATCH_QUANTITY} стикеров` : 'Тот же стикер';
+  return `${what} — ${style === 'new' ? 'новый вид, с QR по углам' : 'обычный вид'}. Повторно ничего не списано.`;
 }
 
 async function localStickerPng(code, style) {
@@ -1507,22 +1647,31 @@ async function sendPreview(chatId, requestId, result, page = 0, style = 'old') {
     if (urls.length === 1) await sendPhoto(chatId, urls[0]);
     else if (urls.length > 1) await sendMediaGroup(chatId, urls);
   }
-  await sendMessage(chatId, `Предпросмотр ${safePage + 1} из ${totalPages} · показано ${Math.min(items.length, safePage * 4 + 4)} из ${items.length}`, { reply_markup: pageKeyboard(requestId, safePage, totalPages, style) });
+  // «Предпросмотр 1 из 1» ничего не сообщал, а главные кнопки висели на нём — счётчик только для нескольких страниц.
+  if (totalPages > 1) await sendMessage(chatId, `Страница ${safePage + 1} из ${totalPages}`, { reply_markup: pageKeyboard(requestId, safePage, totalPages, style) });
 }
 
-function formatKeyboard(requestId) {
-  return choiceKeyboard([
-    [{ text: 'Старые стикеры', callback_data: `gen:format:old:${requestId}` }, { text: 'Новые стикеры', callback_data: `gen:format:new:${requestId}` }],
-    [{ text: '➕ Создать ещё', callback_data: 'gen:start' }, ...MENU_ROW],
-  ]);
+/** Картинка (кроме пачки) и PDF; кнопки — на PDF. caption — подпись к PDF (первая выдача или повтор). */
+async function deliverGeneration(chatId, requestId, result, style = 'old', caption = null) {
+  const fresh = freshResult(result);
+  if (Number(fresh.quantity || 1) !== BATCH_QUANTITY) await sendPreview(chatId, requestId, fresh, 0, style);
+  const document = process.env.TELEGRAM_LOCAL_POLLING === '1' && fresh.variant !== 'box'
+    ? { buffer: await localStickerPdf(fresh, style), filename: `stickers-${style}.pdf` }
+    : absoluteAssetUrl(fresh.pdfUrl, false, style);
+  await sendDocument(chatId, document, { caption: caption || fresh.botCaption || `Готово: ${fresh.quantity || 1} шт.`, reply_markup: resultKeyboard(requestId, fresh, style) });
 }
 
-async function deliverGeneration(chatId, requestId, result, style = 'old') {
-  if (Number(result.quantity || 1) !== BATCH_QUANTITY) await sendPreview(chatId, requestId, result, 0, style);
-  const document = process.env.TELEGRAM_LOCAL_POLLING === '1' && result.variant !== 'box'
-    ? { buffer: await localStickerPdf(result, style), filename: `stickers-${style}.pdf` }
-    : absoluteAssetUrl(result.pdfUrl, false, style);
-  await sendDocument(chatId, document, { caption: result.botCaption || `Готово: ${result.quantity || 1} шт.` });
+/** Файл не ушёл в Telegram: ссылка на PDF и повтор той же выдачи (повтор переподписывает ссылки). */
+function deliveryFailedView(requestId, result, style = 'old') {
+  const fresh = freshResult(result);
+  return {
+    text: `Стикеры созданы (${fresh.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке или пришлите файл ещё раз — повторно платить не нужно.`,
+    reply_markup: choiceKeyboard([
+      [{ text: '📄 Скачать PDF', url: absoluteAssetUrl(fresh.pdfUrl, false, style) }],
+      [{ text: '🔄 Прислать файл ещё раз', callback_data: `gen:format:${style}:${requestId}` }],
+      MENU_ROW,
+    ]),
+  };
 }
 
 async function claimGenerationRequest(requestId, from, chatId, draft) {
@@ -1540,70 +1689,119 @@ async function loadGenerationRequest(requestId, telegramId) {
 }
 
 async function confirmGeneration(callback, session) {
-  return runGeneration(callback.from, callback.message.chat.id, callback.message.message_id, session,
-    () => answerCallbackQuery(callback.id, 'Этот запрос уже обработан'));
+  return runGeneration(callback.from, callback.message.chat.id, callback.message.message_id, session, {
+    onDuplicate: () => answerCallbackQuery(callback.id, 'Этот запрос уже обработан'),
+  });
 }
 
-/** Генерация по подтверждённому черновику: по кнопке «Подтвердить» или сама после пополнения баланса. */
-async function runGeneration(from, chatId, messageId, session, onDuplicate = async () => {}) {
+/** Подпись к PDF при первой выдаче: что создано и что списано (из пакета или с баланса). */
+function generationCaption(draft, charge) {
+  const noun = kindNoun(draft.category), units = requiredUnits(draft);
+  const what = draft.mode === 'range' ? `${BATCH_QUANTITY} ${noun.many} одним файлом` : `1 ${noun.one} (${draft.code})`;
+  const paid = charge.paymentSource === 'package'
+    ? `Списано из пакета: ${units} шт., в пакете осталось ${Number(charge.packageRemaining || 0)}.`
+    : `Списано ${wallet.formatRub(charge.priceKopecks / 100)}${charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(charge.balanceKopecks / 100)}.`;
+  const hint = draft.category === 'box' ? '' : '\nНужен новый вид — с маленькими QR по углам? Нажмите «🔁 Новый вид», пришлю без доплаты.';
+  return `Готово: ${what}. ${paid}${hint}`;
+}
+
+/** Что сказать о деньгах, когда стикер не создан: по источнику оплаты и по тому, прошёл ли возврат. */
+function refundLine(charge, refunded) {
+  if (!refunded) return 'Деньги вернём сами. Если в течение часа они не вернутся — напишите в поддержку, назовите код ниже.';
+  if (charge?.paymentSource === 'package') return 'Деньги не потеряны: стикер вернулся в ваш пакет.';
+  return `Деньги не потеряны: ${wallet.formatRub(Number(charge?.priceKopecks || 0) / 100)} вернулись на баланс.`;
+}
+
+/**
+ * Генерация по подтверждённому черновику: по кнопке «Создать» или сама после пополнения баланса.
+ * noticeId — сообщение «Баланс пополнен…» внизу чата (автопокупка): ход и итог показываем в нём, а прежний экран
+ * мастера выше (там висела ссылка на оплату) превращаем в «итог ниже». Ключ запроса — по прежнему экрану:
+ * нажатие «Создать» там и автопокупка не создадут стикер дважды.
+ */
+async function runGeneration(from, chatId, messageId, session, { onDuplicate = async () => {}, noticeId = null } = {}) {
   const draft = session.draft || {};
   // Сообщение мастера переиспользуется между генерациями, поэтому к его id добавлена метка
   // этого запуска мастера (draft.nonce): двойной клик по «Подтвердить» по-прежнему отсекается.
   const requestId = `${from.id}:${messageId}${draft.nonce || ''}`;
   if (!await claimGenerationRequest(requestId, from, chatId, draft)) { await onDuplicate(); return; }
-  let paidLine = '';
+  const screenId = noticeId || messageId;
+  const lead = noticeId ? '<b>Баланс пополнен ✅</b>\n' : '';
+  if (noticeId && messageId && noticeId !== messageId) {
+    await editMessageText(chatId, messageId, 'Баланс пополнен — итог ниже ⬇️').catch(() => {});
+    draft.msgId = noticeId;
+  }
+  const releaseRequest = () => supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
   draft.billingRequestKey = `telegram:${requestId}`;
   let bought;
   try {
     bought = await buyGenerationsWithWallet(draft);
-    if (!bought.ok) {
-      // Деньги не списаны: освобождаем запрос, чтобы после пополнения можно было нажать «Подтвердить» снова.
-      await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
-      draft.balanceKopecks = bought.balanceKopecks;
-      draft.error = 'Денег на балансе не хватает — пополните баланс.';
-      await renderWizard(from, chatId, 'confirm', draft, messageId);
-      return;
-    }
-    draft.chargeId = bought.charge.chargeId;
-    paidLine = bought.charge.paymentSource === 'package'
-      ? ` Из пакета списано ${requiredUnits(draft)}, осталось ${Number(bought.charge.packageRemaining || 0)}.`
-      : ` Списано ${wallet.formatRub(bought.charge.priceKopecks / 100)}${bought.charge.discountApplied ? ' со скидкой 20%' : ''}, на балансе ${wallet.formatRub(bought.charge.balanceKopecks / 100)}.`;
   } catch (error) {
-    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
-    throw error;
+    await releaseRequest();
+    // Предыдущий стикер ещё создаётся (резерв держится до 5 минут) или резерв не прошёл — деньги не списаны.
+    const busy = { GENERATION_BUSY: 'Предыдущий стикер ещё создаётся. Подождите минуту и нажмите «Создать» ещё раз — деньги сейчас не списаны.', BILLING_ERROR: 'Не получилось провести оплату — деньги не списаны. Попробуйте ещё раз через минуту.' }[error?.code];
+    if (!busy) throw error;
+    delete draft.billingRequestKey;
+    draft.error = busy;
+    await renderWizard(from, chatId, 'confirm', draft, screenId);
+    return;
   }
+  if (!bought.ok) {
+    // Деньги не списаны: освобождаем запрос, чтобы после пополнения можно было нажать «Создать» снова.
+    await releaseRequest();
+    delete draft.billingRequestKey;
+    draft.balanceKopecks = bought.balanceKopecks;
+    draft.error = 'Денег на балансе не хватает.';
+    await renderWizard(from, chatId, 'confirm', draft, screenId);
+    return;
+  }
+  draft.chargeId = bought.charge.chargeId;
   await saveSession(from, chatId, 'generating', draft);
-  await showScreen(chatId, messageId, `${wizardTrail(draft)}⏳ Генерирую и подготавливаю PDF…`);
+  await showScreen(chatId, screenId, `${lead}${wizardTrail(draft)}⏳ Создаю ${draft.mode === 'range' ? 'стикеры' : kindNoun(draft.category).one} и PDF…`);
   let result;
   try {
     const requesterHash = telegramRequesterHash(from.id);
     result = await generateStickers({ ...draft, quantity: draft.mode === 'range' ? BATCH_QUANTITY : 1, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
     result = { ...result, priceKopecks: bought.charge.priceKopecks, discountApplied: bought.charge.discountApplied, balanceKopecks: bought.charge.balanceKopecks };
-    result.botCaption = `Готово: ${result.quantity || 1} шт.${paidLine}`;
+    result.botCaption = generationCaption(draft, bought.charge);
     await finalizeGeneration(draft.chargeId, result);
     await completeGenerationRequest(requestId, result);
     await clearSession(from.id);
   } catch (error) {
-    if (draft.chargeId) await refundGeneration(draft.chargeId).catch(() => {});
+    const refunded = draft.chargeId ? await refundGeneration(draft.chargeId).then(() => true, () => false) : true;
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
-    await clearSession(from.id);
-    await sendMessage(chatId, `Не удалось создать ШК: ${escapeHtml(error.message)}\n\nОплата возвращена на баланс.`, { reply_markup: choiceKeyboard([[{ text: '🏷 Попробовать снова', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    const incident = crypto.randomBytes(3).toString('hex');
+    console.error(`Telegram sticker generation failed [${incident}]`, error.code || '', error.message);
+    // «Повторить» — снова подтверждение с тем же черновиком. Новый nonce: этот requestId уже занят записью failed,
+    // и повтор в том же сообщении получил бы «Этот запрос уже обработан».
+    for (const key of ['chargeId', 'billingRequestKey', 'error']) delete draft[key];
+    draft.nonce = wizardNonce();
+    draft.msgId = screenId;
+    await saveSession(from, chatId, 'confirm', draft).catch(() => clearSession(from.id).catch(() => {}));
+    const reason = error?.code === 'POOL_EMPTY'
+      ? `Сейчас закончились свободные номера для пачки — ${draft.category === 'box' ? 'QR коробок' : 'стикеры'} не созданы.`
+      : `Не получилось создать ${draft.mode === 'range' ? 'стикеры' : kindNoun(draft.category).one} — ошибка на нашей стороне.`;
+    const next = error?.code === 'POOL_EMPTY'
+      ? 'Попробуйте позже или сделайте один по своему номеру.'
+      : `Попробуйте ещё раз. Если повторится — напишите в поддержку, код ошибки: <code>${incident}</code>`;
+    await showScreen(chatId, screenId, [`${lead}${wizardTrail(draft)}${reason}`, refundLine(bought.charge, refunded), next].join('\n'), { reply_markup: choiceKeyboard([
+      [{ text: '🔄 Повторить', callback_data: 'gen:recheck' }],
+      [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+      MENU_ROW,
+    ]) }).catch(() => {});
     return;
   }
   // Файл должен прийти сразу после списания. Для товарных стикеров отправляем
-  // прежний формат по умолчанию, а новый остаётся доступен кнопкой в предпросмотре.
-  // Раньше между списанием и выдачей был отдельный вопрос о формате: если Telegram
-  // не принимал это сообщение, пользователь оставался на экране «Генерирую…».
+  // прежний вид по умолчанию, а новый остаётся доступен кнопкой под PDF.
   try {
     await deliverGeneration(chatId, requestId, result, 'old');
   } catch (error) {
     console.warn('Telegram sticker delivery failed', error.message);
-    const retryRows = result.variant === 'box'
-      ? [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], [{ text: '🌐 История стикеров на сайте', web_app: { url: publicUrl('/cabinet/history') } }], MENU_ROW]
-      : [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], ...formatKeyboard(requestId).inline_keyboard];
-    await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard(retryRows) }).catch(() => {});
+    const view = deliveryFailedView(requestId, result);
+    await showScreen(chatId, screenId, `${lead}${view.text}`, { reply_markup: view.reply_markup }).catch(() => {});
     return;
   }
+  // Экран мастера — в итог, а не вечное «⏳ Создаю…»: всё нужное (файл и кнопки) — ниже.
+  await showScreen(chatId, screenId, `${lead}${wizardTrail(draft)}✅ Готово. Файл — ниже.`).catch(() => {});
   if (result.variant !== 'box') return;
   // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
   if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) }).catch(() => {});
@@ -1619,13 +1817,21 @@ async function startGeneration(from, chatId, messageId) {
 
 async function startForCategory(from, chatId, category) {
   const userId = await ensureUser(from);
-  await renderWizard(from, chatId, 'choose_mode', { userId, category, nonce: wizardNonce() });
+  await renderChooseMode(from, chatId, { userId, category, nonce: wizardNonce() });
 }
 
-/** Стикер по уже известному номеру (с фото или из сообщения): сразу на подтверждение. */
-async function startWithCode(from, chatId, code, messageId) {
+/** «➕ Ещё один по номеру» под готовым файлом: сразу ввод номера того же типа, новым сообщением внизу. */
+async function startAgainByNumber(from, chatId, category) {
   const userId = await ensureUser(from);
-  await requestConfirmation(from, chatId, { userId, category: 'product', mode: 'custom', code, nonce: wizardNonce() }, messageId);
+  const draft = { userId, category, mode: 'custom', nonce: wizardNonce(), ...(category === 'box' ? { prefix: 'TRBX' } : {}) };
+  await renderWizard(from, chatId, 'await_code', draft);
+}
+
+/** Стикер (или QR коробки) по уже известному номеру — с фото или из сообщения: сразу на подтверждение. */
+async function startWithCode(from, chatId, code, messageId, category = 'product') {
+  const userId = await ensureUser(from);
+  const draft = { userId, category, mode: 'custom', code, nonce: wizardNonce(), ...(category === 'box' ? { prefix: 'TRBX' } : {}) };
+  await requestConfirmation(from, chatId, draft, messageId);
 }
 
 // ── ШК с фото: скриншот WB Point или фото экрана WB-PVZ (распознавание — server/_shk-vision.js) ──
@@ -1663,13 +1869,19 @@ async function acceptWizardPhoto(from, chatId, draft, message, image) {
   await deleteMessage(chatId, message.message_id).catch(() => {});
   const length = draft.category === 'box' ? 10 : 11;
   delete draft.photoCodes;
-  if (photoTooOften(from.id)) { draft.error = 'Предыдущее фото ещё читается — подождите несколько секунд.'; return renderWizard(from, chatId, 'await_code', draft); }
-  draft.msgId = await showScreen(chatId, draft.msgId, `${wizardTrail(draft)}🔍 Читаю номер с фото…`);
+  delete draft.pickFromText;
+  if (photoTooOften(from.id)) { draft.error = 'Читаю по одному фото за раз. Пришлите следующее через 10 секунд.'; return renderWizard(from, chatId, 'await_code', draft); }
+  // Статус — новым сообщением внизу (фото человека только что ушло вниз), прежний экран мастера убираем;
+  // дальше правим уже статус.
+  const previousId = draft.msgId;
+  const status = await sendMessage(chatId, `${wizardTrail(draft)}🔍 Читаю номер с фото…`);
+  draft.msgId = status?.message_id || null;
+  if (previousId && previousId !== draft.msgId) await retireMessage(chatId, previousId);
   const codes = await shkFromImage(image, length);
-  if (!codes?.length) { draft.error = photoFailText(codes, length); return renderWizard(from, chatId, 'await_code', draft); }
-  if (codes.length > 1) { draft.photoCodes = codes; return renderWizard(from, chatId, 'await_code', draft); }
+  if (!codes?.length) { draft.error = photoFailText(codes, length); return renderWizard(from, chatId, 'await_code', draft, draft.msgId); }
+  if (codes.length > 1) { draft.photoCodes = codes; return renderWizard(from, chatId, 'await_code', draft, draft.msgId); }
   draft.code = codes[0];
-  return requestConfirmation(from, chatId, draft);
+  return requestConfirmation(from, chatId, draft, draft.msgId);
 }
 
 // Когда последний раз ответили «читаю по одному фото»: на серию фото (альбом) — одно предупреждение, а не девять.
@@ -1708,22 +1920,85 @@ async function acceptLoosePhoto(from, chatId, image) {
 async function handlePhoto(from, chatId, message, image, session) {
   if (session?.state === 'await_code') return acceptWizardPhoto(from, chatId, session.draft || {}, message, image);
   if (session?.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
-  const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения', await_client_query: 'номер ячейки или телефон', await_quantity: 'количество' }[session?.state];
+  const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения', await_client_query: 'номер ячейки или телефон' }[session?.state];
   const wb = waiting ? null : await getWbConnection(from.id);
   const wbWaiting = wb?.state === 'await_phone' ? 'номер телефона сотрудника' : wb?.state === 'await_code' ? 'код из SMS WB' : null;
   if (waiting || wbWaiting) return sendMessage(chatId, `Сейчас жду ${waiting || wbWaiting} цифрами — фото здесь не подойдёт. /cancel — отменить.`);
   return acceptLoosePhoto(from, chatId, image);
 }
 
-/** Голый номер без команды: 11 цифр — может быть ШК; 7–12 цифр — ID клиента из программы. */
+/**
+ * Голый номер без команды: 11 цифр — может быть ШК товара, 10 — номер возвратной коробки, 7–12 — ID клиента.
+ * Ни одна кнопка здесь не списывает сразу: стикер и QR коробки идут через подтверждение мастера, QR клиента —
+ * через своё подтверждение с ценой (code:ask). Раньше «QR клиента» списывал 50 ₽ сразу, а для 10 цифр был
+ * единственной кнопкой — человек, делавший QR коробки, платил за ненужный QR.
+ */
 async function offerForNumber(from, chatId, digits) {
   const free = clientCodeFreeFor(from.id);
   const { price } = free ? { price: 0 } : await clientCodePrice(from.id);
-  const rows = [];
-  if (digits.length === 11) rows.push([{ text: `🏷 Стикер по ШК ${digits}`, callback_data: `gen:num:${digits}` }]);
-  rows.push([{ text: `🔑 QR клиента по ID — ${free ? 'бесплатно' : wallet.formatRub(price)}`, callback_data: `code:qr:${digits}` }]);
+  const sticker = wallet.formatRub(GENERATION_PRICES.custom / 100), qr = free ? 'бесплатно' : wallet.formatRub(price);
+  const rows = [], lines = [`Вы прислали номер <code>${digits}</code>. Что с ним сделать?`];
+  if (digits.length === 11) {
+    rows.push([{ text: `🏷 Стикер товара — ${sticker}`, callback_data: `gen:num:${digits}` }]);
+    lines.push(`🏷 Стикер товара — если это ШК товара (11 цифр), ${sticker}`);
+  }
+  if (digits.length === 10) {
+    rows.push([{ text: `📦 QR коробки — ${sticker}`, callback_data: `gen:box:${digits}` }]);
+    lines.push(`📦 QR коробки — если это номер возвратной коробки (10 цифр), ${sticker}`);
+  }
+  rows.push([{ text: `🔑 QR клиента — ${qr}`, callback_data: `code:ask:${digits}` }]);
+  lines.push(`🔑 QR клиента — если это ID клиента, ${qr}`);
+  lines.push('Деньги спишутся только после подтверждения.');
   rows.push(MENU_ROW);
-  await sendMessage(chatId, `Что сделать с номером <code>${digits}</code>?`, { reply_markup: choiceKeyboard(rows) });
+  await sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
+}
+
+/** Подтверждение QR клиента по голому номеру: что спишется и сколько останется. Сама выдача — code:ok. */
+async function askClientCodeConfirm(from, chatId, messageId, sid) {
+  const rows = [[{ text: '✖️ Отмена', callback_data: 'menu:home' }]];
+  if (clientCodeFreeFor(from.id)) {
+    return showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>\n${unlimitedLine(from.id)}`, { reply_markup: choiceKeyboard([[{ text: '✅ Выдать QR', callback_data: `code:ok:${sid}` }], ...rows]) });
+  }
+  const userId = await ensureUser(from);
+  const [ent, balance, { price, club }] = await Promise.all([
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
+    walletRub(userId),
+    clientCodePrice(from.id),
+  ]);
+  const codesLeft = Math.max(0, Number(ent?.codes_limit || 0) - Number(ent?.codes_used || 0)) + Math.max(0, Number(ent?.packs_left || 0));
+  const lines = ['<b>🔑 QR-код клиента</b>', `ID клиента: <code>${sid}</code>`];
+  let button;
+  if (codesLeft > 0) {
+    lines.push(`Спишется 1 код из тарифа или пакета «Помощника ПВЗ» (осталось ${codesLeft}). Баланс не изменится.`);
+    button = '✅ Выдать QR (1 код)';
+  } else {
+    lines.push(`Спишется с баланса: <b>${wallet.formatRub(price)}</b>${club ? ' (скидка клуба 20%)' : ''}, на балансе ${wallet.formatRub(balance)}.`);
+    button = `✅ Выдать QR за ${wallet.formatRub(price)}`;
+  }
+  lines.push('Каждое получение QR — отдельное списание, даже для того же клиента.');
+  return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: button, callback_data: `code:ok:${sid}` }], ...rows]) });
+}
+
+/**
+ * «Выдать QR» с экрана подтверждения. Одно подтверждение — одна выдача: повторное нажатие той же кнопки
+ * (двойной клик, медленная сеть) отсекается записью запроса по id этого сообщения.
+ */
+async function confirmClientCodeFromNumber(from, chatId, messageId, callbackId, sid) {
+  const userId = await ensureUser(from);
+  const requestId = `qr:${from.id}:${messageId}`;
+  if (!await claimGenerationRequest(requestId, from, chatId, { userId, sid })) { await answerCallbackQuery(callbackId, 'Этот QR уже выдан'); return; }
+  answerCallbackQuery(callbackId).catch(() => {});
+  await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>\n⏳ Готовлю QR…`);
+  try {
+    await handleClientCode(from, chatId, sid);
+  } catch (error) {
+    // Не выдали — запрос освобождаем: подтверждение можно нажать ещё раз.
+    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
+    await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>`, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать ещё раз', callback_data: `code:ok:${sid}` }], MENU_ROW]) }).catch(() => {});
+    throw error;
+  }
+  await completeGenerationRequest(requestId, { sid }).catch(() => {});
+  await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code> — итог ниже ⬇️`).catch(() => {});
 }
 
 /** Баланс в рублях. */
@@ -2475,7 +2750,7 @@ async function resolveShopItem(userId, parts) {
     if (!price || count <= 1) return { error: 'Такого пакета нет.' };
     const target = await ownTopupCode(userId);
     return {
-      title: `<b>🏷 ${count} поштучных генераций</b>\nПо ${wallet.formatRub(price / count)} за номер`,
+      title: `<b>🏷 Пакет: ${count} стикеров по номеру</b>\nПо ${wallet.formatRub(price / count)} за штуку`,
       priceRub: price, productKind: 'stickers', back: b === 'wizard' ? 'shop:gen:wizard' : 'shop:gen', returnToGenerator: b === 'wizard',
       fields: { custom_quantity: count, ...(target ? { renewal_target_key: target } : {}) },
       snapshot: { packs: [{ quantity: count, unit: price / count, total: price }], units: count, total: price },
@@ -2545,7 +2820,7 @@ async function showShop(from, chatId, messageId, parts) {
     return showScreen(chatId, messageId, `<b>🛒 Купить с баланса</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
       [{ text: '🖥 Подписка «Помощник ПВЗ»', callback_data: 'shop:helper' }],
       [{ text: '🖨 Ключ «Печать ячеек»', callback_data: 'shop:cp' }],
-      [{ text: '🏷 Пакеты генераций по номеру', callback_data: 'shop:gen' }],
+      [{ text: '🏷 Пакеты стикеров по номеру', callback_data: 'shop:gen' }],
       [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
       [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
       [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
@@ -2553,14 +2828,23 @@ async function showShop(from, chatId, messageId, parts) {
   }
   if (kind === 'gen' && (!a || a === 'wizard')) {
     const fromWizard = a === 'wizard';
-    const target = await ownTopupCode(userId);
-    const targetLine = target ? `\nПакет добавится к вашему коду <code>${escapeHtml(target)}</code>.` : '\nПосле оплаты получите код доступа.';
+    // Код пакета человеку в боте не нужен: пакет тратится сам (reserve_sticker_generation берёт его раньше баланса).
+    // Код остаётся в истории и для поддержки; здесь — только сколько уже есть в пакете.
+    const { packageLeft } = await wizardPrices(userId);
     const table = Object.entries(CUSTOM_GENERATION_PACKAGES)
       .map(([count, price]) => [Number(count), price])
       .filter(([count]) => count > 1)
-      .map(([count, price]) => `${count} шт. — ${price} ₽ · ${wallet.formatRub(price / count)}/шт.`)
+      .map(([count, price]) => `${count} шт. — ${price} ₽ (${wallet.formatRub(price / count)} за штуку)`)
       .join('\n');
-    return showScreen(chatId, messageId, `<b>🏷 Пакеты по номеру</b>\n${table}${targetLine}\n${balanceLine}`, { reply_markup: choiceKeyboard([
+    const lines = [
+      '<b>🏷 Пакеты стикеров по номеру</b>',
+      table,
+      `Без пакета один стикер по номеру стоит ${wallet.formatRub(GENERATION_PRICES.custom / 100)}.`,
+      'Пакет тратится сам: каждый следующий стикер или QR коробки по номеру спишется из него, а не с баланса. На «Пачку 50» пакет не действует.',
+      ...(packageLeft > 0 ? [`Сейчас в вашем пакете: ${packageLeft} шт. — новый пакет добавится к ним.`] : []),
+      balanceLine,
+    ];
+    return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
       ...Object.entries(CUSTOM_GENERATION_PACKAGES)
         .map(([count, price]) => [Number(count), price])
         .filter(([count]) => count > 1)
@@ -2654,7 +2938,7 @@ async function showShopConfirm(from, chatId, messageId, userId, parts, error) {
   }
   lines.push(`Не хватает <b>${wallet.formatRub(item.priceRub - balance)}</b> — после пополнения покупка пройдёт сама.`);
   return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([
-    topupAndBuyRow(item.priceRub - balance, `shop:${parts.join(':')}`, messageId),
+    topupAndBuyRow(item.priceRub - balance, `shop:${parts.join(':')}`),
     [{ text: '⬅️ Назад', callback_data: item.back }],
   ]) });
 }
@@ -2694,12 +2978,12 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
       ? `Ключ <code>${escapeHtml(order.cell_print_license_key)}</code> продлён на ${item.fields.cell_print_duration_days} дней.`
       : `Ваш ключ: <code>${escapeHtml(order.cell_print_license_key)}</code>\nСрок пойдёт с первой активации.`;
   } else if (item.productKind === 'stickers') {
-    done = `+${item.fields.custom_quantity} генераций начислено на код <code>${escapeHtml(order.access_code)}</code>.`;
+    done = `Пакет куплен: ${item.fields.custom_quantity} стикеров по номеру. Вводить ничего не нужно — они спишутся сами при создании.`;
   } else {
     done = `+${item.fields.license_iterations} подборов — уже в «Помощнике ПВЗ».`;
   }
   const doneRows = item.returnToGenerator
-    ? [[{ text: '🏷 Продолжить генерацию', callback_data: 'gen:return-mode' }], MENU_ROW]
+    ? [[{ text: '🏷 Создать стикер', callback_data: 'gen:return-mode' }], MENU_ROW]
     : [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🛒 Ещё покупка', callback_data: 'shop:home' }], MENU_ROW];
   await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n💰 Осталось ${wallet.formatRub(result.balanceKopecks / 100)}`, { reply_markup: choiceKeyboard(doneRows) });
 }
@@ -2852,8 +3136,15 @@ async function afterWalletTopup(order, noticeId = null) {
   const messageId = Number(order.pricing_snapshot.wallet.message) || null;
   if (then === 'gen') {
     const session = await getSession(telegramId);
-    if (session?.state !== 'confirm' || !session.draft?.mode || session.draft.accessCode) return false;
-    await runGeneration(from, chatId, session.draft.msgId, session);
+    if (session?.state !== 'confirm' || !session.draft?.mode || session.draft.accessCode) {
+      // Выбор успел сброситься (ушли в другой раздел, истекло время): говорим прямо и ведём в мастер.
+      const text = '<b>Баланс пополнен ✅</b>\nСтикер не создан: выбор успел сброситься. Деньги на балансе, платить второй раз не нужно — нажмите «🏷 Стикеры и QR коробок» и повторите.';
+      const keyboard = { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }], MENU_ROW]) };
+      if (noticeId) await showScreen(chatId, noticeId, text, keyboard);
+      else await sendMessage(chatId, text, keyboard);
+      return true;
+    }
+    await runGeneration(from, chatId, session.draft.msgId, session, { noticeId });
     return true;
   }
   const review = /^rv:(all|[1-5]):(\d+):(\d)(?::([0-9a-f]{8}))?$/.exec(then);
@@ -3106,7 +3397,7 @@ async function handleCallback(callback) {
     const amount = Number(topupMatch[1]);
     if (!wallet.validTopup(amount)) { await answerCallbackQuery(callback.id, 'Сумма больше не актуальна'); return; }
     answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {});
-    await startTopupPayment(from, chatId, amount, topupMatch[3] || '', messageId, topupMatch[2] ? Number(topupMatch[2]) / 100 : null);
+    await startTopupPayment(from, chatId, amount, topupMatch[3] || '', messageId, topupMatch[2] ? Number(topupMatch[2]) / 100 : null, data);
     return;
   }
   if (data === 'ref:towallet') { answerCallbackQuery(callback.id).catch(() => {}); await referralToWallet(from, chatId, messageId); return; }
@@ -3155,15 +3446,20 @@ async function handleCallback(callback) {
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
   if (authorMatch) { answerCallbackQuery(callback.id).catch(() => {}); await revealReviewAuthor(from, chatId, Number(authorMatch[1]), Number(authorMatch[2] || 0)); return; }
   if (data === 'gen:start') { answerCallbackQuery(callback.id).catch(() => {}); await startGeneration(from, chatId); return; }
-  // Стикер по номеру, найденному на фото или присланному цифрами, — без шагов мастера.
+  // «➕ Ещё один по номеру» под готовым файлом — сразу ввод номера того же типа.
+  const againMatch = data.match(/^gen:again:(product|box)$/);
+  if (againMatch) { answerCallbackQuery(callback.id).catch(() => {}); await startAgainByNumber(from, chatId, againMatch[1]); return; }
+  // Стикер по номеру (или QR коробки по 10 цифрам), найденному на фото или присланному цифрами, — без шагов мастера.
   const numMatch = data.match(/^gen:num:(\d{11})$/);
   if (numMatch) { answerCallbackQuery(callback.id).catch(() => {}); await startWithCode(from, chatId, numMatch[1], messageId); return; }
+  const boxMatch = data.match(/^gen:box:(\d{10})$/);
+  if (boxMatch) { answerCallbackQuery(callback.id).catch(() => {}); await startWithCode(from, chatId, boxMatch[1], messageId, 'box'); return; }
   if (data === 'orders:list') { answerCallbackQuery(callback.id).catch(() => {}); await showIndividualOrders(from, chatId); return; }
   const orderPay = data.match(/^ord:pay:([0-9a-f-]{36})$/i);
   if (orderPay) { answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {}); await payIndividualOrder(from, chatId, messageId, orderPay[1].toLowerCase()); return; }
   if (data === 'gen:cancel') {
     answerCallbackQuery(callback.id).catch(() => {}); await clearSession(from.id);
-    await showScreen(chatId, messageId, 'Генерация отменена.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    await showScreen(chatId, messageId, 'Создание стикера отменено. Деньги не списаны.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
     return;
   }
   if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }
@@ -3177,32 +3473,65 @@ async function handleCallback(callback) {
   if (loginMatch) { await handleLoginConfirm(from, chatId, messageId, callback.id, loginMatch[1], loginMatch[2]); return; }
   const notMeMatch = data.match(/^dv:no:([0-9a-f-]{36})$/i);
   if (notMeMatch) { await handleDeviceNotMe(from, chatId, messageId, callback.id, notMeMatch[1].toLowerCase()); return; }
+  // QR клиента по голому номеру (offerForNumber): сначала подтверждение с ценой, выдача — по второй кнопке.
+  const codeAsk = data.match(/^code:ask:(\d{7,12})$/);
+  if (codeAsk) { answerCallbackQuery(callback.id).catch(() => {}); await askClientCodeConfirm(from, chatId, messageId, codeAsk[1]); return; }
+  const codeOk = data.match(/^code:ok:(\d{7,12})$/);
+  if (codeOk) { await confirmClientCodeFromNumber(from, chatId, messageId, callback.id, codeOk[1]); return; }
   const codeQr = data.match(/^code:qr:(\d{1,12})$/);
   if (codeQr) { answerCallbackQuery(callback.id).catch(() => {}); await handleClientCode(from, chatId, codeQr[1]); return; }
   if (data === 'code:enter') {
     answerCallbackQuery(callback.id).catch(() => {});
     const current = await getSession(from.id);
     // Из подтверждения генерации сохраняем черновик (после кода — сразу к подтверждению), из профиля начинаем с чистого.
-    await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.mode ? current.draft : {});
+    await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.mode ? current.draft : {}, messageId);
     return;
   }
+  if (data === 'code:cancel') { answerCallbackQuery(callback.id).catch(() => {}); await clearSession(from.id); await showProfile(from, chatId, messageId); return; }
   // Устаревшая кнопка (старый экран входа на сайт) — бот её больше не создаёт, в старых сообщениях ведёт в меню.
   if (data === 'account:continue') { answerCallbackQuery(callback.id).catch(() => {}); await showMainMenu(from, chatId); return; }
+  // Другой вид или «прислать ещё раз» по готовому результату: денег не берём, ссылки подписываем заново (freshResult).
   const formatMatch = data.match(/^gen:format:(old|new):([^:]+:\d+)$/);
   if (formatMatch) {
     await answerCallbackQuery(callback.id, 'Готовлю файлы…');
     const result = await loadGenerationRequest(formatMatch[2], from.id);
     if (!result) return sendMessage(chatId, RESULT_GONE_TEXT, { reply_markup: RESULT_GONE_KEYBOARD });
-    try { await deliverGeneration(chatId, formatMatch[2], result, formatMatch[1]); }
+    try { await deliverGeneration(chatId, formatMatch[2], result, formatMatch[1], repeatCaption(result, formatMatch[1])); }
     catch (error) {
       console.warn('Telegram sticker delivery failed', error.message);
-      await sendMessage(chatId, 'Стикеры созданы, но Telegram не принял файл. Нажмите формат ещё раз — повторно платить не нужно.', { reply_markup: formatKeyboard(formatMatch[2]) });
+      const view = deliveryFailedView(formatMatch[2], result, formatMatch[1]);
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
     }
     return;
   }
   const pageMatch = data.match(/^gen:page:(old|new):([^:]+:\d+):(\d+)$/);
-  if (pageMatch) { answerCallbackQuery(callback.id).catch(() => {}); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, RESULT_GONE_TEXT, { reply_markup: RESULT_GONE_KEYBOARD }); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
+  if (pageMatch) {
+    answerCallbackQuery(callback.id).catch(() => {});
+    const result = await loadGenerationRequest(pageMatch[2], from.id);
+    if (!result) return sendMessage(chatId, RESULT_GONE_TEXT, { reply_markup: RESULT_GONE_KEYBOARD });
+    try { await sendPreview(chatId, pageMatch[2], freshResult(result), Number(pageMatch[3]), pageMatch[1]); }
+    catch (error) {
+      console.warn('Telegram sticker preview failed', error.message);
+      const view = deliveryFailedView(pageMatch[2], result, pageMatch[1]);
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+    }
+    return;
+  }
   const session = await getSession(from.id);
+  // «🏷 Создать стикер» после покупки пакета приходит в новом сообщении (итог покупки), поэтому проверку
+  // «кнопка не из текущего экрана мастера» ниже не проходит. Мастер на выборе «Пачка / По номеру» переносим
+  // в нажатое сообщение; сессии нет или она от другого шага — мастер заново в этом же сообщении.
+  if (data === 'gen:return-mode') {
+    answerCallbackQuery(callback.id).catch(() => {});
+    if (session?.state === 'choose_mode' && session.draft?.category) {
+      const previousId = session.draft.msgId;
+      await renderChooseMode(from, chatId, session.draft, messageId);
+      if (previousId && previousId !== messageId) retireMessage(chatId, previousId).catch(() => {});
+      return;
+    }
+    await startGeneration(from, chatId, messageId);
+    return;
+  }
   if (!session) {
     // Кнопка старого шага: действие закончено (создано, отменено, ушли в меню) или ожидание истекло.
     answerCallbackQuery(callback.id).catch(() => {});
@@ -3218,13 +3547,12 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'gen:back') { answerCallbackQuery(callback.id).catch(() => {}); await wizardBack(from, chatId, session, messageId); return; }
-  if (data === 'gen:return-mode') { answerCallbackQuery(callback.id).catch(() => {}); await renderWizard(from, chatId, 'choose_mode', draft, messageId); return; }
   // «🔄 Я пополнил» — перечитать баланс и коды и показать подтверждение заново.
   if (data === 'gen:recheck' && session.state === 'confirm') { answerCallbackQuery(callback.id).catch(() => {}); await requestConfirmation(from, chatId, draft, messageId); return; }
   if (data.startsWith('gen:kind:') && session.state === 'choose_kind') {
     answerCallbackQuery(callback.id).catch(() => {});
     draft.category = data.endsWith(':box') ? 'box' : 'product';
-    await renderWizard(from, chatId, 'choose_mode', draft, messageId);
+    await renderChooseMode(from, chatId, draft, messageId);
     return;
   }
   if (data.startsWith('gen:mode:') && session.state === 'choose_mode') {
@@ -3239,17 +3567,10 @@ async function handleCallback(callback) {
     }
     return;
   }
-  if (data.startsWith('gen:qty:') && session.state === 'await_quantity') {
-    const quantity = Number(data.slice('gen:qty:'.length));
-    // gen:qty:manual — кнопка «Ввести другое количество» из старых сообщений.
-    if (quantity !== BATCH_QUANTITY) { await answerCallbackQuery(callback.id, 'Пачка содержит ровно 50 кодов'); return; }
-    answerCallbackQuery(callback.id).catch(() => {});
-    draft.quantity = quantity; await requestConfirmation(from, chatId, draft, messageId); return;
-  }
   const pickMatch = data.match(/^gen:pick:(\d{10,11})$/);
   if (pickMatch && session.state === 'await_code' && Array.isArray(draft.photoCodes) && draft.photoCodes.includes(pickMatch[1])) {
     answerCallbackQuery(callback.id).catch(() => {});
-    draft.code = pickMatch[1]; delete draft.photoCodes;
+    draft.code = pickMatch[1]; delete draft.photoCodes; delete draft.pickFromText;
     await requestConfirmation(from, chatId, draft, messageId);
     return;
   }
@@ -3339,19 +3660,15 @@ async function handleMessage(message) {
   if (session?.state === 'await_access_code') return redeemAccessCode(from, chatId, session, text);
   if (session?.state === 'await_topup_amount') return acceptTopupAmount(from, chatId, session, message, text);
   if (session?.state === 'await_client_query') return runClientSearch(from, chatId, text);
-  // Ввод в мастер: сообщение пользователя убираем, ответ — в том же экране мастера (ошибка — строкой сверху).
-  if (session?.state === 'await_quantity') {
-    await deleteMessage(chatId, message.message_id).catch(() => {});
-    const quantity = Number(text);
-    if (quantity !== BATCH_QUANTITY) { draft.error = 'Пачка содержит ровно 50 кодов.'; return renderWizard(from, chatId, 'await_quantity', draft); }
-    draft.quantity = quantity; return requestConfirmation(from, chatId, draft);
-  }
+  // Ввод в мастер: сообщение пользователя убираем, ответ — новым экраном внизу (прежний экран мастера удаляется,
+  // renderWizard без messageId), ошибка — строкой сверху.
   if (session?.state === 'await_code') {
     await deleteMessage(chatId, message.message_id).catch(() => {});
-    const length = draft.category === 'box' ? 10 : 11;
-    const code = text.replace(/\s+/g, '');
-    if (!new RegExp(`^\\d{${length}}$`).test(code)) { draft.error = `«${escapeHtml(text.slice(0, 20))}» — номер должен содержать ровно ${length} цифр.`; return renderWizard(from, chatId, 'await_code', draft); }
-    draft.code = code; return requestConfirmation(from, chatId, draft);
+    const parsed = parseWizardNumber(text, draft.category);
+    if (parsed.codes) { draft.photoCodes = parsed.codes; draft.pickFromText = true; return renderWizard(from, chatId, 'await_code', draft); }
+    if (parsed.error) { draft.error = parsed.error; return renderWizard(from, chatId, 'await_code', draft); }
+    delete draft.photoCodes; delete draft.pickFromText;
+    draft.code = parsed.code; return requestConfirmation(from, chatId, draft);
   }
   const wbConnection = await getWbConnection(from.id);
   if (wbConnection?.state === 'await_phone') {
@@ -3396,10 +3713,17 @@ async function handleMessage(message) {
     return offerForNumber(from, chatId, bareNumber);
   }
   if (!session) return showMainMenu(from, chatId, undefined, { notice: await unknownInputNotice(from, text) });
-  // Шаг мастера ждёт нажатия кнопки, а пришёл текст — подсказываем в том же экране.
+  // Шаг мастера ждёт нажатия кнопки, а пришёл текст — подсказка новым экраном внизу. На подтверждении «По номеру»
+  // правильный по длине номер заменяет прежний: человек заметил опечатку и прислал номер заново.
   if (['choose_kind', 'choose_mode', 'confirm'].includes(session.state) && draft.msgId) {
     await deleteMessage(chatId, message.message_id).catch(() => {});
-    draft.error = 'Выберите вариант кнопкой ниже.';
+    if (session.state === 'confirm' && draft.mode === 'custom') {
+      const parsed = parseWizardNumber(text, draft.category);
+      if (parsed.code) { draft.code = parsed.code; return requestConfirmation(from, chatId, draft); }
+    }
+    draft.error = session.state !== 'confirm' ? 'Выберите вариант кнопкой ниже.'
+      : draft.mode === 'custom' ? 'Чтобы изменить номер, нажмите «⬅️ Назад» или пришлите номер заново. Чтобы создать — «✅ Создать».'
+        : 'Нажмите «✅ Создать» или «⬅️ Назад».';
     return renderWizard(from, chatId, session.state, draft);
   }
   if (session.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
@@ -3547,4 +3871,4 @@ function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramI
 /** Админка сняла/поставила ограничение или безлимит — сбросить снимок на узле бота (по RPC с сайта). */
 function invalidateUserControls() { controls.invalidate(); return true; }
 
-module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, syncBotCommands, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, syncBotCommands, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, parseWizardNumber, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

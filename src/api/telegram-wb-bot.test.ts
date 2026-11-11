@@ -53,18 +53,18 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.profileKeyboard({ orders: true }).inline_keyboard.flat().map(button => button.callback_data)).toContain('orders:list');
   });
 
-  it('показывает короткий выбор режима без цен и лишней отмены', () => {
+  it('выбор «Пачка / По номеру» — с ценами на кнопках, без лишней отмены', () => {
     const view = bot.wizardView('choose_mode', { category: 'product' });
     expect(view.rows.flat().map(button => button.text)).toEqual([
-      'Пачка 50',
-      'По номеру',
-      '💎 Купить пакет по номеру',
+      'Пачка 50 шт. — 20 ₽',
+      'Один по номеру — 7,50 ₽',
+      '💎 Пакеты по номеру — от 3 ₽/шт.',
       '⬅️ Назад',
     ]);
   });
 
   it('в шаге «По номеру» предлагает фото, а несколько номеров с фото даёт выбрать кнопкой', () => {
-    expect(bot.wizardView('await_code', { category: 'product', mode: 'custom' }).text).toContain('пришлите фото');
+    expect(bot.wizardView('await_code', { category: 'product', mode: 'custom' }).text).toContain('фото экрана');
     expect(bot.wizardView('await_code', { category: 'box', mode: 'custom' }).text).not.toContain('фото');
     const pick = bot.wizardView('await_code', { category: 'product', mode: 'custom', photoCodes: ['47671114039', '58899100266'] });
     expect(pick.rows.flat().map(button => button.callback_data)).toEqual(['gen:pick:47671114039', 'gen:pick:58899100266', 'gen:back', 'gen:cancel']);
@@ -87,12 +87,12 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.isFreshSubscriber(null, 333, now)).toBe(false);
   });
 
-  it('на подтверждении показывает источник оплаты без цены на кнопке', () => {
+  it('на подтверждении из пакета — сколько останется в пакете и что баланс не тронут', () => {
     const packageView = bot.wizardView('confirm', {
       category: 'product', mode: 'custom', code: '12345678901', accessCode: '123456', packageRemaining: 9,
     });
-    expect(packageView.text).toContain('останется: <b>9</b>');
-    expect(packageView.rows[0][0].text).toBe('✅ Создать');
+    expect(packageView.text).toContain('в пакете останется 9. Баланс не изменится.');
+    expect(packageView.rows[0][0].text).toBe('✅ Создать (из пакета)');
   });
 
   it('считает каждый новый QR того же SID отдельной платной операцией', () => {
