@@ -2728,15 +2728,24 @@ async function referralLinks(code) {
   };
 }
 
+/** Переход из этого Telegram уже привязан к аккаунту (bind_referral прошёл). Сбой чтения — «нет». */
+async function referralBoundTo(telegramId, userId) {
+  const rows = await supabaseFetch(`telegram_referral_captures?telegram_user_id=eq.${Number(telegramId)}&bound_user_id=eq.${encodeURIComponent(userId)}&select=telegram_user_id&limit=1`).catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 /**
  * /start r_<КОД>: запомнить, кто пригласил. Первый переход побеждает; если аккаунт уже есть,
  * привязать нельзя (приглашение считается только для новых) — ничего не сохраняем.
- * → 'new' (переход записан) | 'already_captured' (переход был раньше, аккаунта ещё нет) |
- *   'existing' (уже пользовался ботом) | 'unknown' (такого кода нет).
+ * → 'new' (переход записан) | 'already_captured' (переход был раньше: аккаунта ещё нет или приглашение
+ *   ему уже засчитано) | 'existing' (уже пользовался ботом) | 'unknown' (такого кода нет).
  */
 async function captureReferral(from, rawCode) {
   const code = String(rawCode).toUpperCase();
-  if (await findUser(from.id)) return 'existing';
+  const userId = await findUser(from.id);
+  // Аккаунт создаётся сразу после первого перехода, и Telegram шлёт /start r_… при каждом открытии ссылки:
+  // если приглашение этому аккаунту уже засчитано, повторный переход — то же приветствие, а не «только новым».
+  if (userId) return (await referralBoundTo(from.id, userId)) ? 'already_captured' : 'existing';
   const [owners, aliases] = await Promise.all([
     supabaseFetch(`referral_accounts?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
     supabaseFetch(`referral_code_aliases?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
@@ -3455,7 +3464,15 @@ async function rejectRestricted(update) {
   if (!controls.covers(restriction, 'bot')) return false;
   const cq = update.callback_query;
   if (cq) {
-    await alertCallback(cq.id, restriction.message);
+    // Кнопка: раз в час — сообщение с причиной и кнопкой-ссылкой поддержки (всплывашка тогда была бы повтором),
+    // в остальное время — всплывающее окно с причиной и строкой про поддержку.
+    const chatId = cq.message?.chat?.id;
+    if (chatId && shouldReplyRestricted(tgId)) {
+      answerCallbackQuery(cq.id).catch(() => {});
+      await sendMessage(chatId, restrictedText(restriction.message), { reply_markup: RESTRICTED_KEYBOARD }).catch(() => {});
+    } else {
+      await alertCallback(cq.id, `${restriction.message}\n${RESTRICTED_SUPPORT_LINE}`);
+    }
   } else if (update.message?.chat?.id && (RESTRICTED_ALWAYS_REPLY.test(String(update.message.text || '').trim()) || shouldReplyRestricted(tgId))) {
     await sendMessage(update.message.chat.id, restrictedText(restriction.message), { reply_markup: RESTRICTED_KEYBOARD }).catch(() => {});
   }

@@ -44,6 +44,7 @@ type World = {
   session: Record<string, unknown> | null;
   referralOwner: boolean;
   captured: boolean;
+  boundTo: string | null;
   clubRefAt: string | null;
   clubActive: boolean;
   failPath: string | null;
@@ -63,7 +64,7 @@ beforeEach(() => {
   process.env.TELEGRAM_LOCAL_POLLING = '1';
   process.env.STICKER_CLIENT_SECRET = 's'.repeat(32);
   process.env.WB_CONNECTION_STORE = 'memory';
-  world = { identity: USER, session: null, referralOwner: true, captured: false, clubRefAt: null, clubActive: false, failPath: null };
+  world = { identity: USER, session: null, referralOwner: true, captured: false, boundTo: null, clubRefAt: null, clubActive: false, failPath: null };
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -86,6 +87,10 @@ beforeEach(() => {
     if (path === 'auth:admin/users' && method === 'POST') return json({ id: NEW_USER });
     if (path.startsWith('referral_accounts?referral_code=')) return json(world.referralOwner ? [{ user_id: REFERRER }] : []);
     if (path.startsWith('telegram_referral_captures?on_conflict')) { world.captured = true; return json([{ telegram_user_id: TG }]); }
+    if (path.startsWith('telegram_referral_captures?telegram_user_id') && method === 'PATCH') { world.boundTo = body.bound_user_id; return json(null); }
+    if (path.startsWith('telegram_referral_captures?telegram_user_id') && path.includes('bound_user_id=eq.')) {
+      return json(world.boundTo && path.includes(`bound_user_id=eq.${world.boundTo}`) ? [{ telegram_user_id: TG }] : []);
+    }
     if (path.startsWith('telegram_referral_captures?telegram_user_id') && method === 'GET') return json(world.captured ? [{ referral_code: 'ABC123', captured_at: new Date().toISOString() }] : []);
     if (path === 'rpc/bind_referral') return json(true);
     if (path.startsWith('referral_attributions?invited_user_id')) return json([{ referrer_user_id: REFERRER }]);
@@ -241,6 +246,19 @@ describe('приглашённый', () => {
     const greeting = String(lastScreen().body.text);
     expect(greeting).toContain('Вы пришли по приглашению коллеги — добро пожаловать!');
     expect(greeting).not.toContain('Профиль');
+  });
+
+  it('повторный переход по той же ссылке после засчитанного приглашения — снова приветствие, а не «только новым»', async () => {
+    world.identity = null;
+    await bot.processUpdate(message('/start r_abc123'));
+    const posts = () => db.filter(call => call.path.startsWith('telegram_referral_captures?on_conflict')).length;
+    expect(posts()).toBe(1);
+    await bot.processUpdate(message('/start r_abc123'));
+    const greeting = String(lastScreen().body.text);
+    expect(greeting).toContain('Вы пришли по приглашению коллеги — добро пожаловать!');
+    expect(greeting).not.toContain('засчитывается только новым');
+    expect(posts()).toBe(1);
+    expect(db.some(call => call.path.includes(`bound_user_id=eq.${NEW_USER}`))).toBe(true);
   });
 
   it('уже пользовался ботом — одна строка, что приглашение только для новых; переход не записывается', async () => {

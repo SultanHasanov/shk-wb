@@ -285,15 +285,10 @@ describe('бот при ограничении «Бот»', () => {
       .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
   }
 
-  it('кнопка — всплывающее окно с причиной; /start — ответ всегда, прочие сообщения — не чаще раза в час', async () => {
+  it('/start — ответ всегда, прочие сообщения — не чаще раза в час; под ответом — ссылка на поддержку', async () => {
     restrict(['bot'], { telegram_user_id: 777002 });
     const fetchMock = mockFetch(url => (url.includes('relay.test') ? { body: { ok: true, result: { message_id: 1 } } } : undefined));
     const bot = require('../../server/_telegram-wb-bot.js') as { processUpdate: (u: unknown) => Promise<void> };
-
-    await bot.processUpdate({ update_id: 1, callback_query: { id: 'cq1', from: { id: 777002 }, data: 'menu:home', message: { chat: { id: 777002 }, message_id: 5 } } });
-    expect(telegramCalls(fetchMock, 'answerCallbackQuery')).toEqual([
-      { callback_query_id: 'cq1', text: 'Доступ ограничен администратором. До 01.01', show_alert: true },
-    ]);
 
     const message = { from: { id: 777002 }, chat: { id: 777002, type: 'private' }, text: '/start' };
     await bot.processUpdate({ update_id: 2, message });
@@ -309,6 +304,30 @@ describe('бот при ограничении «Бот»', () => {
     await bot.processUpdate({ update_id: 5, message: other });
     sent = telegramCalls(fetchMock, 'sendMessage');
     expect(sent).toHaveLength(3);
+    // в базу бот за ограниченного не ходил
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('https://db.test'))).toBe(false);
+  });
+
+  it('кнопка — раз в час сообщение с причиной и ссылкой поддержки, дальше — всплывашка с причиной и строкой про поддержку', async () => {
+    restrict(['bot'], { telegram_user_id: 777003 });
+    const fetchMock = mockFetch(url => (url.includes('relay.test') ? { body: { ok: true, result: { message_id: 1 } } } : undefined));
+    const bot = require('../../server/_telegram-wb-bot.js') as { processUpdate: (u: unknown) => Promise<void> };
+    const press = (id: string) => ({ update_id: 10, callback_query: { id, from: { id: 777003 }, data: 'menu:home', message: { chat: { id: 777003 }, message_id: 5 } } });
+
+    await bot.processUpdate(press('cq1'));
+    let sent = telegramCalls(fetchMock, 'sendMessage');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ chat_id: 777003, text: '⛔ Доступ ограничен администратором. До 01.01\nЕсли считаете, что это ошибка, напишите в поддержку.' });
+    expect(sent[0].reply_markup.inline_keyboard.flat()).toEqual([{ text: '✉️ Написать в поддержку', url: 'https://t.me/roma_denosov' }]);
+
+    await bot.processUpdate(press('cq2'));
+    expect(telegramCalls(fetchMock, 'sendMessage')).toHaveLength(1);
+    expect(telegramCalls(fetchMock, 'answerCallbackQuery')).toEqual([
+      { callback_query_id: 'cq1' },
+      { callback_query_id: 'cq2', text: 'Доступ ограничен администратором. До 01.01\nЕсли считаете, что это ошибка, напишите в поддержку.', show_alert: true },
+    ]);
+    sent = telegramCalls(fetchMock, 'sendMessage');
+    expect(sent).toHaveLength(1);
     // в базу бот за ограниченного не ходил
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('https://db.test'))).toBe(false);
   });
