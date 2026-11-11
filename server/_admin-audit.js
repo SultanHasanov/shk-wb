@@ -40,6 +40,7 @@ const ACTION_CATEGORY = Object.freeze({
   sendTelegramBroadcast: 'messages',
   logoutAll: 'settings',
   unlinkTelegram: 'settings',
+  linkTelegram: 'settings',
   unlinkOAuth: 'settings',
   deleteAccount: 'deletions',
   deleteResource: 'deletions',
@@ -65,7 +66,7 @@ const ACTION_CATEGORY = Object.freeze({
 
 const DANGER_ACTIONS = new Set([
   'revokeAppSubscription', 'walletAdjust', 'restrict', 'updateRestriction', 'block',
-  'sendNews', 'sendTelegramBroadcast', 'logoutAll', 'unlinkTelegram', 'unlinkOAuth',
+  'sendNews', 'sendTelegramBroadcast', 'logoutAll', 'unlinkTelegram', 'linkTelegram', 'unlinkOAuth',
   'deleteAccount', 'deleteResource', 'setAppFreeMode', 'setAppCodeViaBot', 'setPaymentsEnabled',
   'setStickerPoolRange', 'setBoxPoolRange', 'processWithdrawal',
 ]);

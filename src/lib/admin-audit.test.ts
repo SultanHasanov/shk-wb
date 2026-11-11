@@ -48,6 +48,7 @@ const TABLE: Array<[string, string, boolean]> = [
   ['sendTelegramBroadcast', 'messages', true],
   ['logoutAll', 'settings', true],
   ['unlinkTelegram', 'settings', true],
+  ['linkTelegram', 'settings', true],
   ['unlinkOAuth', 'settings', true],
   ['deleteAccount', 'deletions', true],
   ['deleteResource', 'deletions', true],
@@ -186,6 +187,9 @@ describe('describeAction', () => {
     );
     expect(describeAction(entry({ action: 'updateResource', category: 'settings', payload: { resource: 'cellPromo', id: 4 } })).title).toBe(
       'Изменена запись: промокод ПВЗ Принт',
+    );
+    expect(describeAction(entry({ action: 'linkTelegram', category: 'settings', payload: { telegramUserId: 1, expected: 'merge' } })).title).toBe(
+      'Связан с Telegram: объединение',
     );
     const plainEntry = describeAction(entry({ action: 'setOverrides' }));
     expect(plainEntry).toMatchObject({ title: 'Выданы ручные лимиты', categoryLabel: 'Лимиты', danger: false });

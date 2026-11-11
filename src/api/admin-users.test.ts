@@ -187,9 +187,12 @@ describe('раздел пользователей: новые фильтры, д
 
   it('новые действия идут через таблицу DELEGATED', () => {
     expect(Object.keys(handler.DELEGATED).sort()).toEqual([
-      'GET messageTargets', 'POST block', 'POST clearOverrides', 'POST liftRestriction', 'POST message', 'POST notify',
+      'GET linkTelegramPreview', 'GET messageTargets', 'POST block', 'POST clearOverrides', 'POST liftRestriction',
+      'POST linkTelegram', 'POST message', 'POST notify',
       'POST restrict', 'POST setOverrides', 'POST unblock', 'POST updateRestriction', 'POST walletAdjust',
     ]);
+    expect(typeof handler.DELEGATED['POST linkTelegram']()).toBe('function');
+    expect(typeof handler.DELEGATED['GET linkTelegramPreview']()).toBe('function');
     expect(typeof handler.DELEGATED['POST restrict']()).toBe('function');
     expect(typeof handler.DELEGATED['POST setOverrides']()).toBe('function');
   });

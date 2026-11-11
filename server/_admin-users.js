@@ -48,6 +48,9 @@ const DELEGATED = {
   'GET messageTargets': () => require('./_admin-messages').messageTargets,
   'POST message': () => require('./_admin-messages').message,
   'POST notify': () => require('./_admin-messages').notifyCompat,
+  // Связать аккаунт сайта с Telegram-ботом — только через поддержку (server/_admin-link.js).
+  'GET linkTelegramPreview': () => require('./_admin-link').linkTelegramPreview,
+  'POST linkTelegram': () => require('./_admin-link').linkTelegram,
 };
 
 function badRequest(res, error) {

@@ -7,6 +7,7 @@ import { formatDateMsk, int, plural, rub } from '../../../../lib/admin-controls'
 import { payerLabel } from '../../../../lib/admin-users';
 import { Badge, Button, Card, Field, Input, Select } from '../../../../ui';
 import { AuditEntry, ConfirmDialog, DataState, EmptyBlock } from '../../kit';
+import { LinkTelegramModal } from '../modals/LinkTelegramModal';
 import { OAUTH_LABEL, daysLeft, useQuickRunner, useRunner } from '../shared';
 import u from '../user.module.css';
 
@@ -80,6 +81,7 @@ function ProfileCard({ detail }: { detail: AdminUserDetail }) {
 
 function LoginMethodsCard({ detail }: { detail: AdminUserDetail }) {
   const [unlink, setUnlink] = useState<Unlink | null>(null);
+  const [linkMode, setLinkMode] = useState<'telegram' | 'site' | null>(null);
   const unlinkTelegram = useAccountAction('unlinkTelegram');
   const unlinkOAuth = useAccountAction('unlinkOAuth');
   const run = useRunner();
@@ -87,6 +89,9 @@ function LoginMethodsCard({ detail }: { detail: AdminUserDetail }) {
   if (!methods) return null;
 
   const total = (methods.email.address ? 1 : 0) + (methods.telegram ? 1 : 0) + methods.oauth.length;
+  // Связать с ботом — только поддержка: аккаунту сайта без Telegram — привязать, аккаунту бота — объединить с сайтом.
+  const canLinkTelegram = !methods.telegram && !methods.email.technical;
+  const canMergeIntoSite = Boolean(methods.telegram) && methods.email.technical;
 
   return (
     <Card>
@@ -94,6 +99,16 @@ function LoginMethodsCard({ detail }: { detail: AdminUserDetail }) {
         <h3 className={u.cardTitle}>
           Способы входа <span className={u.cardSub}>подключено: {total}</span>
         </h3>
+        {canLinkTelegram && (
+          <Button variant="secondary" size="sm" style={{ minHeight: 'var(--tap)' }} onClick={() => setLinkMode('telegram')}>
+            Привязать Telegram
+          </Button>
+        )}
+        {canMergeIntoSite && (
+          <Button variant="secondary" size="sm" style={{ minHeight: 'var(--tap)' }} onClick={() => setLinkMode('site')}>
+            Объединить с аккаунтом сайта
+          </Button>
+        )}
       </div>
       <div className={u.list}>
         <div className={u.listRow}>
@@ -109,7 +124,9 @@ function LoginMethodsCard({ detail }: { detail: AdminUserDetail }) {
           <div className={u.listRow}>
             <div className={u.listMain}>
               <span>Telegram{methods.telegram.username ? ` · @${methods.telegram.username}` : ''}</span>
-              <small>привязан {formatDateMsk(methods.telegram.linkedAt)}</small>
+              <small>
+                ID {methods.telegram.telegramUserId} · привязан {formatDateMsk(methods.telegram.linkedAt)}
+              </small>
             </div>
             <Badge tone={methods.telegram.bot.blockedAt ? 'error' : methods.telegram.bot.started ? 'success' : 'default'}>
               {methods.telegram.bot.blockedAt ? 'бот заблокирован' : methods.telegram.bot.started ? 'бот запущен' : 'бот не запущен'}
@@ -142,6 +159,10 @@ function LoginMethodsCard({ detail }: { detail: AdminUserDetail }) {
           );
         })}
       </div>
+
+      {linkMode && (
+        <LinkTelegramModal open={linkMode !== null} onOpenChange={open => !open && setLinkMode(null)} detail={detail} mode={linkMode} />
+      )}
 
       <ConfirmDialog
         open={unlink !== null}

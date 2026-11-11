@@ -34,7 +34,7 @@ const TABLE: Record<string, [string, boolean]> = {
   walletAdjust: ['money', true], restrict: ['restrict', true], updateRestriction: ['restrict', true], liftRestriction: ['restrict', false],
   block: ['restrict', true], unblock: ['restrict', false], message: ['messages', false], notify: ['messages', false],
   retryDelivery: ['messages', false], sendNews: ['messages', true], sendTelegramBroadcast: ['messages', true],
-  logoutAll: ['settings', true], unlinkTelegram: ['settings', true], unlinkOAuth: ['settings', true],
+  logoutAll: ['settings', true], unlinkTelegram: ['settings', true], linkTelegram: ['settings', true], unlinkOAuth: ['settings', true],
   deleteAccount: ['deletions', true], deleteResource: ['deletions', true], createResource: ['settings', false],
   updateResource: ['settings', false], setAppFreeMode: ['settings', true], setAppCrackFallback: ['settings', false],
   setAppCodeViaBot: ['settings', true], setPaymentsEnabled: ['settings', true], upsertPriceTier: ['money', false],

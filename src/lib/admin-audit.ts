@@ -60,6 +60,7 @@ export const ACTION_META: Record<string, { label: string; category: AuditCategor
   sendTelegramBroadcast: { label: 'Рассылка в Telegram', category: 'messages', danger: true },
   logoutAll: { label: 'Завершены все сеансы', category: 'settings', danger: true },
   unlinkTelegram: { label: 'Отвязан Telegram', category: 'settings', danger: true },
+  linkTelegram: { label: 'Связан с Telegram', category: 'settings', danger: true },
   unlinkOAuth: { label: 'Отвязан способ входа', category: 'settings', danger: true },
   deleteAccount: { label: 'Аккаунт удалён', category: 'deletions', danger: true },
   deleteResource: { label: 'Удалена запись', category: 'deletions', danger: true },
@@ -409,6 +410,13 @@ function titleDetail(entry: AdminAuditEntry): string | null {
       const provider = typeof payload.provider === 'string' ? payload.provider : null;
       const names: Record<string, string> = { yandex: 'Яндекс ID', mailru: 'Mail.ru', vkid: 'VK ID' };
       return provider ? (names[provider] ?? provider) : null;
+    }
+    case 'linkTelegram': {
+      const outcome = typeof payload.expected === 'string' ? payload.expected : null;
+      const names: Record<string, string> = {
+        new_identity: 'привязка', relink: 'перепривязка', merge: 'объединение', move_identity: 'перенос привязки',
+      };
+      return outcome ? (names[outcome] ?? outcome) : null;
     }
     case 'setDeviceRole': {
       const role = typeof payload.role === 'string' ? payload.role : null;

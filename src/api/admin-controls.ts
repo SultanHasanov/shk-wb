@@ -73,6 +73,17 @@ export type SendMessageBody = {
   idempotencyKey: string;
 };
 
+/** Связать аккаунт сайта с Telegram (server/_admin-link.js). expected — исход, который видел админ. */
+export type LinkTelegramOutcome = 'new_identity' | 'relink' | 'merge' | 'move_identity';
+export type LinkTelegramBody = {
+  userId: string;
+  telegramUserId: number;
+  expected: LinkTelegramOutcome;
+  confirmMove?: boolean;
+  reason: string;
+  idempotencyKey: string;
+};
+
 /* ============ Ответы ============ */
 
 export type SetOverridesResult = { overrides: AdminOverrides | null; entitlements?: Record<string, unknown>; replayed?: true };
@@ -81,6 +92,60 @@ export type RestrictResult = { restriction: AdminRestriction; authBan?: 'failed'
 export type LiftRestrictionResult = {
   restored: { stickerCodes: number; programKeys: number; cellLicenses: number };
   restriction: AdminRestriction;
+  replayed?: true;
+};
+
+/** Сводка аккаунта из rpc account_merge_summary (поля, которые показывает окно). */
+export type LinkAccountSummary = {
+  technical: boolean;
+  restricted: boolean;
+  empty: boolean;
+  walletKopecks: number;
+  paidOrders: number;
+  activeSubscriptions: number;
+  stickersLeft: number;
+  devices: number;
+  cellPrintDevices: number;
+  licenseKeys: number;
+  cellPrintLicenses: number;
+  points: number;
+  docs: number;
+};
+export type LinkTelegramAccount = {
+  userId: string;
+  email: string | null;
+  technical: boolean;
+  emailConfirmed: boolean;
+  createdAt: string | null;
+  summary: Partial<LinkAccountSummary> | null;
+};
+export type LinkTelegramPreview = {
+  outcome: LinkTelegramOutcome | 'already_linked';
+  blockers: Array<{ code: string; message: string }>;
+  warnings: string[];
+  needsMoveConfirm: boolean;
+  target: LinkTelegramAccount;
+  source: LinkTelegramAccount | null;
+  telegram: {
+    telegramUserId: number;
+    username: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    botStarted: boolean;
+    botBlocked: boolean;
+  };
+  request: { userId: string; telegramUserId: number };
+};
+export type LinkTelegramResult = {
+  ok: true;
+  outcome: LinkTelegramOutcome;
+  telegramUserId: number;
+  sourceUserId: string | null;
+  sourceDeleted: boolean;
+  sourceKept?: true;
+  moved: { walletKopecks: number; subscriptions: number; devices: number };
+  delivered: boolean;
+  warning?: string;
   replayed?: true;
 };
 
@@ -137,6 +202,8 @@ export const controlUrls = {
   section: (userId: string, section: UserSection) =>
     `${USERS}&action=detailSection&userId=${encodeURIComponent(userId)}&section=${section}`,
   messageTargets: (userId: string) => `${USERS}&action=messageTargets&userId=${encodeURIComponent(userId)}`,
+  linkTelegramPreview: (userId: string, query: string) =>
+    `${USERS}&action=linkTelegramPreview&userId=${encodeURIComponent(userId)}&query=${encodeURIComponent(query)}`,
   action: (action: string) => `${USERS}&action=${action}`,
 };
 
@@ -208,6 +275,16 @@ export function useLiftRestriction() {
 
 export function useSendMessage() {
   return useControlMutation<SendMessageBody, AdminMessageResult>('message');
+}
+
+/** Предпросмотр связки: по запросу из окна, не кешируется (состояние аккаунтов меняется). */
+export function fetchLinkTelegramPreview(userId: string, query: string) {
+  return adminApi<LinkTelegramPreview>(controlUrls.linkTelegramPreview(userId, query));
+}
+
+/** Связать аккаунт сайта с Telegram. body.userId — аккаунт сайта (из request предпросмотра). */
+export function useLinkTelegram() {
+  return useControlMutation<LinkTelegramBody, LinkTelegramResult>('linkTelegram');
 }
 
 /** Тонкая обёртка над POST users&action=: выход везде, отвязка входа, роль ПК. */

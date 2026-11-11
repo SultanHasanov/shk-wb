@@ -4,7 +4,7 @@
 const crypto = require('crypto');
 const { fetchWithRetry } = require('./_fetch-retry');
 
-const ALLOWED = new Set(['afterWalletTopup', 'notifyMiniAppAuthorized', 'bindTelegramReferral', 'forgetSiteUser', 'forgetTelegramUser', 'invalidateUserControls']);
+const ALLOWED = new Set(['afterWalletTopup', 'notifyMiniAppAuthorized', 'notifyAccountLinked', 'bindTelegramReferral', 'forgetSiteUser', 'forgetTelegramUser', 'invalidateUserControls']);
 
 function rpcConfig() {
   const url = String(process.env.BOT_RPC_URL || '').trim();

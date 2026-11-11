@@ -14,6 +14,7 @@ type Call = { url: string; method: string; body: unknown };
 let calls: Call[] = [];
 let detail: AdminUserDetail;
 let targets: AdminMessageTargets;
+let linkPreview: unknown;
 
 function json(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } }));
@@ -41,6 +42,10 @@ beforeEach(() => {
       if (url.includes('action=detailSection')) return json({ items: [], ledger: [], balanceKopecks: 0 });
       if (url.includes('action=detail')) return json(detail);
       if (url.includes('action=messageTargets')) return json(targets);
+      if (url.includes('action=linkTelegramPreview')) return json(linkPreview);
+      if (url.includes('action=linkTelegram')) {
+        return json({ ok: true, outcome: 'merge', telegramUserId: 716976910, sourceUserId: 'b0b', sourceDeleted: true, moved: { walletKopecks: 0, subscriptions: 0, devices: 0 }, delivered: true });
+      }
       if (url.includes('resource=audit')) return json({ items: [], nextCursor: null, total: 0 });
       if (url.includes('action=message')) {
         return json(
@@ -297,6 +302,79 @@ describe('карточка пользователя', () => {
     expect(body).toMatchObject({ userId: USER_ID, reason: 'второй пункт', slots: { devices: 2, points: 1, mirror: 0 } });
     expect(body.codes).toBeUndefined();
     expect(body.unlimited).toBeUndefined();
+  });
+});
+
+describe('«Связать с Telegram» (только поддержка)', () => {
+  const account = (userId: string, email: string | null, technical: boolean) => ({
+    userId, email, technical, emailConfirmed: true, createdAt: '2026-01-01T00:00:00Z',
+    summary: { walletKopecks: technical ? 51750 : 0, paidOrders: 1, activeSubscriptions: 0, devices: 0, cellPrintDevices: 0, points: 0 },
+  });
+
+  beforeEach(() => {
+    detail = makeDetail({
+      loginMethods: { email: { address: 'anna.s@example.ru', confirmed: true, technical: false }, telegram: null, oauth: [] },
+    });
+    linkPreview = {
+      outcome: 'merge', blockers: [], warnings: ['К аккаунту сайта перейдёт: баланс 517,5 ₽'], needsMoveConfirm: false,
+      target: account(USER_ID, 'anna.s@example.ru', false), source: account('b0b', null, true),
+      telegram: { telegramUserId: 716976910, username: 'anna_pvz', firstName: 'Анна', lastName: null, botStarted: true, botBlocked: false },
+      request: { userId: USER_ID, telegramUserId: 716976910 },
+    };
+  });
+
+  it('без Telegram: найти по ID → предпросмотр → без причины не отправить → с причиной уходит expected', async () => {
+    const user = userEvent.setup();
+    renderCard();
+    await screen.findByRole('tab', { name: 'Обзор' });
+    await user.click(await screen.findByRole('button', { name: 'Привязать Telegram' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязать Telegram' });
+    await user.type(within(dialog).getByLabelText('Telegram ID или @ник'), '716976910');
+    await user.click(within(dialog).getByRole('button', { name: 'Проверить' }));
+    expect(await within(dialog).findByText(/Объединим: баланс, покупки/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/баланс 517,5 ₽/)).toBeInTheDocument();
+    const lookup = calls.find(call => call.url.includes('action=linkTelegramPreview'))!;
+    expect(lookup.url).toContain(`userId=${USER_ID}`);
+    expect(lookup.url).toContain('query=716976910');
+
+    const submit = within(dialog).getByRole('button', { name: 'Объединить аккаунты' });
+    expect(submit).toBeDisabled();
+    await user.type(within(dialog).getByLabelText('Причина для журнала *'), 'написала в поддержку');
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    await waitFor(() => expect(posted('linkTelegram')).toHaveLength(1));
+    expect(posted('linkTelegram')[0].body).toMatchObject({
+      userId: USER_ID, telegramUserId: 716976910, expected: 'merge', reason: 'написала в поддержку',
+    });
+    expect((posted('linkTelegram')[0].body as Record<string, unknown>).idempotencyKey).toMatch(/^[A-Za-z0-9_-]{8,80}$/);
+  });
+
+  it('отказ из предпросмотра — кнопка выключена, причина не спрашивается', async () => {
+    linkPreview = { ...(linkPreview as Record<string, unknown>), blockers: [{ code: 'MERGE_CLOUD_DATA', message: 'У аккаунта бота есть облачные данные' }] };
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(await screen.findByRole('button', { name: 'Привязать Telegram' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Привязать Telegram' });
+    await user.type(within(dialog).getByLabelText('Telegram ID или @ник'), '716976910');
+    await user.click(within(dialog).getByRole('button', { name: 'Проверить' }));
+    expect(await within(dialog).findByText('У аккаунта бота есть облачные данные')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Объединить аккаунты' })).toBeDisabled();
+    expect(within(dialog).queryByLabelText('Причина для журнала *')).toBeNull();
+  });
+
+  it('аккаунт бота: кнопка «Объединить с аккаунтом сайта», у аккаунта с Telegram — «Привязать» не показываем', async () => {
+    detail = makeDetail({
+      telegramOnly: true,
+      loginMethods: {
+        email: { address: null, confirmed: true, technical: true },
+        telegram: { username: 'anna_pvz', telegramUserId: 716976910, linkedAt: '2026-03-20T10:00:00Z', bot: { started: true, blockedAt: null } },
+        oauth: [],
+      },
+    });
+    renderCard();
+    expect(await screen.findByRole('button', { name: 'Объединить с аккаунтом сайта' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Привязать Telegram' })).toBeNull();
+    expect(screen.getByText(/ID 716976910/)).toBeInTheDocument();
   });
 });
 

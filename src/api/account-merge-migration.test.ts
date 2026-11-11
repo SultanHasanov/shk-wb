@@ -329,10 +329,14 @@ describe('память сервера после слияния', () => {
 });
 
 describe('relinkIdentity / mergeTelegramAccount в server/_telegram-identity.js', () => {
-  it('api/auth.js берёт их из общего модуля, а не держит свою копию', () => {
+  it('сайт сам не объединяет и не перепривязывает: это делает поддержка через общий модуль', () => {
     const auth = readFileSync(resolve(root, 'api/auth.js'), 'utf8');
-    expect(auth).toContain("const { mergeTelegramAccount, relinkIdentity } = require('../server/_telegram-identity');");
     expect(auth).not.toMatch(/async function (relinkIdentity|mergeTelegramAccount)\b/);
+    expect(auth).not.toMatch(/merge_telegram_account|relink_telegram_identity|mergeTelegramAccount|relinkIdentity/);
+    const link = readFileSync(resolve(root, 'server/_admin-link.js'), 'utf8');
+    expect(link).toContain("require('./_telegram-identity')");
+    expect(link).toMatch(/identity\.mergeTelegramAccount\(/);
+    expect(link).toMatch(/identity\.relinkIdentity\(/);
   });
 
   it('текст исключения базы доходит до вызывающего — api/auth.js отвечает по нему 409', async () => {
@@ -410,15 +414,19 @@ describe('relinkIdentity / mergeTelegramAccount в server/_telegram-identity.js'
   });
 });
 
-describe('api/auth.js: отказы объединения', () => {
-  it('MERGE_* — 409 «напишите в поддержку» с кодом отказа, а не 500 «не удалось выполнить вход»', () => {
-    const auth = readFileSync(resolve(root, 'api/auth.js'), 'utf8');
-    const at = auth.indexOf('/\\bMERGE_[A-Z_]+/');
-    expect(at).toBeGreaterThan(-1);
-    expect(at).toBeLessThan(auth.indexOf("'Не удалось выполнить вход через Telegram'"));
-    expect(auth).toContain("json(res, 409, { error: 'Объединить кабинеты автоматически не получилось. Напишите в поддержку — объединим вручную.', code: mergeRefusal[0] })");
-    // все отказы объединения из миграции попадают под это правило и дают чистый код
-    const codes = [...raw.matchAll(/raise exception '(MERGE_[^']*)'/g)].map((m) => /\bMERGE_[A-Z_]+/.exec(m[1])![0]);
-    expect(new Set(codes)).toEqual(new Set(['MERGE_BUSY', 'MERGE_POINT_CONFLICT', 'MERGE_CLOUD_DATA', 'MERGE_PARTNER_CONFLICT']));
+describe('админка «Связать с Telegram»: отказы объединения', () => {
+  it('каждый MERGE_* из миграции — 409 с тем же кодом, а не общий 502', () => {
+    const link = require('../../server/_admin-link.js') as {
+      rpcRefusal: (error: unknown) => (Error & { status: number; code: string }) | null;
+    };
+    const codes = [...raw.matchAll(/raise exception '(MERGE_[^']*)'/g)].map((m) => m[1]);
+    expect(new Set(codes.map((text) => /\bMERGE_[A-Z_]+/.exec(text)![0])))
+      .toEqual(new Set(['MERGE_BUSY', 'MERGE_POINT_CONFLICT', 'MERGE_CLOUD_DATA', 'MERGE_PARTNER_CONFLICT']));
+    for (const text of codes) {
+      const refusal = link.rpcRefusal(new Error(text));
+      expect(refusal, text).not.toBeNull();
+      expect(refusal!.status).toBe(409);
+      expect(refusal!.code).toBe(/\bMERGE_[A-Z_]+/.exec(text)![0]);
+    }
   });
 });
