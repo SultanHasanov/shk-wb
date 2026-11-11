@@ -130,6 +130,7 @@ function chargeLine(charge) {
 function chargeLabel(charge) {
   if (charge.kind === 'free') return 'бесплатно';
   if (charge.kind === 'quota' || charge.kind === 'pack') return '1 код';
+  if (charge.kind === 'unknown') return `1 код или ${rub(charge.price)}`;
   return rub(charge.price);
 }
 
@@ -227,7 +228,8 @@ async function finalText(row) {
   const device = await deviceInfo(row.device_id);
   const lines = headerLines(row, device?.name);
   const b = row.billing || {};
-  const how = b.via === 'wallet' ? ` · списано ${wallet.formatRub(Number(b.rub || 0))} с баланса`
+  const how = b.via === 'wallet' && b.duplicate ? ' · без нового списания'
+    : b.via === 'wallet' ? ` · списано ${wallet.formatRub(Number(b.rub || 0))} с баланса`
     : b.via === 'reuse' ? ' · повтор, без списания'
     : b.free ? ' · без списания'
     : b.source === 'unlimited' ? ' · без списания'
@@ -300,7 +302,9 @@ async function approve(id, { telegramUserId = null, payWithWallet = false } = {}
       body: JSON.stringify({ p_user: row.user_id, p_kopecks: price * 100, p_event_key: `qr:${row.user_id}:${qrText}`, p_details: { sid: String(row.sid), club, approval: row.id } }),
     });
     if (!spent?.ok) return { outcome: 'wallet_short', row, price, balance: Number(spent?.balance || 0) / 100 };
-    billing = { via: 'wallet', rub: price, club, balance: Number(spent.balance) / 100 };
+    // duplicate — база ответила «уже списано по этому ключу» (ключ с случайным qrText, так быть не должно):
+    // денег сейчас не взяли, значит и возвращать при гонке нечего.
+    billing = { via: 'wallet', rub: price, club, balance: Number(spent.balance) / 100, ...(spent.duplicate === true ? { duplicate: true } : {}) };
   } else {
     qrText = buildClientQr(row.sid).qrText;
     try {
@@ -319,7 +323,7 @@ async function approve(id, { telegramUserId = null, payWithWallet = false } = {}
   if (!updated) {
     // Кто-то успел решить раньше (двойное нажатие): списание по id запроса идемпотентно, деньги с баланса —
     // возвращаем, чтобы не списать дважды.
-    if (billing?.via === 'wallet') await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: row.user_id, p_kopecks: billing.rub * 100, p_note: `qr approval race ${row.id}` }) }).catch(() => {});
+    if (billing?.via === 'wallet' && !billing.duplicate) await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: row.user_id, p_kopecks: billing.rub * 100, p_note: `qr approval race ${row.id}` }) }).catch(() => {});
     return { outcome: 'stale', row: await loadApproval(id) };
   }
   await updateOwnerMessage(updated);

@@ -516,7 +516,9 @@ async function handleApprovalButton(from, chatId, messageId, callbackId, action,
     answerCallbackQuery(callbackId).catch(() => {});
     const away = !fromRequest(row);
     const charge = await approvals.nextCodeCharge(row.user_id, from.id);
-    if (charge.kind === 'wallet' || charge.kind === 'unknown') {
+    // unknown — права не прочитались: не пугаем «кодов не осталось», а показываем обычный запрос; если кодов
+    // действительно нет, «Выдать» само откроет экран оплаты (approve → limit).
+    if (charge.kind === 'wallet') {
       return showApprovalPaywall(chatId, messageId, row, charge.price, charge.balance ?? await walletRub(row.user_id), { away });
     }
     // Коды появились (купили пакет) — обычный экран запроса с «Выдать / Отклонить».
@@ -560,10 +562,12 @@ async function afterTopupApproval(from, chatId, id, { noticeId = null, screenId 
   let lines;
   if (r.outcome === 'approved') {
     const b = r.row.billing || {};
-    const spent = b.via === 'wallet' ? `Списано ${wallet.formatRub(Number(b.rub || 0))}${b.club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(b.balance || 0))}.`
+    const spent = b.via === 'wallet' && b.duplicate ? 'Ничего не списано — деньги на балансе.'
+      : b.via === 'wallet' ? `Списано ${wallet.formatRub(Number(b.rub || 0))}${b.club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(b.balance || 0))}.`
       : b.via === 'reuse' ? 'Этого клиента сегодня уже выдавали — повтор без списания, деньги на балансе.'
       : 'Без списания с баланса.';
-    const photo = await approvals.sendQrToOwner(r.row, { replyMarkup: keyboard });
+    // Нет уведомления «Баланс пополнен» — итог (сколько списано) пишем в подпись под фото.
+    const photo = await approvals.sendQrToOwner(r.row, { replyMarkup: keyboard, extra: noticeId ? [] : [spent] });
     lines = [`✅ QR по запросу с компьютера выдан — он показан на компьютере${photo ? ', фото — ниже' : ''}.`, spent];
     // Кнопки — под фото (последним сообщением); не ушло фото — под итогом.
     const text = [head, ...lines].join('\n');
@@ -996,13 +1000,22 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
     body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_event_key: clientCodeEventKey(userId, qrText), p_details: { sid: String(sid), club } }),
   });
   if (!spent?.ok) { await showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100, price); return 'not_sent'; }
-  notifyAdminSpend({ userId, priceRub: price, title: `Код клиента (QR)${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
-  const spentText = `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}.`;
+  // Ключ списания уникален (в qrText случайные 6 цифр), но если база всё же ответила «уже было» — денег сейчас не
+  // взяли: не пишем «Списано» и при сбое отправки не возвращаем то, что не списывали.
+  const duplicate = spent.duplicate === true;
+  if (!duplicate) notifyAdminSpend({ userId, priceRub: price, title: `Код клиента (QR)${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
+  const spentText = duplicate ? 'Повторная отправка — ничего не списано.'
+    : `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}.`;
   try {
     await sendPhoto(chatId, clientQrUrl(qrText), { caption: clientQrCaption(sid, cell, spentText), reply_markup: CLIENT_QR_KEYBOARD });
   } catch (error) {
     // Фото не ушло — возвращаем деньги, чтобы не списать за несделанное. Что сказать — по исходу возврата.
     console.warn('Client QR photo failed (wallet)', error.message);
+    if (duplicate) {
+      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` });
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+      return 'not_sent';
+    }
     const refund = await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_note: `qr refund ${qrText}` }) })
       .then(result => (result?.ok === false ? null : result || {}), refundError => { console.error('Client QR refund failed', userId, qrText, refundError.message); return null; });
     let view;
@@ -2266,6 +2279,13 @@ async function askClientCodeConfirm(from, chatId, messageId, sid) {
   return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: button, callback_data: `code:ok:${sid}` }], ...rows]) });
 }
 
+/** Всплывашка на повторное нажатие кнопки выдачи: по сохранённому исходу первого нажатия. */
+async function duplicateQrNotice(requestId, from, sentText) {
+  const result = await loadGenerationRequest(requestId, from.id).catch(() => null);
+  if (result?.outcome === 'charged_unsent') return 'Код уже списан, но QR не дошёл — нажмите «🔁 Отправить ещё раз» в сообщении ниже или напишите в поддержку.';
+  return sentText;
+}
+
 /** Снять отметку нажатия: QR не выдан и ничего не списано — ту же кнопку можно нажать снова. */
 function releaseRequest(requestId) {
   return supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
@@ -2310,7 +2330,10 @@ async function confirmClientCodeFromNumber(from, chatId, messageId, callbackId, 
     await showScreen(chatId, messageId, title, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать ещё раз', callback_data: `code:ok:${sid}` }], MENU_ROW]) }).catch(() => {});
     throw error;
   }
-  if (outcome === 'duplicate') { await answerCallbackQuery(callbackId, 'Этот QR уже выдан — он ниже в чате.'); return; }
+  if (outcome === 'duplicate') {
+    await answerCallbackQuery(callbackId, await duplicateQrNotice(requestId, from, 'Этот QR уже выдан — он ниже в чате.'), { alert: true });
+    return;
+  }
   await showScreen(chatId, messageId, `${title} — итог ниже ⬇️`).catch(() => {});
 }
 
@@ -2320,11 +2343,12 @@ async function confirmClientCodeFromNumber(from, chatId, messageId, callbackId, 
  */
 async function pressClientQr(from, chatId, messageId, callbackId, sid, cell) {
   if (!messageId) { answerCallbackQuery(callbackId).catch(() => {}); await handleClientCode(from, chatId, sid, { cell }); return; }
-  const outcome = await issueClientQrOnce(from, chatId, `qrs:${from.id}:${messageId}:${sid}`, sid, { cell }, async () => {
+  const requestId = `qrs:${from.id}:${messageId}:${sid}`;
+  const outcome = await issueClientQrOnce(from, chatId, requestId, sid, { cell }, async () => {
     answerCallbackQuery(callbackId, 'Готовлю QR…').catch(() => {});
   });
   if (outcome === 'duplicate') {
-    await answerCallbackQuery(callbackId, 'Этот QR уже выдан по этой кнопке — он ниже в чате. Нужен ещё раз — отправьте ячейку или телефон снова (спишется ещё раз).', { alert: true });
+    await answerCallbackQuery(callbackId, await duplicateQrNotice(requestId, from, 'Этот QR уже выдан по этой кнопке — он ниже в чате. Нужен ещё раз — отправьте ячейку или телефон снова (спишется ещё раз).'), { alert: true });
   }
 }
 

@@ -160,6 +160,30 @@ describe('«Код N» в чате', () => {
     expect(buttons(photo).map(button => button.callback_data)).toEqual(['code:find', 'menu:home']);
   });
 
+  it('два «Код N» того же клиента — два списания с разными ключами (повтор платный)', async () => {
+    await bot.processUpdate(message('Код 191607973'));
+    await bot.processUpdate(message('Код 191607973'));
+    const keys = rpc('wallet_spend').map(call => call.body.p_event_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it('база ответила «уже списано» — не пишем «Списано» и при сбое фото ничего не возвращаем', async () => {
+    const base = (globalThis.fetch as any).getMockImplementation();
+    (globalThis.fetch as any).mockImplementation(async (url: string, init: RequestInit = {}) => {
+      if (String(url).endsWith('/rpc/wallet_spend')) { db.push({ method: 'POST', path: 'rpc/wallet_spend', body: null }); return json({ ok: true, duplicate: true, balance: world.balance }); }
+      return base(url, init);
+    });
+    world.photoFails = true;
+    await bot.processUpdate(message('Код 191607973'));
+    expect(rpc('admin_wallet_adjust')).toHaveLength(0);
+    expect(lastScreen().body.text).toContain('Ничего не списано');
+    world.photoFails = false;
+    await bot.processUpdate(message('Код 191607973'));
+    expect(photos().at(-1)!.body.caption).toContain('ничего не списано');
+    expect(photos().at(-1)!.body.caption).not.toContain('Списано 50');
+  });
+
   it('«код» без цифр — экран «Код клиента» с подсказкой, ничего не списано', async () => {
     await bot.processUpdate(message('код'));
     expect(lastScreen().body.text).toContain('Не понял номер клиента');
@@ -287,6 +311,21 @@ describe('поиск клиента', () => {
     expect(alert.body).toMatchObject({ show_alert: true });
     expect(alert.body.text).toContain('уже выдан');
   });
+
+  it('повтор кнопки после «код списан, фото не ушло» — не «QR ниже», а куда нажать', async () => {
+    const base = (globalThis.fetch as any).getMockImplementation();
+    (globalThis.fetch as any).mockImplementation(async (url: string, init: RequestInit = {}) => {
+      const address = String(url);
+      if (address.includes('telegram_generation_requests') && init.method === 'POST') return json([]);
+      if (address.includes('telegram_generation_requests') && (!init.method || init.method === 'GET')) return json([{ result: { sid: '191607973', outcome: 'charged_unsent' } }]);
+      return base(url, init);
+    });
+    await bot.processUpdate(press('code:qr:191607973:245', 61));
+    const alert = sent.filter(call => call.method === 'answerCallbackQuery').at(-1)!;
+    expect(alert.body.text).toContain('Код уже списан');
+    expect(alert.body.text).toContain('Отправить ещё раз');
+    expect(alert.body.text).not.toContain('ниже в чате');
+  });
 });
 
 describe('запросы QR с компьютеров', () => {
@@ -325,6 +364,21 @@ describe('запросы QR с компьютеров', () => {
     expect(all.some(b => b.callback_data === 'menu:code')).toBe(true);
   });
 
+  it('права не прочитались — «⬅️ Назад» показывает обычный запрос, а не «кодов не осталось»', async () => {
+    world.approval = pendingRow();
+    const base = (globalThis.fetch as any).getMockImplementation();
+    (globalThis.fetch as any).mockImplementation(async (url: string, init: RequestInit = {}) => {
+      if (String(url).endsWith('/rpc/app_entitlements')) return json({ message: 'timeout' }, 500);
+      return base(url, init);
+    });
+    await bot.processUpdate(press(`cq:view:${APPROVAL}`, 50));
+    const screen = sent.filter(call => call.method === 'editMessageText' && call.body.message_id === 50).at(-1)!;
+    expect(screen.body.text).not.toContain('Бесплатных кодов не осталось');
+    const data = buttons(screen).map(button => button.callback_data);
+    expect(data).toContain(`cq:ok:${APPROVAL}`);
+    expect(data).not.toContain(`cq:wallet:${APPROVAL}`);
+  });
+
   it('«⬅️ Назад» с оплаты ведёт к запросу (cq:view) и к подтверждению QR (code:ask), а не в меню', () => {
     expect(topupScreen.topupBackData(`cqa:${APPROVAL}`)).toBe(`cq:view:${APPROVAL}`);
     expect(topupScreen.topupBackData('qr:191607973')).toBe('code:ask:191607973');
@@ -344,6 +398,13 @@ describe('запросы QR с компьютеров', () => {
     // экран оплаты (не сообщение запроса) — без живой ссылки на оплату
     expect(sent.some(call => call.method === 'editMessageText' && call.body.message_id === 50 && call.body.text === 'Баланс пополнен — итог ниже ⬇️')).toBe(true);
   });
+
+  it('пополнить и выдать без уведомления — сколько списано, в подписи под фото', async () => {
+    world.approval = pendingRow();
+    await bot.afterWalletTopup({ id: 'o2', user_id: USER, gross_amount: 100, wallet_topup_kopecks: 10000, pricing_snapshot: { wallet: { then: `cqa:${APPROVAL}`, message: 50 } } }, null);
+    expect(world.approval).toMatchObject({ status: 'approved' });
+    expect(photos().at(-1)!.body.caption).toContain('Списано 50 ₽');
+  });
 });
 
 describe('что спишется (nextCodeCharge / chargeLine)', () => {
@@ -351,5 +412,6 @@ describe('что спишется (nextCodeCharge / chargeLine)', () => {
     expect(approvals.chargeLine({ kind: 'quota', left: 7, limit: 10 })).toBe('Спишется 1 код из тарифа — останется 6 из 10 на этот месяц.');
     expect(approvals.chargeLine({ kind: 'wallet', price: 50, balance: 12, club: false })).toBe('Стоит 50 ₽ с баланса, на балансе 12 ₽ — не хватает 38 ₽.');
     expect(approvals.chargeLabel({ kind: 'pack', left: 3 })).toBe('1 код');
+    expect(approvals.chargeLabel({ kind: 'unknown', price: 50 })).toBe('1 код или 50 ₽');
   });
 });
