@@ -122,7 +122,9 @@ describe('запрос QR с компьютера (createApproval)', () => {
     expect(tg.body.chat_id).toBe(OWNER_TG);
     expect(tg.body.text).toContain('Ленина 5');
     expect(tg.body.text).toContain('ячейка 12');
-    expect(tg.body.text).toContain('3 из 10');
+    // остаток, а не потраченное: 3 из 10 потрачено → после этой выдачи останется 6
+    expect(tg.body.text).toContain('Спишется 1 код из тарифа — останется 6 из 10 на этот месяц.');
+    expect(tg.body.text).toMatch(/Ответьте до \d\d:\d\d \(по Москве\)/);
     expect(tg.body.reply_markup.inline_keyboard[0].map((b: any) => b.callback_data)).toEqual([`cq:ok:${APPROVAL}`, `cq:no:${APPROVAL}`]);
     expect(sent.telegram_message_id).toBe(77);
   });
@@ -174,7 +176,7 @@ describe('решение владельца (approve / decline)', () => {
     const edit = calls.find(c => c.url === 'https://relay.test/api/editMessageText')!;
     expect(edit.body.message_id).toBe(77);
     expect(edit.body.text).toContain('Выдано');
-    expect(edit.body.text).toContain('код тарифа');
+    expect(edit.body.text).toContain('списан 1 код из тарифа');
     expect(approvals.statusPayload(out.row)).toMatchObject({ status: 'approved', code: 12345, qrText: '191607973_12345_654321_1' });
   });
 

@@ -424,9 +424,9 @@ describe('голые цифры и код доступа', () => {
     expect(lastScreen().body.text).toContain('📦 QR коробки — если это номер возвратной коробки (10 цифр)');
     expect(buttons().map(button => button.callback_data)).toEqual(['gen:box:1234567890', 'code:ask:1234567890', 'menu:home']);
     await bot.processUpdate(press('code:ask:1234567890', 77));
-    expect(lastScreen().body.text).toContain('Спишется с баланса: <b>50 ₽</b>');
+    expect(lastScreen().body.text).toContain('Спишется 50 ₽ с баланса, на балансе 120 ₽.');
     expect(lastScreen().body.text).toContain('отдельное списание');
-    expect(buttons()[0]).toMatchObject({ text: '✅ Выдать QR за 50 ₽', callback_data: 'code:ok:1234567890' });
+    expect(buttons()[0]).toMatchObject({ text: '✅ Выдать QR — 50 ₽', callback_data: 'code:ok:1234567890' });
     expect(rpcCalls('wallet_spend')).toEqual([]);
   });
 

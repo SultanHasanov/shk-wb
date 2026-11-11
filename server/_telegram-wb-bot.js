@@ -429,82 +429,154 @@ async function pendingApprovalRows(userId) {
   const nameOf = id => devices.find(d => d.id === id)?.name || 'ПК';
   const rows = pending.map(r => [
     { text: `✅ Выдать · ${nameOf(r.device_id)}${r.cell ? ` · яч. ${r.cell}` : ''}`.slice(0, 60), callback_data: `cq:ok:${r.id}` },
-    { text: '❌', callback_data: `cq:no:${r.id}` },
+    { text: '❌ Отклонить', callback_data: `cq:no:${r.id}` },
   ]);
-  return { lines: [`⏳ <b>Ожидают решения: ${pending.length}</b> — запросы QR с ваших компьютеров.`, ''], rows };
+  // Раньше всех истекает самый старый запрос (pendingFor — по времени создания).
+  const until = approvals.moscowTime(pending[0].expires_at);
+  const deadline = pending.length > 1 ? `Первый истекает в ${until} (по Москве).` : `Ответьте до ${until} (по Москве).`;
+  return { lines: [`⏳ <b>Ожидают решения: ${pending.length}</b> — запросы QR с ваших компьютеров. ${deadline}`, ''], rows };
 }
 
-async function showClientCode(chatId, messageId, from) {
+/** Что спишется за следующий QR этого человека (server/_code-approvals.js: nextCodeCharge). */
+function nextClientCharge(from, userId) {
+  return approvals.nextCodeCharge(userId, from?.id, { telegramFree: clientCodeFreeFor(from?.id) });
+}
+
+const REPEAT_PAID_LINE = 'Каждое получение QR — отдельное списание, даже для того же клиента.';
+
+/**
+ * Экран «Код клиента». Главный путь — поиск по ячейке или телефону; ID можно прислать и сразу цифрами.
+ * notice — строка сверху (например, «не понял номер» после «код» без цифр).
+ */
+async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
   const userId = from?.id ? await findUser(from.id).catch(() => null) : null;
-  const [free, { price, club }, pending] = await Promise.all([helperFreeText(), clientCodePrice(from?.id), pendingApprovalRows(userId)]);
-  // Коротко: что прислать и сколько стоит; где взять ID — кнопками ниже.
+  const [charge, pending] = await Promise.all([nextClientCharge(from, userId), pendingApprovalRows(userId)]);
   const text = [
+    ...(notice ? [notice, ''] : []),
     '<b>🔑 Код клиента</b>',
     ...pending.lines,
-    ...(club ? [clubLine] : []),
-    `Отправьте ID клиента, например <code>Код 191607973</code>, — пришлю QR. Сначала списывается код тарифа «Помощника ПВЗ», без него — <b>${wallet.formatRub(price)}</b> с баланса.`,
+    'Пришлю QR клиента на сегодня — когда клиент не может сам показать свой QR из приложения WB.',
+    'Найдите клиента по ячейке или телефону — или пришлите его ID цифрами, например <code>191607973</code>.',
     '',
-    'ID найдёте здесь в боте по ячейке или телефону, или в программе «Помощник ПВЗ»',
-    `(тариф «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес${free ? `, сейчас ${free}` : ''}).`,
+    ...(charge.club ? [clubLine] : []),
+    `<b>Что спишется:</b> ${approvals.chargeLine(charge)}`,
+    ...(charge.kind === 'free' ? [] : [REPEAT_PAID_LINE]),
   ].join('\n');
+  const short = charge.kind === 'wallet' && charge.balance != null && charge.balance < charge.price;
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     ...pending.rows,
-    [{ text: '🔎 Найти ID в боте', callback_data: 'code:find' }],
-    [{ text: `🛒 Купить «Стандарт» — ${PLANS.standard.monthlyPrice} ₽/мес`, callback_data: 'shop:helper:standard' }],
-    [{ text: '🖥 Что ещё умеет Помощник', callback_data: 'menu:helper' }],
+    [{ text: '🔎 Найти клиента по ячейке или телефону', callback_data: 'code:find' }],
+    ...(short ? [[{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] : []),
     MENU_ROW,
   ]) });
 }
 
 // ── Подтверждение QR-кода клиента с компьютеров (server/_code-approvals.js) ──
 
-/** Экран «коды тарифа закончились»: выдать с баланса, пополнить, купить пакет или отклонить. */
-async function showApprovalPaywall(chatId, messageId, row, price, balance) {
-  const base = await approvals.ownerMessage(row);
+/**
+ * Экран «бесплатных кодов нет» у запроса с компьютера: выдать с баланса, пополнить и выдать, купить пакет или
+ * отклонить. away — экран открыт не в сообщении самого запроса (с «Код клиента» или после покупки): «⬅️ Назад».
+ */
+async function showApprovalPaywall(chatId, messageId, row, price, balance, { away = false } = {}) {
+  const base = await approvals.ownerMessage(row, chatId, { withCharge: false });
   const enough = balance >= price;
   const text = [
     base.text,
     '',
-    `Коды тарифа закончились. Выдать за <b>${wallet.formatRub(price)}</b> с баланса (на балансе ${wallet.formatRub(balance)})${enough ? '?' : ' — не хватает.'}`,
+    'Бесплатных кодов не осталось.',
+    enough
+      ? `Выдать этот QR за <b>${wallet.formatRub(price)}</b> с баланса? На балансе ${wallet.formatRub(balance)}.`
+      : `Выдать этот QR стоит <b>${wallet.formatRub(price)}</b>, на балансе ${wallet.formatRub(balance)} — не хватает ${wallet.formatRub(price - balance)}.`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-    enough ? [{ text: `💳 Выдать за ${wallet.formatRub(price)} с баланса`, callback_data: `cq:wallet:${row.id}` }] : topupAndBuyRow(price - balance, `cqa:${row.id}`),
+    enough ? [{ text: `💳 Выдать за ${wallet.formatRub(price)} с баланса`, callback_data: `cq:wallet:${row.id}` }] : topupAndBuyRow(price - balance, `cqa:${row.id}`, { verb: 'выдать' }),
     [{ text: '🔑 Пакет кодов клиента', callback_data: 'shop:wbpk' }],
     [{ text: '❌ Отклонить', callback_data: `cq:no:${row.id}` }],
+    ...(away ? [[{ text: '⬅️ Назад', callback_data: 'menu:code' }]] : []),
   ]) });
 }
 
+/**
+ * Кнопки запроса с компьютера: cq:ok | cq:no | cq:wallet и cq:view («⬅️ Назад» с экрана оплаты — снова экран
+ * выдачи, без списания). Нажали не в сообщении самого запроса (экран «Код клиента», «Готово» после покупки
+ * пакета) — после решения перерисовываем этот экран: список ожидающих обновится.
+ */
 async function handleApprovalButton(from, chatId, messageId, callbackId, action, id) {
+  const fromRequest = (row) => !row || !messageId || Number(row.telegram_message_id) === Number(messageId);
+  const redraw = async (row) => { if (!fromRequest(row)) await showClientCode(chatId, messageId, from); };
+  const closed = async (row) => {
+    await answerCallbackQuery(callbackId, approvals.closedNotice(row), { alert: true });
+    if (row) await approvals.updateOwnerMessage(row);
+    await redraw(row);
+  };
+  if (action === 'view') {
+    const row = await approvals.loadApproval(id);
+    if (row && row.user_id !== await findUser(from.id)) return answerCallbackQuery(callbackId, 'Это не ваш запрос');
+    if (!row || row.status !== 'pending') return closed(row);
+    answerCallbackQuery(callbackId).catch(() => {});
+    const away = !fromRequest(row);
+    const charge = await approvals.nextCodeCharge(row.user_id, from.id);
+    if (charge.kind === 'wallet' || charge.kind === 'unknown') {
+      return showApprovalPaywall(chatId, messageId, row, charge.price, charge.balance ?? await walletRub(row.user_id), { away });
+    }
+    // Коды появились (купили пакет) — обычный экран запроса с «Выдать / Отклонить».
+    const base = await approvals.ownerMessage(row, from.id);
+    return showScreen(chatId, messageId, base.text, { reply_markup: choiceKeyboard([
+      ...base.reply_markup.inline_keyboard,
+      ...(away ? [[{ text: '⬅️ Назад', callback_data: 'menu:code' }]] : []),
+    ]) });
+  }
   if (action === 'no') {
     const r = await approvals.decline(id, { telegramUserId: from.id });
-    await answerCallbackQuery(callbackId, r.outcome === 'declined' ? 'Отклонено' : r.outcome === 'not_owner' ? 'Это не ваш запрос' : 'Запрос устарел');
-    if (r.outcome === 'stale' && r.row) await approvals.updateOwnerMessage(r.row);
-    return;
+    if (r.outcome === 'not_owner') return answerCallbackQuery(callbackId, 'Это не ваш запрос');
+    if (r.outcome !== 'declined') return closed(r.row);
+    await answerCallbackQuery(callbackId, 'Отклонено. Ничего не списано.');
+    return redraw(r.row);
   }
   const r = await approvals.approve(id, { telegramUserId: from.id, payWithWallet: action === 'wallet' });
   if (r.outcome === 'approved') {
     answerCallbackQuery(callbackId, 'Выдано — QR показан на компьютере').catch(() => {});
     await approvals.sendQrToOwner(r.row);
-    return;
+    return redraw(r.row);
   }
   if (r.outcome === 'not_owner') return answerCallbackQuery(callbackId, 'Это не ваш запрос');
-  if (r.outcome === 'stale') {
-    await answerCallbackQuery(callbackId, 'Запрос устарел');
-    if (r.row) await approvals.updateOwnerMessage(r.row);
-    return;
-  }
-  // limit | wallet_short — квота пуста или на балансе не хватает
+  if (r.outcome === 'stale') return closed(r.row);
+  // limit | wallet_short — кодов нет или на балансе не хватает: экран оплаты там, где нажали.
   answerCallbackQuery(callbackId).catch(() => {});
-  await showApprovalPaywall(chatId, r.row.telegram_message_id || messageId, r.row, r.price, r.balance ?? await walletRub(r.row.user_id));
+  await showApprovalPaywall(chatId, messageId || r.row.telegram_message_id, r.row, r.price, r.balance ?? await walletRub(r.row.user_id), { away: !fromRequest(r.row) });
 }
 
-/** После пополнения «и выдать» (walletThen = cqa:<id>): выдать с баланса без повторного нажатия. */
-async function afterTopupApproval(from, chatId, id) {
+/**
+ * После пополнения «и выдать» (walletThen = cqa:<id>): выдать с баланса без повторного нажатия. Итог — одним
+ * сообщением: уведомление «Баланс пополнен» (noticeId) становится итогом с кнопками; QR при выдаче — фото ниже.
+ * screenId — экран оплаты: если это не сообщение запроса (его правит сам запрос), убираем с него ссылку на оплату.
+ */
+async function afterTopupApproval(from, chatId, id, { noticeId = null, screenId = null, head = '<b>Баланс пополнен ✅</b>' } = {}) {
   const r = await approvals.approve(id, { telegramUserId: from.id, payWithWallet: true });
-  if (r.outcome === 'approved') { await approvals.sendQrToOwner(r.row); return true; }
-  await sendMessage(chatId, r.outcome === 'wallet_short'
-    ? 'Баланс пополнен, но на QR всё ещё не хватает — откройте запрос в меню «Код клиента».'
-    : 'Баланс пополнен. Запрос с компьютера уже недействителен — деньги остались на балансе.');
+  if (screenId && screenId !== noticeId && Number(r.row?.telegram_message_id) !== Number(screenId)) {
+    await editMessageText(chatId, screenId, 'Баланс пополнен — итог ниже ⬇️').catch(() => {});
+  }
+  const keyboard = choiceKeyboard([[{ text: '🔑 Код клиента', callback_data: 'menu:code' }, ...MENU_ROW]]);
+  let lines;
+  if (r.outcome === 'approved') {
+    const b = r.row.billing || {};
+    const spent = b.via === 'wallet' ? `Списано ${wallet.formatRub(Number(b.rub || 0))}${b.club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(b.balance || 0))}.`
+      : b.via === 'reuse' ? 'Этого клиента сегодня уже выдавали — повтор без списания, деньги на балансе.'
+      : 'Без списания с баланса.';
+    const photo = await approvals.sendQrToOwner(r.row, { replyMarkup: keyboard });
+    lines = [`✅ QR по запросу с компьютера выдан — он показан на компьютере${photo ? ', фото — ниже' : ''}.`, spent];
+    // Кнопки — под фото (последним сообщением); не ушло фото — под итогом.
+    const text = [head, ...lines].join('\n');
+    if (noticeId) await showScreen(chatId, noticeId, text, photo ? {} : { reply_markup: keyboard });
+    else if (!photo) await sendMessage(chatId, text, { reply_markup: keyboard });
+    return true;
+  }
+  lines = [r.outcome === 'wallet_short'
+    ? 'QR не выдан: на балансе всё ещё не хватает. Откройте запрос в «Код клиента».'
+    : 'QR не выдан: запрос с компьютера уже закрыт. Деньги остались на балансе — платить второй раз не нужно.'];
+  const text = [head, ...lines].join('\n');
+  if (noticeId) await showScreen(chatId, noticeId, text, { reply_markup: keyboard });
+  else await sendMessage(chatId, text, { reply_markup: keyboard });
   return true;
 }
 
@@ -750,13 +822,13 @@ async function handleDeviceNotMe(from, chatId, messageId, callbackId, deviceId) 
 /** Не хватает денег на QR — пополнить ровно на недостающее и выдать QR (afterWalletTopup → qr:<sid>). */
 async function showClientCodePaywall(from, chatId, sid, balance, price) {
   const text = [
-    `<b>🔑 Код клиента — ${wallet.formatRub(price)}</b>`,
-    `💰 На балансе: <b>${wallet.formatRub(balance)}</b> — не хватает.`,
-    'После пополнения QR придёт сам.',
+    `<b>🔑 QR клиента ${escapeHtml(sid)} — ${wallet.formatRub(price)}</b>`,
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b> — не хватает ${wallet.formatRub(Math.max(0, price - balance))}.`,
+    'Пополните баланс — QR придёт сам, ничего нажимать не нужно.',
   ].join('\n');
   await sendMessage(chatId, text, { reply_markup: choiceKeyboard([
-    topupAndBuyRow(price - balance, `qr:${sid}`),
-    MENU_ROW,
+    topupAndBuyRow(price - balance, `qr:${sid}`, { verb: 'получить QR' }),
+    [{ text: '⬅️ Код клиента', callback_data: 'menu:code' }, ...MENU_ROW],
   ]) });
 }
 
@@ -792,61 +864,162 @@ const reviewPrice = telegramId => clubPrice(telegramId, REVIEW_PRICE);
 
 const clubLine = '🎁 У вас скидка 20% как у участника клуба.';
 
-/** «Коды: 3 из 10 в этом месяце · в пакетах 5» после списания кода тарифа; ошибка → пусто. */
+/** «· осталось 6 из 10 на этот месяц, в пакете 5» после списания кода; ошибка → пусто. */
 async function codesLeftText(userId) {
   try {
     const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) });
     const limit = Number(ent?.codes_limit || 0), used = Number(ent?.codes_used || 0), packs = Number(ent?.packs_left || 0);
     const parts = [];
-    if (limit > 0) parts.push(`${Math.max(0, limit - used)} из ${limit} в этом месяце`);
-    if (packs > 0) parts.push(`в пакетах ${packs}`);
+    if (limit > 0) parts.push(`${Math.max(0, limit - used)} из ${limit} на этот месяц`);
+    if (packs > 0) parts.push(`в пакете ${packs}`);
     return parts.length ? ` · осталось ${parts.join(', ')}` : '';
   } catch { return ''; }
 }
 
 /**
- * «Код <SID>» → QR клиента. Сначала код тарифа/пакета «Помощника ПВЗ» (как в программе), если их нет —
- * CLIENT_CODE_PRICE с баланса (со скидкой клуба меньше). Присылаем только QR-код.
+ * Текст «Код …» → { digits } (цифры без пробелов, двоеточия, «№», дефисов; нет цифр — пустая строка) или null.
+ * Принимает «Код 191607973», «код: 191 607 973», «Код191607973», «Код клиента 191607973». «\b» здесь не годится:
+ * в JavaScript он не считает кириллицу буквами, и «Код» без цифр раньше проваливался в главное меню.
  */
-async function handleClientCode(from, chatId, sid) {
+function parseCodeCommand(text) {
+  const match = /^\s*код(?![а-яёa-z])(.*)$/isu.exec(String(text || ''));
+  if (!match) return null;
+  const tail = match[1].replace(/^\s*клиента(?![а-яёa-z])/iu, '').replace(/[\s:№#.,-]/gu, '');
+  return { digits: /^\d+$/.test(tail) ? tail : '' };
+}
+
+/**
+ * «Код <ID>» в чате. Мгновенная выдача (и списание) — только при 7–12 цифрах, как у настоящего ID клиента; короче
+ * (ячейка, SMS-код) — подсказка с поиском, без цифр — экран «Код клиента» с подсказкой сверху.
+ */
+async function handleCodeCommand(from, chatId, digits) {
+  if (/^\d{7,12}$/.test(digits)) return handleClientCode(from, chatId, digits);
+  if (!digits) {
+    return showClientCode(chatId, undefined, from, { notice: 'Не понял номер клиента. Пришлите ID цифрами, например <code>191607973</code>, или найдите клиента по ячейке.' });
+  }
+  const lines = digits.length < 7
+    ? [`Похоже, это не ID клиента: в нём 7–12 цифр, а вы прислали «${escapeHtml(digits)}».`, 'Если это номер ячейки или цифры телефона — найдите клиента поиском. Ничего не списано.']
+    : [`В ID клиента 7–12 цифр, а вы прислали ${digits.length}. Проверьте номер. Ничего не списано.`];
+  return sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: '🔎 Найти клиента по ячейке или телефону', callback_data: 'code:find' }], MENU_ROW]) });
+}
+
+/** Подпись под QR клиента: кто это, сколько действует и что списано. */
+function clientQrCaption(sid, cell, chargeText) {
+  return [
+    `QR клиента ${sid}${cell ? ` · ячейка ${cell}` : ''}`,
+    'Действует сегодня, до 23:59 по Москве.',
+    chargeText,
+  ].join('\n');
+}
+
+const CLIENT_QR_KEYBOARD = choiceKeyboard([[{ text: '🔎 Найти ещё клиента', callback_data: 'code:find' }], MENU_ROW]);
+
+/** Ячейка для подписи и кнопки «Повторить»: короткая и без разметки — иначе без неё. */
+function safeCell(cell) {
+  const value = String(cell || '').trim();
+  return /^[0-9A-Za-zА-Яа-я-]{1,10}$/u.test(value) ? value : '';
+}
+
+/** QR не отправился: что с деньгами — по факту, без общей «внутренней ошибки». */
+function clientQrFailedView(lines, retry) {
+  return {
+    text: ['⚠️ Не получилось отправить QR — Telegram не принял картинку.', ...lines].join('\n'),
+    reply_markup: choiceKeyboard([...(retry ? [[retry]] : []), [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]),
+  };
+}
+
+/** callback «отправить тот же QR ещё раз» по id списания (code:re:<ID>:<uuid>) — повтор без нового списания. */
+function clientQrResendData(sid, requestId) {
+  const data = `code:re:${sid}:${requestId}`;
+  return Buffer.byteLength(data) <= 64 ? data : null;
+}
+
+/**
+ * QR клиента по ID. Сначала код из тарифа или пакета (как в программе), если их нет — CLIENT_CODE_PRICE с баланса
+ * (со скидкой клуба меньше). Каждое получение — отдельное списание, даже того же клиента (решение владельца).
+ * cell — ячейка из поиска (для подписи); requestId — повтор отправки того же списания кодом (app_code_once
+ * идемпотентна по нему: второй раз код не спишется).
+ * → 'sent' | 'charged_unsent' (списано, фото не ушло, возврата нет) | 'not_sent' (ничего не списано: нехватка, возврат).
+ */
+async function handleClientCode(from, chatId, sid, { cell = '', requestId = null } = {}) {
+  cell = safeCell(cell);
   const { qrText: freeQr } = buildClientQr(sid);
   if (clientCodeFreeFor(from.id)) {
-    await sendPhoto(chatId, clientQrUrl(freeQr), { caption: unlimitedLine(from.id) });
-    return;
+    try {
+      await sendPhoto(chatId, clientQrUrl(freeQr), { caption: clientQrCaption(sid, cell, unlimitedLine(from.id)), reply_markup: CLIENT_QR_KEYBOARD });
+    } catch (error) {
+      console.warn('Client QR photo failed (free)', error.message);
+      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` });
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+      return 'not_sent';
+    }
+    return 'sent';
   }
   const userId = await ensureUser(from);
-  // Каждый ввод SID — новая платная операция, даже если этот SID уже вводили сегодня.
   const { qrText } = buildClientQr(sid);
   // 1) квота тарифа или пакет кодов клиента — без ПК (p_device = null, via = 'bot'); нет → 2) баланс
+  const chargeId = requestId || crypto.randomUUID();
   let charged = null;
   try {
-    charged = await account.chargeClientCode(userId, null, { requestId: crypto.randomUUID(), sid, qrText, meta: { via: 'bot' } });
+    charged = await account.chargeClientCode(userId, null, { requestId: chargeId, sid, qrText, meta: { via: 'bot' } });
   } catch (error) {
     if (error.code !== 'LIMIT_EXCEEDED') throw error;
   }
   if (charged) {
     const b = charged.billing || {};
-    const caption = b.free ? 'Без списания.' : b.source === 'pack' ? `Списан 1 код из пакета${await codesLeftText(userId)}` : `Списан 1 код тарифа${await codesLeftText(userId)}`;
-    await sendPhoto(chatId, clientQrUrl(charged.qrText || qrText), { caption });
-    return;
+    const free = b.free || b.source === 'unlimited';
+    const left = free ? '' : await codesLeftText(userId);
+    const spentText = free ? 'Без списания.'
+      : charged.replayed ? 'Повторная отправка — ничего не списано.'
+      : b.source === 'pack' ? `Списан 1 код из пакета${left}.` : `Списан 1 код из тарифа${left}.`;
+    try {
+      await sendPhoto(chatId, clientQrUrl(charged.qrText || qrText), { caption: clientQrCaption(sid, cell, spentText), reply_markup: CLIENT_QR_KEYBOARD });
+    } catch (error) {
+      console.warn('Client QR photo failed (code)', error.message);
+      // Код уже списан: повтор по тому же id списания отправит этот же QR и второй раз не спишет.
+      const resend = !free && clientQrResendData(sid, chargeId);
+      const view = free
+        ? clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` })
+        : clientQrFailedView([resend ? 'Код уже списан — повторная отправка бесплатна.' : 'Код уже списан. Напишите в поддержку — разберёмся.'],
+          resend ? { text: '🔁 Отправить ещё раз', callback_data: resend } : null);
+      await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+      return free ? 'not_sent' : 'charged_unsent';
+    }
+    return 'sent';
   }
   // ограничение «Покупки» — с баланса нельзя (ACCOUNT_RESTRICTED покажет processUpdate)
   await controls.assertAllowed(userId, 'purchases');
   const [balance, { price, club }] = await Promise.all([walletRub(userId), clientCodePrice(from.id)]);
-  if (balance < price) return showClientCodePaywall(from, chatId, sid, balance, price);
+  if (balance < price) { await showClientCodePaywall(from, chatId, sid, balance, price); return 'not_sent'; }
   const spent = await supabaseFetch('rpc/wallet_spend', {
     method: 'POST',
     body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_event_key: clientCodeEventKey(userId, qrText), p_details: { sid: String(sid), club } }),
   });
-  if (!spent?.ok) return showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100, price);
+  if (!spent?.ok) { await showClientCodePaywall(from, chatId, sid, Number(spent?.balance || 0) / 100, price); return 'not_sent'; }
   notifyAdminSpend({ userId, priceRub: price, title: `Код клиента (QR)${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
+  const spentText = `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}.`;
   try {
-    await sendPhoto(chatId, clientQrUrl(qrText), { caption: `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · баланс ${wallet.formatRub(Number(spent.balance) / 100)}` });
+    await sendPhoto(chatId, clientQrUrl(qrText), { caption: clientQrCaption(sid, cell, spentText), reply_markup: CLIENT_QR_KEYBOARD });
   } catch (error) {
-    // Фото не ушло — возвращаем деньги, чтобы не списать за несделанное.
-    await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_note: `qr refund ${qrText}` }) }).catch(() => {});
-    throw error;
+    // Фото не ушло — возвращаем деньги, чтобы не списать за несделанное. Что сказать — по исходу возврата.
+    console.warn('Client QR photo failed (wallet)', error.message);
+    const refund = await supabaseFetch('rpc/admin_wallet_adjust', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: price * 100, p_note: `qr refund ${qrText}` }) })
+      .then(result => (result?.ok === false ? null : result || {}), refundError => { console.error('Client QR refund failed', userId, qrText, refundError.message); return null; });
+    let view;
+    if (refund) {
+      const back = Number.isFinite(Number(refund.balance)) ? `, на балансе ${wallet.formatRub(Number(refund.balance) / 100)}` : '';
+      view = clientQrFailedView([`Ничего не списано: ${wallet.formatRub(price)} вернулись на баланс${back}. Попробуйте ещё раз через минуту.`],
+        { text: `🔁 Попробовать ещё раз — ${wallet.formatRub(price)}`, callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` });
+    } else {
+      const incident = crypto.randomBytes(3).toString('hex');
+      console.error(`Client QR refund not done [${incident}]`, userId, price, qrText);
+      sendToAdmins(`⚠️ QR клиента: списано ${wallet.formatRub(price)}, фото не ушло, возврат не прошёл.\nTelegram ${Number(from.id)}, код ${incident}. Верните деньги вручную.`).catch(() => {});
+      view = clientQrFailedView([`${wallet.formatRub(price)} списаны, а вернуть их автоматически не получилось. Напишите в поддержку и назовите код: <code>${incident}</code> — вернём вручную.`], null);
+    }
+    await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+    return refund ? 'not_sent' : 'charged_unsent';
   }
+  return 'sent';
 }
 
 // ── Поиск SID клиента в боте: по телефону (последние цифры) или номеру ячейки ──
@@ -860,9 +1033,13 @@ function goodSid(item) {
 }
 function goodPhone(item) { return String(item?.buyer?.mobile ?? item?.buyer?.phone ?? item?.mobile ?? item?.phone ?? ''); }
 function goodCell(item) { return String(item?.cell ?? item?.cell_address ?? '').trim(); }
-function goodName(item) { return String(item?.buyer?.name ?? item?.name ?? '').trim(); }
+// Имя — только покупателя: item.name у товара бывает названием товара, а не клиента.
+function goodName(item) { return String(item?.buyer?.name ?? '').trim(); }
 
-/** Совпадения по запросу: цифры могут быть и номером ячейки, и хвостом телефона — ищем и так, и так. */
+/**
+ * Совпадения по запросу: цифры могут быть номером ячейки, хвостом телефона или самим ID клиента (его копируют из
+ * программы) — ищем всеми способами.
+ */
 function findClientsByQuery(goods, digits) {
   const out = new Map();
   for (const item of Array.isArray(goods) ? goods : []) {
@@ -872,7 +1049,8 @@ function findClientsByQuery(goods, digits) {
     const phoneDigits = goodPhone(item).replace(/\D/g, '');
     const cellMatch = cell && cell.replace(/\D/g, '') === digits;
     const phoneMatch = digits.length >= 3 && phoneDigits.length >= digits.length && phoneDigits.endsWith(digits);
-    if (!cellMatch && !phoneMatch) continue;
+    const sidMatch = sid === digits;
+    if (!cellMatch && !phoneMatch && !sidMatch) continue;
     const entry = out.get(sid) || { sid, phone: '', cells: new Set(), name: '' };
     if (cell) entry.cells.add(cell);
     if (!entry.phone && goodPhone(item)) entry.phone = goodPhone(item);
@@ -905,10 +1083,10 @@ async function promptClientQuery(from, chatId, messageId) {
   await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
   await showScreen(chatId, messageId, [
     `<b>🔎 Поиск клиента (ПВЗ ${(await getWbConnection(from.id))?.session?.pointId || ''})</b>`,
-    'Отправьте <b>номер ячейки</b> или <b>телефон</b> (можно последние 4 цифры).',
+    'Отправьте <b>номер ячейки</b> или <b>последние 4 цифры телефона</b> клиента.',
     'Например: <code>245</code> или <code>8898</code>.',
     '',
-    'Ищу по текущим заказам в пункте.',
+    'Ищу среди заказов, которые сейчас лежат в пункте.',
   ].join('\n'), { reply_markup: choiceKeyboard([
     [{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
     [{ text: '⬅️ Назад', callback_data: 'menu:code' }],
@@ -936,48 +1114,76 @@ async function startClientSearch(from, chatId, messageId) {
   await showScreen(chatId, messageId, '<b>Вход в кабинет WB</b>\nДля поиска клиента по телефону или ячейке нужен вход в кабинет WB.\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.', { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
 }
 
+/** Похоже на полный номер телефона: у WB середина номера затёрта, совпасть может только хвост. */
+function phoneLike(digits) { return /^(?:[78]\d{10}|9\d{9})$/.test(digits); }
+
+/** Кнопка результата поиска: «QR · яч. 245 · …98 · Иван» (без ID — QR даёт сама кнопка). */
+function clientMatchButton(match) {
+  const cells = [...match.cells];
+  const tail = String(match.phone || '').replace(/\D/g, '').slice(-2);
+  const parts = ['QR'];
+  if (cells.length) parts.push(`яч. ${cells.join(', ')}`);
+  if (tail) parts.push(`…${tail}`);
+  if (match.name) parts.push(match.name);
+  const cell = cells.length === 1 ? safeCell(cells[0]) : '';
+  return { text: parts.join(' · ').slice(0, 60), callback_data: `code:qr:${match.sid}${cell ? `:${cell}` : ''}` };
+}
+
 async function runClientSearch(from, chatId, query) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') { await clearSession(from.id); return startClientSearch(from, chatId); }
-  const digits = String(query || '').replace(/\D/g, '');
-  if (!digits) return sendMessage(chatId, 'Отправьте номер ячейки или телефон цифрами (можно последние 4 цифры).');
+  // Поиск остаётся открытым: каждый запрос продлевает ожидание, следующий номер можно прислать и через час.
+  await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
+  const point = connection.session?.pointId ? ` на ПВЗ ${escapeHtml(connection.session.pointId)}` : '';
+  let digits = String(query || '').replace(/\D/g, '');
+  if (!digits) return sendMessage(chatId, 'Отправьте номер ячейки или последние 4 цифры телефона клиента — цифрами.', { reply_markup: choiceKeyboard([MENU_ROW]) });
   let goods;
   try {
     goods = await loadGoodsSnapshot(from.id, connection);
   } catch (error) {
-    if (error.status === 401 || error.status === 403) { await deleteWbConnection(from.id); await clearSession(from.id); await sendMessage(chatId, 'Сессия WB истекла. Подключите кабинет заново.'); return startClientSearch(from, chatId); }
+    if (error.status === 401 || error.status === 403) { await deleteWbConnection(from.id); await clearSession(from.id); await sendMessage(chatId, 'Вход в WB устарел — войдите заново.'); return startClientSearch(from, chatId); }
     throw error;
   }
-  const matches = findClientsByQuery(goods, digits);
+  let matches = findClientsByQuery(goods, digits);
+  const lines = [];
+  if (!matches.length && phoneLike(digits)) {
+    digits = digits.slice(-4);
+    lines.push(`Ищу по последним 4 цифрам телефона: ${digits}.`);
+    matches = findClientsByQuery(goods, digits);
+  }
   if (!matches.length) {
+    // 7–12 цифр не телефон — может быть ID клиента не из этого пункта: QR через подтверждение с ценой.
+    const maybeId = !lines.length && /^\d{7,12}$/.test(digits);
     return sendMessage(chatId, [
-      'Не нашёл клиента по этому запросу среди текущих заказов пункта.',
-      'Попробуйте номер ячейки или другие цифры телефона. WB хранит только недавние заказы — старых в онлайне нет.',
-      '',
-      '<b>Не нашли здесь — найдите ID в программе «Помощник ПВЗ».</b>',
-      'Установите её на компьютер пункта, где стоит WB-PVZ: в ячейке клиента или поиском по телефону будет ID (SID).',
-      `Скачать: ${PROGRAM_URL}`,
+      ...lines,
+      `По «${escapeHtml(digits)}» никого не нашёл${point}.`,
+      'Проверьте номер и отправьте ещё раз — ячейку или последние 4 цифры телефона. Ищу только среди заказов, которые сейчас лежат в пункте.',
     ].join('\n'), { reply_markup: choiceKeyboard([
-      [{ text: '🔁 Искать снова', callback_data: 'code:find' }],
-      [{ text: '🖥 Что умеет «Помощник ПВЗ»', callback_data: 'menu:helper' }],
+      ...(maybeId ? [[{ text: '🔑 Это ID клиента — получить QR', callback_data: `code:ask:${digits}` }]] : []),
+      [{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }],
       MENU_ROW,
     ]) });
   }
-  const { price: codePrice } = await clientCodePrice(from.id);
-  const lines = ['<b>🔎 Найдено:</b>', 'Выберите клиента — пришлю QR (спишется ' + wallet.formatRub(codePrice) + ').', ''];
+  const userId = await findUser(from.id).catch(() => null);
+  const charge = await nextClientCharge(from, userId);
+  lines.unshift('<b>🔎 Найдено:</b>');
+  lines.push(`Выберите клиента — пришлю его QR. ${approvals.chargeLine(charge)}`);
+  if (charge.kind !== 'free') lines.push('Каждое нажатие — отдельное списание.');
+  lines.push('');
   const rows = [];
   matches.slice(0, 10).forEach((match, index) => {
     const cells = [...match.cells].join(', ');
-    const parts = [`${index + 1}. ${maskWbPhone(match.phone)}`];
+    // «1. Иван · яч. 245 · +7 912 ***-**-98»
+    const parts = [];
+    if (match.name) parts.push(escapeHtml(match.name));
     if (cells) parts.push(`яч. ${escapeHtml(cells)}`);
-    parts.push(`ID <code>${match.sid}</code>`);
-    lines.push(parts.join(' · '));
-    rows.push([{ text: `${index + 1}. Получить QR`, callback_data: `code:qr:${match.sid}` }]);
+    if (match.phone) parts.push(maskWbPhone(match.phone));
+    lines.push(`${index + 1}. ${parts.join(' · ') || 'клиент'}`);
+    rows.push([clientMatchButton(match)]);
   });
-  if (matches.length > 10) lines.push(`\n…и ещё ${matches.length - 10}. Уточните запрос.`);
-  rows.push([{ text: '🔁 Искать снова', callback_data: 'code:find' }, ...MENU_ROW]);
-  // Поиск остаётся открытым: следующий номер можно отправить сразу, без кнопки.
-  lines.push('', 'Можно сразу отправить следующий номер.');
+  if (matches.length > 10) lines.push('', `…и ещё ${matches.length - 10}. Уточните запрос.`);
+  rows.push([{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }, ...MENU_ROW]);
+  lines.push('', 'Можно сразу отправить следующую ячейку или последние 4 цифры телефона.');
   await sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
 }
 
@@ -1885,8 +2091,12 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
   // Экран мастера — в итог, а не вечное «⏳ Создаю…»: всё нужное (файл и кнопки) — ниже.
   await showScreen(chatId, screenId, `${lead}${wizardTrail(draft)}✅ Готово. Файл — ниже.`).catch(() => {});
   if (result.variant !== 'box') return;
-  // Мягкая подсказка про Помощник — не после каждой генерации, примерно в каждой третьей.
-  if (Math.random() < 1 / 3) await sendMessage(chatId, `💡 Клиент пришёл без кода? «Помощник ПВЗ» подберёт его по базе WB ПВЗ за пару минут: ${PROGRAM_URL}`, { reply_markup: choiceKeyboard([[{ text: '🔑 Как это работает', callback_data: 'menu:code' }]]) }).catch(() => {});
+  // Мягкая подсказка про «Код клиента» — не после каждого QR коробки, примерно после каждого третьего.
+  if (Math.random() < 1 / 3) {
+    const charge = await nextClientCharge(from, draft.userId || await findUser(from.id).catch(() => null)).catch(() => null);
+    const cost = charge ? ` — ${approvals.chargeLabel(charge)}` : '';
+    await sendMessage(chatId, `💡 Клиент пришёл без своего QR? Найду его по ячейке или телефону и пришлю QR сюда${cost}.`, { reply_markup: choiceKeyboard([[{ text: `🔑 Код клиента${cost}`, callback_data: 'menu:code' }]]) }).catch(() => {});
+  }
 }
 
 function wizardNonce() { return String(crypto.randomInt(100000, 1000000)); }
@@ -2016,16 +2226,15 @@ async function handlePhoto(from, chatId, message, image, session) {
  * единственной кнопкой — человек, делавший QR коробки, платил за ненужный QR.
  */
 async function offerForNumber(from, chatId, digits) {
-  const free = clientCodeFreeFor(from.id);
   // Цена стикера — как на выборе режима мастера: со скидкой 20% или «из пакета», если пакет есть.
-  const [{ price }, stickerPrices] = await Promise.all([
-    free ? { price: 0 } : clientCodePrice(from.id),
+  const [charge, stickerPrices] = await Promise.all([
+    findUser(from.id).catch(() => null).then(userId => nextClientCharge(from, userId)),
     digits.length === 10 || digits.length === 11
       ? ensureUser(from).then(wizardPrices).catch(() => null)
       : null,
   ]);
   const sticker = Number(stickerPrices?.packageLeft || 0) > 0 ? 'из пакета' : wallet.formatRub(Number(stickerPrices?.custom ?? GENERATION_PRICES.custom) / 100);
-  const qr = free ? 'бесплатно' : wallet.formatRub(price);
+  const qr = approvals.chargeLabel(charge);
   const rows = [], lines = [`Вы прислали номер <code>${digits}</code>. Что с ним сделать?`];
   if (digits.length === 11) {
     rows.push([{ text: `🏷 Стикер товара — ${sticker}`, callback_data: `gen:num:${digits}` }]);
@@ -2045,27 +2254,43 @@ async function offerForNumber(from, chatId, digits) {
 /** Подтверждение QR клиента по голому номеру: что спишется и сколько останется. Сама выдача — code:ok. */
 async function askClientCodeConfirm(from, chatId, messageId, sid) {
   const rows = [[{ text: '✖️ Отмена', callback_data: 'menu:home' }]];
+  const lines = ['<b>🔑 QR клиента</b>', `ID клиента: <code>${sid}</code>`];
   if (clientCodeFreeFor(from.id)) {
-    return showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>\n${unlimitedLine(from.id)}`, { reply_markup: choiceKeyboard([[{ text: '✅ Выдать QR', callback_data: `code:ok:${sid}` }], ...rows]) });
+    lines.push(unlimitedLine(from.id));
+    return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: '✅ Выдать QR', callback_data: `code:ok:${sid}` }], ...rows]) });
   }
-  const userId = await ensureUser(from);
-  const [ent, balance, { price, club }] = await Promise.all([
-    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
-    walletRub(userId),
-    clientCodePrice(from.id),
-  ]);
-  const codesLeft = Math.max(0, Number(ent?.codes_limit || 0) - Number(ent?.codes_used || 0)) + Math.max(0, Number(ent?.packs_left || 0));
-  const lines = ['<b>🔑 QR-код клиента</b>', `ID клиента: <code>${sid}</code>`];
-  let button;
-  if (codesLeft > 0) {
-    lines.push(`Спишется 1 код из тарифа или пакета «Помощника ПВЗ» (осталось ${codesLeft}). Баланс не изменится.`);
-    button = '✅ Выдать QR (1 код)';
-  } else {
-    lines.push(`Спишется с баланса: <b>${wallet.formatRub(price)}</b>${club ? ' (скидка клуба 20%)' : ''}, на балансе ${wallet.formatRub(balance)}.`);
-    button = `✅ Выдать QR за ${wallet.formatRub(price)}`;
-  }
-  lines.push('Каждое получение QR — отдельное списание, даже для того же клиента.');
+  const charge = await nextClientCharge(from, await ensureUser(from));
+  lines.push(approvals.chargeLine(charge));
+  if (charge.kind !== 'free') lines.push(REPEAT_PAID_LINE);
+  const button = charge.kind === 'free' ? '✅ Выдать QR' : `✅ Выдать QR — ${approvals.chargeLabel(charge)}`;
   return showScreen(chatId, messageId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: button, callback_data: `code:ok:${sid}` }], ...rows]) });
+}
+
+/** Снять отметку нажатия: QR не выдан и ничего не списано — ту же кнопку можно нажать снова. */
+function releaseRequest(requestId) {
+  return supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
+}
+
+/**
+ * Выдача QR по кнопке с отметкой нажатия: двойной клик или медленная сеть не спишут дважды. Отметка остаётся,
+ * если QR ушёл или списание прошло (повтор той же кнопки ответит «уже выдан»); нехватка денег и возврат её снимают.
+ * onClaimed — после отметки, до выдачи (ответить на нажатие, показать «Готовлю QR…»).
+ * → исход handleClientCode или 'duplicate'.
+ */
+async function issueClientQrOnce(from, chatId, requestId, sid, options = {}, onClaimed = async () => {}) {
+  const userId = await ensureUser(from);
+  if (!await claimGenerationRequest(requestId, from, chatId, { userId, sid })) return 'duplicate';
+  let outcome;
+  await onClaimed();
+  try {
+    outcome = await handleClientCode(from, chatId, sid, options);
+  } catch (error) {
+    await releaseRequest(requestId);
+    throw error;
+  }
+  if (outcome === 'not_sent') await releaseRequest(requestId);
+  else await completeGenerationRequest(requestId, { sid, outcome }).catch(() => {});
+  return outcome;
 }
 
 /**
@@ -2073,21 +2298,34 @@ async function askClientCodeConfirm(from, chatId, messageId, sid) {
  * (двойной клик, медленная сеть) отсекается записью запроса по id этого сообщения.
  */
 async function confirmClientCodeFromNumber(from, chatId, messageId, callbackId, sid) {
-  const userId = await ensureUser(from);
+  const title = `<b>🔑 QR клиента</b>\nID клиента: <code>${sid}</code>`;
   const requestId = `qr:${from.id}:${messageId}`;
-  if (!await claimGenerationRequest(requestId, from, chatId, { userId, sid })) { await answerCallbackQuery(callbackId, 'Этот QR уже выдан'); return; }
-  answerCallbackQuery(callbackId).catch(() => {});
-  await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>\n⏳ Готовлю QR…`);
+  let outcome;
   try {
-    await handleClientCode(from, chatId, sid);
+    outcome = await issueClientQrOnce(from, chatId, requestId, sid, {}, async () => {
+      answerCallbackQuery(callbackId).catch(() => {});
+      await showScreen(chatId, messageId, `${title}\n⏳ Готовлю QR…`);
+    });
   } catch (error) {
-    // Не выдали — запрос освобождаем: подтверждение можно нажать ещё раз.
-    await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'DELETE' }).catch(() => {});
-    await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code>`, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать ещё раз', callback_data: `code:ok:${sid}` }], MENU_ROW]) }).catch(() => {});
+    await showScreen(chatId, messageId, title, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать ещё раз', callback_data: `code:ok:${sid}` }], MENU_ROW]) }).catch(() => {});
     throw error;
   }
-  await completeGenerationRequest(requestId, { sid }).catch(() => {});
-  await showScreen(chatId, messageId, `<b>🔑 QR-код клиента</b>\nID клиента: <code>${sid}</code> — итог ниже ⬇️`).catch(() => {});
+  if (outcome === 'duplicate') { await answerCallbackQuery(callbackId, 'Этот QR уже выдан — он ниже в чате.'); return; }
+  await showScreen(chatId, messageId, `${title} — итог ниже ⬇️`).catch(() => {});
+}
+
+/**
+ * Кнопка «QR · яч. 245 · …98» в результатах поиска (и «Попробовать ещё раз» после сбоя): отметка нажатия —
+ * по сообщению с кнопкой и ID, чтобы двойной клик не списал дважды.
+ */
+async function pressClientQr(from, chatId, messageId, callbackId, sid, cell) {
+  if (!messageId) { answerCallbackQuery(callbackId).catch(() => {}); await handleClientCode(from, chatId, sid, { cell }); return; }
+  const outcome = await issueClientQrOnce(from, chatId, `qrs:${from.id}:${messageId}:${sid}`, sid, { cell }, async () => {
+    answerCallbackQuery(callbackId, 'Готовлю QR…').catch(() => {});
+  });
+  if (outcome === 'duplicate') {
+    await answerCallbackQuery(callbackId, 'Этот QR уже выдан по этой кнопке — он ниже в чате. Нужен ещё раз — отправьте ячейку или телефон снова (спишется ещё раз).', { alert: true });
+  }
 }
 
 /** Баланс в рублях. */
@@ -3266,7 +3504,16 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
   } else if (item.productKind === 'stickers') {
     done = `Пакет куплен: ${item.fields.custom_quantity} стикеров по номеру. Вводить ничего не нужно — они спишутся сами при создании.`;
   } else {
-    done = `+${item.fields.license_iterations} кодов клиента в пакете. Они спишутся сами — здесь в боте («Код» и ID клиента) и в «Помощнике ПВЗ».`;
+    done = `+${item.fields.license_iterations} кодов клиента в пакете. Они спишутся сами — здесь в боте («Код клиента») и в «Помощнике ПВЗ».`;
+    // Покупали из-за запроса с компьютера («Бесплатных кодов не осталось») — сразу кнопка выдачи: код спишется из пакета.
+    const pending = await approvals.pendingFor(userId).catch(() => []);
+    if (pending.length) {
+      done += `\nЖдёт решения запрос QR с компьютера${pending.length > 1 ? ` (всего ${pending.length})` : ''} — выдайте его кнопкой ниже.`;
+      rows = [
+        ...pending.slice(0, 3).map(r => [{ text: `✅ Выдать QR по запросу${r.cell ? ` · яч. ${r.cell}` : ''}`.slice(0, 60), callback_data: `cq:ok:${r.id}` }]),
+        ...rows,
+      ];
+    }
   }
   if (item.returnToGenerator) rows = [[{ text: '🏷 Создать стикер', callback_data: 'gen:return-mode' }], MENU_ROW];
   await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n${balanceLine}`, { reply_markup: choiceKeyboard(rows) });
@@ -3536,7 +3783,11 @@ async function afterWalletTopup(order, noticeId = null) {
   }
   // «Пополнить и выдать» по запросу QR с компьютера (server/_code-approvals.js)
   const approval = /^cqa:([0-9a-f-]{36})$/.exec(then);
-  if (approval) { await settleNotice(false); return afterTopupApproval(from, chatId, approval[1]); }
+  if (approval) {
+    const head = `<b>Баланс пополнен ✅</b>
+${topupScreen.creditedLine(topupScreen.topupAmounts(order))}`;
+    return afterTopupApproval(from, chatId, approval[1], { noticeId, screenId: messageId, head });
+  }
   if (then.startsWith('shop:')) {
     // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
     const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
@@ -3844,8 +4095,9 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }
-  // Запрос QR с компьютера: выдать / отклонить / выдать с баланса; подтверждение замены привязки Telegram.
-  const approvalMatch = data.match(/^cq:(ok|no|wallet):([0-9a-f-]{36})$/);
+  // Запрос QR с компьютера: выдать / отклонить / выдать с баланса / снова экран выдачи («⬅️ Назад» с оплаты);
+  // подтверждение замены привязки Telegram.
+  const approvalMatch = data.match(/^cq:(ok|no|wallet|view):([0-9a-f-]{36})$/);
   if (approvalMatch) { await handleApprovalButton(from, chatId, messageId, callback.id, approvalMatch[1], approvalMatch[2]); return; }
   const linkMatch = data.match(/^cq:link:(yes|no):([A-Za-z0-9_-]{24})$/);
   if (linkMatch) { await handleLinkConfirm(from, chatId, messageId, callback.id, linkMatch[1], linkMatch[2]); return; }
@@ -3859,8 +4111,12 @@ async function handleCallback(callback) {
   if (codeAsk) { answerCallbackQuery(callback.id).catch(() => {}); await askClientCodeConfirm(from, chatId, messageId, codeAsk[1]); return; }
   const codeOk = data.match(/^code:ok:(\d{7,12})$/);
   if (codeOk) { await confirmClientCodeFromNumber(from, chatId, messageId, callback.id, codeOk[1]); return; }
-  const codeQr = data.match(/^code:qr:(\d{1,12})$/);
-  if (codeQr) { answerCallbackQuery(callback.id).catch(() => {}); await handleClientCode(from, chatId, codeQr[1]); return; }
+  // Кнопка из результатов поиска (code:qr:<ID>[:<ячейка>]) — выдача с отметкой нажатия, без второго вопроса.
+  const codeQr = data.match(/^code:qr:(\d{1,12})(?::([0-9A-Za-zА-Яа-я-]{1,10}))?$/u);
+  if (codeQr) { await pressClientQr(from, chatId, messageId, callback.id, codeQr[1], codeQr[2] || ''); return; }
+  // QR не отправился, а код уже списан: тот же id списания — тот же QR без нового списания (app_code_once).
+  const codeResend = data.match(/^code:re:(\d{1,12}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
+  if (codeResend) { answerCallbackQuery(callback.id, 'Отправляю QR ещё раз…').catch(() => {}); await handleClientCode(from, chatId, codeResend[1], { requestId: codeResend[2] }); return; }
   if (data === 'code:enter') {
     answerCallbackQuery(callback.id).catch(() => {});
     const current = await getSession(from.id);
@@ -4027,14 +4283,17 @@ async function handleMessage(message) {
     if (command === 'product') return startForCategory(from, chatId, 'product');
     if (command === 'box') return startForCategory(from, chatId, 'box');
   }
-  // «Код <SID>» → QR клиента (списывает 50 ₽). Голое «код …» без цифр — показываем инструкцию.
-  const codeMatch = /^\s*код\s+(\d{1,12})\s*$/iu.exec(text);
-  if (codeMatch) return handleClientCode(from, chatId, codeMatch[1]);
-  if (/^\s*код\b/iu.test(text)) return showClientCode(chatId, undefined, from);
   // Сначала — ввод, которого ждёт открытый экран (мастер, сумма, поиск). Иначе незаконченный вход в WB
   // («пришлите телефон») перехватывал бы, например, количество стикеров или ШК из 11 цифр.
   const session = await getSession(from.id);
   const draft = session?.draft || {};
+  // «Код <ID>» → QR клиента сразу (платно). Не команда, если бот ждёт ввод для текущего шага: SMS-код WB или код
+  // доступа («код 4821» там — это ввод), короткий номер в открытом поиске — тоже поиск.
+  const codeCommand = parseCodeCommand(text);
+  if (codeCommand && session?.state !== 'await_access_code' && !(session?.state === 'await_client_query' && codeCommand.digits.length < 7)) {
+    const wb = await getWbConnection(from.id).catch(() => null);
+    if (wb?.state !== 'await_code' && wb?.state !== 'await_phone') return handleCodeCommand(from, chatId, codeCommand.digits);
+  }
   // Фото или скриншот с номером ШК — вместо ручного ввода.
   const image = shkVision.imageOf(message);
   if (image) return handlePhoto(from, chatId, message, image, session);

@@ -11,6 +11,7 @@ const { editMessageText, sendMessage, sendPhoto } = require('./_telegram-api');
 const { buildClientQr } = require('./_wb-code');
 const { CLIENT_CODE_PRICE } = require('./_payments');
 const { clubPrice } = require('./_club');
+const { appFreeMode } = require('./_app-free');
 const wallet = require('./_wallet');
 const account = require('./_app-account');
 const controls = require('./_user-controls');
@@ -64,10 +65,14 @@ async function patchApproval(id, patch, filter = '') {
   return Array.isArray(rows) ? rows[0] || null : null;
 }
 
-/** Просроченный pending помечаем при любом чтении — крона нет. */
+/**
+ * Просроченный pending помечаем при любом чтении — крона нет. Кто перевёл запрос в expired (фильтр по pending —
+ * ровно один читатель), тот и правит сообщение владельцу: кнопки «Выдать / Отклонить» не висят живыми.
+ */
 async function expireIfNeeded(row) {
   if (!row || row.status !== 'pending' || Date.parse(row.expires_at) > Date.now()) return row;
   const updated = await patchApproval(row.id, { status: 'expired', decided_at: new Date().toISOString() }, '&status=eq.pending').catch(() => null);
+  if (updated) await updateOwnerMessage(updated).catch(error => console.warn('code approval: expired message', error?.message || error));
   return updated || { ...row, status: 'expired' };
 }
 
@@ -82,17 +87,56 @@ async function deviceInfo(deviceId) {
   return rows[0] || null;
 }
 
-/** Строка «Коды: 3 из 10 в этом месяце · пакеты: 5» для сообщения владельцу (ошибка → без строки). */
-async function quotaLine(userId) {
-  if (account.isUnlimited(userId)) return null;
+/**
+ * Что спишется за следующий QR клиента — одна правда для экрана «Код клиента», поиска, предложения по номеру
+ * и запросов с компьютеров. Порядок — как у самого списания (chargeClientCode → app_consume): безлимит или
+ * бесплатный режим → код из тарифа → код из пакета → баланс (цена со скидкой клуба).
+ * telegramFree — бесплатный доступ к QR по Telegram ID (только в боте: UNLIMITED_TELEGRAM_USERS и env).
+ * → { kind: 'free' | 'quota' | 'pack' | 'wallet' | 'unknown', left?, limit?, price, club, balance }
+ *   unknown — права не прочитались: спишется код, если он есть, иначе цена с баланса. balance null — не прочитался.
+ */
+async function nextCodeCharge(userId, telegramId, { telegramFree = false } = {}) {
+  if (telegramFree || (userId && account.isUnlimited(userId))) return { kind: 'free' };
+  const [free, ent, balance, priced] = await Promise.all([
+    appFreeMode().catch(() => false),
+    userId ? supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null) : {},
+    userId ? wallet.getBalanceKopecks(userId).then(k => k / 100, () => null) : 0,
+    clubPrice(telegramId, CLIENT_CODE_PRICE).catch(() => ({ price: CLIENT_CODE_PRICE, club: false })),
+  ]);
+  if (free || ent?.unlimited === true) return { kind: 'free' };
+  const money = { price: priced.price, club: priced.club, balance };
+  if (!ent) return { kind: 'unknown', ...money };
+  const limit = Number(ent.codes_limit || 0), used = Number(ent.codes_used || 0), packs = Number(ent.packs_left || 0);
+  if (limit - used > 0) return { kind: 'quota', left: limit - used, limit, ...money };
+  if (packs > 0) return { kind: 'pack', left: packs, ...money };
+  return { kind: 'wallet', ...money };
+}
+
+function rub(value) { return wallet.formatRub(Number(value) || 0); }
+
+/** Одна строка «что спишется» по ответу nextCodeCharge. */
+function chargeLine(charge) {
+  const club = charge.club ? ' (скидка клуба 20%)' : '';
+  if (charge.kind === 'free') return 'Сейчас бесплатно — ничего не спишется.';
+  if (charge.kind === 'quota') return `Спишется 1 код из тарифа — останется ${charge.left - 1} из ${charge.limit} на этот месяц.`;
+  if (charge.kind === 'pack') return `Спишется 1 код из пакета — останется ${charge.left - 1}.`;
+  if (charge.kind === 'unknown') return `Спишется 1 код из тарифа или пакета, если они есть, иначе ${rub(charge.price)}${club} с баланса.`;
+  if (charge.balance == null) return `Спишется ${rub(charge.price)}${club} с баланса.`;
+  if (charge.balance < charge.price) return `Стоит ${rub(charge.price)}${club} с баланса, на балансе ${rub(charge.balance)} — не хватает ${rub(charge.price - charge.balance)}.`;
+  return `Спишется ${rub(charge.price)}${club} с баланса, на балансе ${rub(charge.balance)}.`;
+}
+
+/** Коротко для кнопки: «бесплатно», «1 код» или цена. */
+function chargeLabel(charge) {
+  if (charge.kind === 'free') return 'бесплатно';
+  if (charge.kind === 'quota' || charge.kind === 'pack') return '1 код';
+  return rub(charge.price);
+}
+
+/** Строка «что спишется» для сообщения владельцу (ошибка → без строки). */
+async function quotaLine(userId, telegramId) {
   try {
-    const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) });
-    const limit = Number(ent?.codes_limit || 0), used = Number(ent?.codes_used || 0), packs = Number(ent?.packs_left || 0);
-    const parts = [];
-    if (limit > 0) parts.push(`${Math.min(used, limit)} из ${limit} в этом месяце`);
-    if (packs > 0) parts.push(`в пакетах ещё ${packs}`);
-    if (!parts.length) return `Коды тарифа закончились — выдача спишет ${CLIENT_CODE_PRICE} ₽ с баланса`;
-    return `Коды: ${parts.join(' · ')}`;
+    return chargeLine(await nextCodeCharge(userId, telegramId));
   } catch {
     return null;
   }
@@ -146,13 +190,27 @@ function pendingKeyboard(row) {
 function headerLines(row, deviceName) {
   const place = [`ПК «${escapeHtml(deviceName || 'без названия')}»`];
   if (row.cell) place.push(`ячейка ${escapeHtml(row.cell)}`);
-  place.push(`клиент <code>${escapeHtml(row.sid)}</code>`);
-  return ['<b>🔑 Запрос QR-кода клиента</b>', place.join(' · ')];
+  place.push(`ID клиента <code>${escapeHtml(row.sid)}</code>`);
+  return ['<b>🔑 Запрос QR клиента</b>', place.join(' · ')];
 }
 
-/** Сообщение владельцу о новом запросе. */
-async function ownerMessage(row) {
-  const [device, quota, earlier] = await Promise.all([deviceInfo(row.device_id), quotaLine(row.user_id), approvedToday(row.user_id, row.sid, row.id)]);
+/** «Ответьте до 14:32 (по Москве)» — до какого времени запрос ждёт решения. */
+function deadlineLine(row) {
+  return Number.isFinite(Date.parse(row.expires_at))
+    ? `Сотрудник ждёт у компьютера. Ответьте до ${moscowTime(row.expires_at)} (по Москве) — потом запрос отменится сам.`
+    : 'Сотрудник ждёт у компьютера. Запрос действует 10 минут.';
+}
+
+/**
+ * Сообщение владельцу о новом запросе. telegramId — для скидки клуба в строке «что спишется»;
+ * withCharge: false — без этой строки (экран оплаты пишет свою).
+ */
+async function ownerMessage(row, telegramId = row.telegram_chat_id, { withCharge = true } = {}) {
+  const [device, quota, earlier] = await Promise.all([
+    deviceInfo(row.device_id),
+    withCharge ? quotaLine(row.user_id, telegramId) : null,
+    approvedToday(row.user_id, row.sid, row.id),
+  ]);
   const lines = headerLines(row, device?.name);
   if (earlier) {
     const earlierDevice = earlier.device_id === row.device_id ? null : await deviceInfo(earlier.device_id);
@@ -160,7 +218,7 @@ async function ownerMessage(row) {
   } else if (quota) {
     lines.push(quota);
   }
-  lines.push('', 'Сотрудник ждёт у компьютера. Запрос действует 10 минут.');
+  lines.push('', deadlineLine(row));
   return { text: lines.join('\n'), reply_markup: pendingKeyboard(row) };
 }
 
@@ -172,13 +230,14 @@ async function finalText(row) {
   const how = b.via === 'wallet' ? ` · списано ${wallet.formatRub(Number(b.rub || 0))} с баланса`
     : b.via === 'reuse' ? ' · повтор, без списания'
     : b.free ? ' · без списания'
+    : b.source === 'unlimited' ? ' · без списания'
     : b.source === 'pack' ? ' · списан 1 код из пакета'
-    : b.source === 'quota' ? ' · списан 1 код тарифа' : '';
+    : b.source === 'quota' ? ' · списан 1 код из тарифа' : '';
   const result = {
     approved: `✅ Выдано${how}. QR показан на компьютере.`,
-    declined: '❌ Отклонено.',
-    cancelled: '↩️ Отменено с компьютера.',
-    expired: '⌛ Не выдан — истекли 10 минут.',
+    declined: '❌ Отклонено. Ничего не списано.',
+    cancelled: '↩️ Отменено с компьютера. Ничего не списано.',
+    expired: '⌛ Не выдан — истекло время (10 минут). Ничего не списано.',
     undeliverable: '⚠️ Сообщение не доставлено.',
     failed: `⚠️ Не удалось выдать: ${escapeHtml(row.error || 'ошибка')}`,
   }[row.status] || row.status;
@@ -195,7 +254,7 @@ async function updateOwnerMessage(row) {
 
 /** Отправить запрос владельцу. Не доставлено (бот заблокирован и т.п.) → status undeliverable. */
 async function notifyOwner(row, owner) {
-  const message = await ownerMessage(row);
+  const message = await ownerMessage(row, owner?.id || row.telegram_chat_id);
   try {
     const sent = await sendMessage(owner.id, message.text, { reply_markup: message.reply_markup });
     return await patchApproval(row.id, { telegram_chat_id: owner.id, telegram_message_id: sent?.message_id || null }) || row;
@@ -316,14 +375,31 @@ function statusPayload(row) {
   };
 }
 
-/** Фото QR владельцу после выдачи — чтобы мог переслать, если компьютер не дождался. */
-async function sendQrToOwner(row) {
-  if (!row.telegram_chat_id || !row.qr_text) return;
-  await sendPhoto(row.telegram_chat_id, clientQrUrl(row.qr_text), { caption: `Клиент ${row.sid} · код ${codeFromQrText(row.qr_text)}` }).catch(error => console.warn('code approval: photo to owner', error.message));
+/** Всплывашка на кнопку уже закрытого запроса: что с ним стало и списано ли что-то. */
+function closedNotice(row) {
+  return {
+    approved: 'Этот запрос уже выдан — QR показан на компьютере.',
+    declined: 'Этот запрос уже отклонён. Ничего не списано.',
+    cancelled: 'Сотрудник отменил запрос на компьютере. Ничего не списано.',
+    expired: 'Запрос уже не действует — прошло больше 10 минут. Ничего не списано. Сотрудник может запросить заново.',
+  }[row?.status] || 'Этот запрос уже закрыт. Ничего не списано.';
+}
+
+/**
+ * Фото QR владельцу после выдачи — чтобы мог переслать, если компьютер не дождался.
+ * extra — строки под подписью (итог пополнения), replyMarkup — кнопки под фото. Возвращает, ушло ли фото.
+ */
+async function sendQrToOwner(row, { extra = [], replyMarkup } = {}) {
+  if (!row.telegram_chat_id || !row.qr_text) return false;
+  const cell = row.cell ? ` · ячейка ${row.cell}` : '';
+  const caption = [`QR клиента ${row.sid}${cell} · код на сегодня ${codeFromQrText(row.qr_text)}`, ...extra].join('\n');
+  return sendPhoto(row.telegram_chat_id, clientQrUrl(row.qr_text), { caption, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) })
+    .then(() => true, error => { console.warn('code approval: photo to owner', error.message); return false; });
 }
 
 module.exports = {
   TTL_MS, FLOOD_LIMIT, FLOOD_WINDOW_MS,
-  approve, cancel, clientQrUrl, codeFromQrText, createApproval, decline, finalText, loadApproval, moscowDayStart,
-  notifyOwner, ownerMessage, ownerTelegramId, pendingFor, pendingKeyboard, sendQrToOwner, statusPayload, updateOwnerMessage,
+  approve, cancel, chargeLabel, chargeLine, clientQrUrl, closedNotice, codeFromQrText, createApproval, decline, finalText, loadApproval,
+  moscowDayStart, moscowTime, nextCodeCharge, notifyOwner, ownerMessage, ownerTelegramId, pendingFor, pendingKeyboard, sendQrToOwner,
+  statusPayload, updateOwnerMessage,
 };

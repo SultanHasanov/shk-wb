@@ -22,6 +22,11 @@ function topupBackData(then) {
   if (!then) return 'topup:home';
   if (then === 'gen') return 'gen:recheck';
   if (then.startsWith('shop:')) return then;
+  // QR клиента: к подтверждению с ценой (code:ask ничего не списывает); запрос с компьютера — снова экран выдачи.
+  const qr = /^qr:(\d{7,12})$/.exec(then);
+  if (qr) return `code:ask:${qr[1]}`;
+  const approval = /^cqa:([0-9a-f-]{36})$/.exec(then);
+  if (approval) return `cq:view:${approval[1]}`;
   return 'menu:home';
 }
 

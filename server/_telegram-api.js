@@ -139,11 +139,13 @@ function sendDocument(chatId, document, options = {}) {
 
 // Подтверждение нажатия кнопки. Если бот ответил позже ~15 с (медленный WB, сеть), Telegram
 // отвечает «query is too old» — само действие при этом выполнять нужно, поэтому не падаем.
-async function answerCallbackQuery(callbackQueryId, text) {
+// alert — окно с кнопкой «OK» вместо исчезающей надписи: для ответов, которые надо успеть прочитать.
+async function answerCallbackQuery(callbackQueryId, text, { alert = false } = {}) {
   try {
     return await telegramRequest('answerCallbackQuery', {
       callback_query_id: callbackQueryId,
       ...(text ? { text } : {}),
+      ...(text && alert ? { show_alert: true } : {}),
     });
   } catch (error) {
     if (/query is too old|query ID is invalid/i.test(String(error.message))) return null;
