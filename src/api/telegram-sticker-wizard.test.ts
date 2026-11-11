@@ -371,14 +371,16 @@ describe('оплата посреди мастера', () => {
     world.session = confirmSession({ balanceKopecks: 0 });
     world.balance = 0;
     await bot.processUpdate(press('tp:25~750:gen'));
-    expect(buttons().at(-1)).toMatchObject({ text: '⬅️ Назад', callback_data: 'gen:recheck' });
+    // Нижний ряд экрана оплаты: «⬅️ Назад» к покупке и «☰ Меню».
+    expect(buttons().at(-2)).toMatchObject({ text: '⬅️ Назад', callback_data: 'gen:recheck' });
+    expect(buttons().at(-1)).toMatchObject({ callback_data: 'menu:home' });
     await bot.processUpdate(press('gen:recheck'));
     // Выбор не стёрт: то же подтверждение с кнопкой «Пополнить и создать».
     expect(lastScreen().body.text).toContain('На балансе не хватает денег');
     expect(lastScreen().body.text).toContain('<code>47671114039</code>');
     expect(world.session?.state).toBe('confirm');
     await bot.processUpdate(press('tp:50:shop:gen:10', 51));
-    expect(buttons().at(-1)).toMatchObject({ callback_data: 'shop:gen:10' });
+    expect(buttons().at(-2)).toMatchObject({ callback_data: 'shop:gen:10' });
   });
 
   it('«🏷 Создать стикер» после покупки пакета в новом сообщении — мастер переходит туда, а не «шаг устарел»', async () => {

@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { createNotification, sendEmail } = require('./_notifications');
-const { sendMessage } = require('./_telegram-api');
+const { editMessageText, sendMessage } = require('./_telegram-api');
+const topupScreen = require('./_topup-screen');
 // Кнопки под уведомлениями — n:<callback>: бот откроет экран новым сообщением, уведомление останется (server/_bot-notice.js).
 const { noticeMarkup } = require('./_bot-notice');
 const { notifyAdminOrder } = require('./_admin-alerts');
@@ -95,6 +96,43 @@ async function completeOrder(order, payment) {
     throw error;
   }
 }
+async function telegramIdOf(userId){
+  if(!userId)return null;
+  const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(userId)}&select=telegram_user_id&limit=1`).catch(()=>[]);
+  return identities[0]?.telegram_user_id||null;
+}
+
+/**
+ * Править экран оплаты пополнения в боте (pricing_snapshot.wallet.message). Не трогаем, если в том же сообщении
+ * человек уже открыл более новую оплату (нажал «Попробовать ещё раз» или другую сумму): экран теперь её.
+ */
+async function editTopupScreen(order,telegramId,text,options={}){
+  const messageId=Number(order?.pricing_snapshot?.wallet?.message)||0;
+  if(!telegramId||!messageId)return false;
+  if(order.created_at){
+    const newer=await supabaseFetch(`payment_orders?user_id=eq.${encodeURIComponent(order.user_id)}&product_kind=eq.wallet_topup&created_at=gt.${encodeURIComponent(order.created_at)}&pricing_snapshot->wallet->>message=eq.${messageId}&select=id&limit=1`).catch(()=>[]);
+    if(Array.isArray(newer)&&newer.length)return false;
+  }
+  await editMessageText(telegramId,messageId,text,options).catch(error=>{if(!/not modified/i.test(String(error.message)))console.warn('Top-up screen edit failed',error.message);});
+  return true;
+}
+
+/**
+ * ЮKassa отменила платёж пополнения из бота (отказ банка или брошенная оплата — её ЮKassa отменяет сама через час):
+ * экран оплаты в боте — «деньги не списаны» и «Попробовать ещё раз» вместо мёртвой ссылки. Нового сообщения не шлём:
+ * брошенный платёж отменяется, когда человек давно ушёл, и уведомление через час только запутало бы.
+ * Вызывать один раз — при переходе заказа в canceled (вебхук или запрос статуса).
+ */
+async function notifyTopupCanceled(order,payment){
+  if(order?.product_kind!=='wallet_topup'||!order.user_id)return false;
+  if(!order.pricing_snapshot?.wallet?.message)return false;
+  const telegramId=await telegramIdOf(order.user_id);
+  if(!telegramId)return false;
+  const wallet=order.pricing_snapshot.wallet;
+  const view=topupScreen.canceledScreen({amount:Number(wallet.amount||order.gross_amount||0),then:String(wallet.then||''),reason:String(payment?.cancellation_details?.reason||'')});
+  return editTopupScreen(order,telegramId,view.text,{reply_markup:view.reply_markup});
+}
+
 /** Пригласившему — в Telegram-бот: «+X ₽ с оплаты друга». Награду пишет SQL-триггер при статусе succeeded. */
 async function notifyReferralReward(order){
   if(!(Number(order.amount||0)>0))return;
@@ -134,22 +172,30 @@ async function notifyCompleted(order){
     // Ссылки на PDF подписаны на час — в сообщение их не кладём: кнопка «Мои заказы» строит свежие.
     if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nPDF со стикерами — по кнопке ниже.',{reply_markup:noticeMarkup({inline_keyboard:[[{text:'📄 Скачать стикеры',callback_data:'orders:list'}],[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
   }else if(order.product_kind==='wallet_topup'){
-    const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
-    const telegramId=identities[0]?.telegram_user_id;
-    const credited=Number(order.wallet_topup_kopecks||0)/100, paid=Number(order.gross_amount||0), bonus=Math.max(0,credited-paid);
-    const balanceLine=order.wallet_balance_kopecks!=null?`
-На балансе: <b>${(order.wallet_balance_kopecks/100).toLocaleString('ru-RU')} ₽</b>`:'';
+    const telegramId=await telegramIdOf(order.user_id);
     if(!telegramId)return;
-    const bonusText=bonus?` (бонус ${bonus.toLocaleString('ru-RU')} ₽)`:'';
+    const amounts=topupScreen.topupAmounts(order);
+    const head=`<b>Баланс пополнен ✅</b>\n${topupScreen.creditedLine(amounts)}`;
+    const balanceRub=order.wallet_balance_kopecks!=null?Number(order.wallet_balance_kopecks)/100:null;
+    const then=order.pricing_snapshot?.wallet?.then;
     // Пополняли ради покупки («Пополнить на X ₽ и купить») — проводим её сразу, без повторных нажатий.
-    if(order.pricing_snapshot?.wallet?.then){
-      const notice=await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}. Оплачиваю покупку…`).catch(()=>null);
+    // Экран покупки правит сам бот (afterWalletTopup): итог — в этом сообщении или ниже.
+    if(then){
+      const notice=await sendMessage(telegramId,`${head}\nОплачиваю покупку…`).catch(()=>null);
       // Через RPC на узел бота (или локально, если узла нет); модуль подключается лениво — прямой require дал бы цикл.
       const started=await require('./_bot-rpc').callBot('afterWalletTopup',order,notice?.message_id||null).catch(error=>{console.error('Auto purchase after top-up failed',error.message);return false;});
-      if(!started)await sendMessage(telegramId,'Не получилось провести покупку автоматически — откройте её снова, оплата пройдёт с баланса.',{reply_markup:noticeMarkup({inline_keyboard:[[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
+      if(!started){
+        // «Оплачиваю покупку…» больше не правда; что делать — отдельным сообщением с прямой кнопкой к покупке.
+        if(notice?.message_id)await editMessageText(telegramId,notice.message_id,head).catch(()=>{});
+        const view=topupScreen.purchaseNotStartedText({balanceRub:balanceRub??NaN,then});
+        await sendMessage(telegramId,view.text,{reply_markup:noticeMarkup({inline_keyboard:view.rows})}).catch(()=>{});
+      }
       return;
     }
-    await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}${balanceLine}`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'}]]})}).catch(()=>{});
+    // Экран оплаты в боте (если он есть и не занят более новой оплатой) — без мёртвой кнопки «Перейти к оплате».
+    await editTopupScreen(order,telegramId,topupScreen.paidScreenText(amounts.paid),{reply_markup:{inline_keyboard:[]}});
+    const balanceLine=balanceRub!=null?`\n💰 На балансе: <b>${topupScreen.formatRub(balanceRub)}</b>`:'';
+    await sendMessage(telegramId,`${head}${balanceLine}`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'},{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
   }else if(order.product_kind==='stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
@@ -160,4 +206,4 @@ async function notifyCompleted(order){
     }
   }
 }
-module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, CUSTOM_GENERATION_PACKAGES, hasYookassa, LICENSE_PRICES, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };
+module.exports = { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, completeOrder, CUSTOM_GENERATION_PACKAGES, hasYookassa, LICENSE_PRICES, notifyTopupCanceled, PACKAGE_PRICES, pricing, REVIEW_PRICE, yookassa };

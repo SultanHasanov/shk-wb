@@ -17,6 +17,7 @@ const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { accountMergeSummary } = require('./_telegram-account');
 const { NOTICE_PREFIX, keptRows, noticeMarkup } = require('./_bot-notice');
+const topupScreen = require('./_topup-screen');
 const userCache = require('./_telegram-user-cache');
 const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
@@ -1370,24 +1371,20 @@ function paymentErrorKeyboard(view, retryData) {
   ]);
 }
 
-/**
- * «⬅️ Назад» с экрана оплаты — туда, откуда пришли, без потери выбора: из мастера стикеров — снова подтверждение
- * (gen:recheck перечитает баланс в том же сообщении), из магазина — экран товара. menu:home здесь стирал черновик,
- * и после оплаты стикер уже не создавался сам.
- */
-function topupBackData(then) {
-  if (!then) return 'topup:home';
-  if (then === 'gen') return 'gen:recheck';
-  if (then.startsWith('shop:')) return then;
-  return 'menu:home';
-}
+// «⬅️ Назад» с экрана оплаты — server/_topup-screen.js: тот же расчёт нужен сайту, когда он правит этот экран.
+const { topupBackData } = topupScreen;
 
-/** retryData — исходная кнопка tp:…: «Попробовать снова» повторяет то же пополнение с той же покупкой. */
+/**
+ * retryData — исходная кнопка tp:…: «Попробовать снова» повторяет то же пополнение с той же покупкой.
+ * id экрана уходит в заказ всегда: после оплаты (или её отмены) сайт правит этот экран, а не оставляет живую ссылку.
+ */
 async function startTopupPayment(from, chatId, amount, then, screenId, missing = null, retryData = 'topup:home') {
   const bonus = wallet.topupBonus(amount);
+  // Кнопка из уведомления открывает экран новым сообщением — его id нужен заказу до создания оплаты.
+  if (!screenId) screenId = await showScreen(chatId, null, '⏳ Готовлю оплату…');
   let userId, payment;
   try {
-    ({ userId, payment } = await createBotPayment(from, id => require('./_bot-checkout').createTopupPayment({ userId: id, amount, then, messageId: then ? screenId : null })));
+    ({ userId, payment } = await createBotPayment(from, id => require('./_bot-checkout').createTopupPayment({ userId: id, amount, then, messageId: screenId })));
   } catch (error) {
     console.warn('Telegram topup payment failed', error.code || '', error.message);
     const view = paymentErrorView(error);
@@ -1397,16 +1394,61 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
   const balance = then && missing != null ? await walletRub(userId).catch(() => null) : null;
   const text = [
     `<b>💳 Пополнение на ${wallet.formatRub(amount)}</b>`,
-    ...(bonus ? [`Зачислим ${wallet.formatRub(amount + bonus)} с бонусом.`] : []),
+    ...(bonus ? [`Зачислим ${wallet.formatRub(amount + bonus)}: ${wallet.formatRub(amount)} + бонус ${wallet.formatRub(bonus)}.`] : []),
     ...topupPurchaseLines({ amount, bonus, balance: balance ?? NaN, missing: missing ?? NaN }),
-    ...(then ? ['После оплаты покупка пройдёт сама, ничего нажимать не нужно.'] : ['Деньги появятся на балансе сразу после оплаты.']),
+    '',
+    then
+      ? 'Откроется страница оплаты ЮKassa. После оплаты вернитесь сюда — покупка пройдёт сама, ничего нажимать не нужно.'
+      : 'Откроется страница оплаты ЮKassa. После оплаты вернитесь сюда — я напишу, что деньги на балансе.',
     '',
     OFFER_LINE,
   ].join('\n');
+  const check = topupScreen.topupCheckData(payment.token);
   await showScreen(chatId, screenId, text, { reply_markup: choiceKeyboard([
     [{ text: `💳 Перейти к оплате ${wallet.formatRub(amount)}`, url: payment.confirmationUrl }],
-    [{ text: '⬅️ Назад', callback_data: topupBackData(then) }],
+    ...(check ? [[{ text: '🔄 Проверить оплату', callback_data: check }]] : []),
+    [{ text: '⬅️ Назад', callback_data: topupBackData(then) }, ...MENU_ROW],
   ]) });
+}
+
+/**
+ * «🔄 Проверить оплату» (tpc:<токен заказа>): спросить ЮKassa сейчас, не дожидаясь вебхука. Запрос статуса
+ * (api/payments.js, action=status) сам зачисляет оплаченное — сообщение о зачислении придёт как обычно.
+ * Заказ ищем по токену и аккаунту этого Telegram: чужой токен ничего не покажет.
+ */
+async function checkTopupPayment(from, chatId, messageId, callbackId, token) {
+  const userId = await ensureUser(from);
+  const rows = await supabaseFetch(`payment_orders?public_token=eq.${encodeURIComponent(token)}&user_id=eq.${encodeURIComponent(userId)}&product_kind=eq.wallet_topup&select=id,status,fulfillment_status,gross_amount,pricing_snapshot&limit=1`);
+  const order = rows[0];
+  if (!order) return answerCallbackQuery(callbackId, 'Эта оплата не найдена — откройте пополнение заново');
+  const wasCanceled = order.status === 'canceled';
+  let status = order.fulfillment_status === 'fulfilled' ? 'succeeded' : order.status;
+  if (status !== 'succeeded' && !wasCanceled) {
+    try {
+      status = (await require('./_bot-checkout').checkTopupPayment({ token })).status;
+    } catch (error) {
+      console.warn('Telegram topup status check failed', error.code || '', error.message);
+      return answerCallbackQuery(callbackId, 'Не получилось проверить оплату. Попробуйте через минуту.');
+    }
+  }
+  const topup = order.pricing_snapshot?.wallet || {};
+  const amount = Number(topup.amount || order.gross_amount || 0);
+  if (status === 'succeeded') {
+    answerCallbackQuery(callbackId, 'Оплата прошла ✅ Деньги на балансе').catch(() => {});
+    // Пополнение ради покупки: экран правит сама покупка (afterWalletTopup); простое — итог здесь.
+    if (!topup.then) await showScreen(chatId, messageId, topupScreen.paidScreenText(amount), { reply_markup: choiceKeyboard([[{ text: '👤 Профиль', callback_data: 'menu:profile' }, ...MENU_ROW]]) });
+    return;
+  }
+  if (status === 'canceled') {
+    answerCallbackQuery(callbackId, 'Оплата не прошла — деньги не списаны').catch(() => {});
+    // Отмену только что узнал запрос статуса — он сам поправил экран (с причиной). Отменён раньше — правим здесь.
+    if (wasCanceled) {
+      const view = topupScreen.canceledScreen({ amount, then: String(topup.then || '') });
+      await showScreen(chatId, messageId, view.text, { reply_markup: view.reply_markup });
+    }
+    return;
+  }
+  return answerCallbackQuery(callbackId, 'Оплата ещё не поступила. Если вы уже оплатили — подождите минуту и нажмите снова.');
 }
 
 /** Кнопки профиля. orders — у человека есть индивидуальные заказы стикеров: кнопка «Мои заказы». */
@@ -2100,7 +2142,8 @@ async function showProfile(from, chatId, messageId) {
     '',
     `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
   ].join('\n');
-  await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ orders: Array.isArray(orders) && orders.length > 0 }) });
+  const screenId = await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ orders: Array.isArray(orders) && orders.length > 0 }) });
+  rememberTopupOrigin(from.id, screenId, 'menu:profile');
 }
 
 /**
@@ -2726,32 +2769,88 @@ async function notifyAccountLinked(telegramId) {
 
 // ── Баланс: пополнение и покупки с баланса (server/_wallet.js) ──
 
+// «⬅️ Назад» с экрана пополнения — туда, откуда пришли: в профиль или в магазин. Источник держим в памяти процесса
+// по паре «Telegram + сообщение» (не в сессии: её состояния ограничены в базе, а потеря после перезапуска безобидна —
+// «Назад» тогда ведёт в профиль, как раньше). Записывают его экраны с кнопкой пополнения.
+const TOPUP_ORIGINS_MAX = 5000;
+const topupOrigins = new Map();
+const TOPUP_BACK_TITLES = { 'menu:profile': '⬅️ Профиль', 'shop:home': '⬅️ Магазин' };
+
+function rememberTopupOrigin(telegramId, messageId, back) {
+  if (!messageId) return;
+  const key = `${Number(telegramId)}:${Number(messageId)}`;
+  topupOrigins.delete(key);
+  topupOrigins.set(key, back);
+  if (topupOrigins.size > TOPUP_ORIGINS_MAX) topupOrigins.delete(topupOrigins.keys().next().value);
+}
+
+function topupOrigin(telegramId, messageId) {
+  return (messageId && topupOrigins.get(`${Number(telegramId)}:${Number(messageId)}`)) || 'menu:profile';
+}
+
+/** Ушли с экрана «Своя сумма» — сумму больше не ждём. Другие состояния (черновик мастера для «пополнить и создать») не трогаем. */
+async function dropTopupAmountWait(telegramId) {
+  const session = await getSession(telegramId).catch(() => null);
+  if (session?.state === 'await_topup_amount') await clearSession(telegramId).catch(() => {});
+}
+
+/** «🎁 Пополните от 500 ₽ — добавим 5%, от 1 000 ₽ — 10%.» — из TOPUP_BONUS_STEPS. */
+function topupBonusText() {
+  const steps = [...wallet.TOPUP_BONUS_STEPS].sort((a, b) => a[0] - b[0]);
+  return `🎁 Пополните ${steps.map(([amount, percent], index) => `от ${wallet.formatRub(amount)} — ${index ? '' : 'добавим '}${percent}%`).join(', ')}.`;
+}
+
 async function showTopup(from, chatId, messageId) {
   const userId = await ensureUser(from);
-  const balance = await walletRub(userId);
+  const [balance] = await Promise.all([walletRub(userId), dropTopupAmountWait(from.id)]);
+  const back = topupOrigin(from.id, messageId);
   const text = [
-    '<b>💰 Пополнение</b>',
-    `На балансе: <b>${wallet.formatRub(balance)}</b>`,
-    '🎁 +5% от 500 ₽, +10% от 1000 ₽',
+    '<b>💰 Пополнение баланса</b>',
+    'С баланса оплачивается всё в боте: стикеры, код клиента, отзывы, подписки и ключи.',
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`,
+    topupBonusText(),
   ].join('\n');
-  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
+  const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     ...topupRows(0),
     [{ text: '✏️ Своя сумма', callback_data: 'topup:custom' }],
-    [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
+    [{ text: TOPUP_BACK_TITLES[back] || '⬅️ Назад', callback_data: back }, ...MENU_ROW],
   ]) });
+  if (id !== messageId) rememberTopupOrigin(from.id, id, back);
 }
+
+const TOPUP_RANGE_TEXT = `от ${wallet.formatRub(wallet.MIN_TOPUP)} до ${wallet.formatRub(wallet.MAX_TOPUP)}`;
 
 async function askTopupAmount(from, chatId, messageId, error) {
   const userId = await ensureUser(from);
-  const id = await showScreen(chatId, messageId, `${error ? `⚠️ ${error}\n\n` : ''}<b>Своя сумма</b>\nОтправьте сумму сообщением: от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`, { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'topup:home' }]]) });
+  const text = `${error ? `⚠️ ${error}\n\n` : ''}<b>Своя сумма</b>\nОтправьте сумму сообщением — только число, например <code>350</code>. Пополнить можно ${TOPUP_RANGE_TEXT}.`;
+  const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'topup:home' }, ...MENU_ROW]]) });
+  if (id !== messageId) rememberTopupOrigin(from.id, id, topupOrigin(from.id, messageId));
   await saveSession(from, chatId, 'await_topup_amount', { userId, msgId: id });
 }
 
+/**
+ * Сумма из сообщения: «350», «1 000», «350,50», «500 ₽», «500р», «500 руб». Остальное — null: прежний разбор
+ * выкидывал все нецифры, и «100р 50к» становилось 10 050 ₽.
+ */
+function parseTopupAmount(text) {
+  const match = /^\s*(\d{1,3}(?:[  ]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:₽|р\.?|руб\.?|рублей|рубля|рубль)?\s*$/iu.exec(String(text || ''));
+  if (!match) return null;
+  return Number(`${match[1].replace(/[  ]/g, '')}.${match[2] || '0'}`);
+}
+
 async function acceptTopupAmount(from, chatId, session, message, text) {
-  await deleteMessage(chatId, message.message_id).catch(() => {});
-  const amount = Number(String(text).replace(',', '.').replace(/[^\d.]/g, ''));
   const msgId = session.draft?.msgId;
-  if (!wallet.validTopup(amount)) return askTopupAmount(from, chatId, msgId, `«${escapeHtml(String(text).slice(0, 20))}» — нужна сумма от ${wallet.MIN_TOPUP} до ${wallet.MAX_TOPUP.toLocaleString('ru-RU')} ₽.`);
+  // Голые 7–12 цифр — скорее ID клиента или ШК, чем сумма (и больше максимума): сумму больше не ждём.
+  const bare = String(text).replace(/\s+/g, '');
+  if (/^\d{7,12}$/.test(bare)) {
+    await clearSession(from.id);
+    return offerForNumber(from, chatId, bare);
+  }
+  await deleteMessage(chatId, message.message_id).catch(() => {});
+  const amount = parseTopupAmount(text);
+  const shown = escapeHtml(String(text).slice(0, 20));
+  if (amount == null) return askTopupAmount(from, chatId, msgId, `Не понял сумму «${shown}». Отправьте только число, например <code>350</code>.`);
+  if (!wallet.validTopup(amount)) return askTopupAmount(from, chatId, msgId, `Сумма «${shown}» не подходит: пополнить можно ${TOPUP_RANGE_TEXT}.`);
   await clearSession(from.id);
   // Сумма введена — сразу заказ и ссылка на оплату, без лишнего нажатия.
   await startTopupPayment(from, chatId, Math.round(amount * 100) / 100, '', msgId);
@@ -2861,14 +2960,25 @@ async function showShop(from, chatId, messageId, parts) {
   const [kind, a, b, c, d] = parts;
 
   if (!kind || kind === 'home') {
-    return showScreen(chatId, messageId, `<b>🛒 Купить с баланса</b>\n${balanceLine}`, { reply_markup: choiceKeyboard([
+    const text = [
+      '<b>🛒 Купить с баланса</b>',
+      balanceLine,
+      '',
+      '🖥 Подписка «Помощник ПВЗ» — программа для компьютера пункта',
+      '🖨 Ключ «ПВЗ Принт» (печать ячеек) — номер ячейки на термопринтере при сканировании',
+      '🏷 Пакет стикеров по номеру — дешевле, чем по одному',
+      '🔑 Пакет кодов клиента — QR клиента в боте и в «Помощнике ПВЗ»',
+    ].join('\n');
+    const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
       [{ text: '🖥 Подписка «Помощник ПВЗ»', callback_data: 'shop:helper' }],
-      [{ text: '🖨 Ключ «Печать ячеек»', callback_data: 'shop:cp' }],
+      [{ text: '🖨 Ключ «ПВЗ Принт»', callback_data: 'shop:cp' }],
       [{ text: '🏷 Пакеты стикеров по номеру', callback_data: 'shop:gen' }],
-      [{ text: '🔑 Пакет подборов кода', callback_data: 'shop:wbpk' }],
+      [{ text: '🔑 Пакет кодов клиента', callback_data: 'shop:wbpk' }],
       [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
-      [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }],
+      [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
     ]) });
+    rememberTopupOrigin(from.id, id, 'shop:home');
+    return id;
   }
   if (kind === 'gen' && (!a || a === 'wizard')) {
     const fromWizard = a === 'wizard';
@@ -3191,19 +3301,27 @@ async function afterWalletTopup(order, noticeId = null) {
     await runGeneration(from, chatId, session.draft.msgId, session, { noticeId });
     return true;
   }
+  // Итог этих покупок приходит новым сообщением ниже — «Оплачиваю покупку…» в уведомлении меняем на «итог ниже».
+  // Старый экран оплаты выше (rv / qr) — без живой ссылки «Перейти к оплате»; экран запроса с ПК (cqa) правит сам запрос.
+  const settleNotice = async (withScreen = true) => {
+    if (noticeId) await editMessageText(chatId, noticeId, `<b>Баланс пополнен ✅</b>\n${topupScreen.creditedLine(topupScreen.topupAmounts(order))} — итог ниже ⬇️`).catch(() => {});
+    if (withScreen && messageId && messageId !== noticeId) await editMessageText(chatId, messageId, 'Баланс пополнен — итог ниже ⬇️').catch(() => {});
+  };
   const review = /^rv:(all|[1-5]):(\d+):(\d)(?::([0-9a-f]{8}))?$/.exec(then);
   if (review) {
+    await settleNotice();
     await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4]);
     return true;
   }
   const qr = /^qr:(\d{1,12})$/.exec(then);
   if (qr) {
+    await settleNotice();
     await handleClientCode(from, chatId, qr[1]);
     return true;
   }
   // «Пополнить и выдать» по запросу QR с компьютера (server/_code-approvals.js)
   const approval = /^cqa:([0-9a-f-]{36})$/.exec(then);
-  if (approval) return afterTopupApproval(from, chatId, approval[1]);
+  if (approval) { await settleNotice(false); return afterTopupApproval(from, chatId, approval[1]); }
   if (then.startsWith('shop:')) {
     // Метка оплаты из id заказа: повторный вызов по тому же заказу не купит второй раз.
     const nonce = parseInt(String(order.id).replace(/-/g, '').slice(0, 8), 16) % 1000000;
@@ -3435,12 +3553,16 @@ async function handleCallback(callback) {
   if (data === 'rvbuy:list') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewPaywall(from, chatId, undefined, messageId); return; }
   // code:buy — кнопка «Купить генерации» из старых сообщений: теперь это пополнение баланса.
   if (data === 'topup:home' || data === 'code:buy') { answerCallbackQuery(callback.id).catch(() => {}); await showTopup(from, chatId, messageId); return; }
+  // tpc:<токен заказа> — «🔄 Проверить оплату» на экране оплаты.
+  const topupCheck = data.match(/^tpc:([A-Za-z0-9_-]{40,60})$/);
+  if (topupCheck) { await checkTopupPayment(from, chatId, messageId, callback.id, topupCheck[1]); return; }
   // tp:<сумма>[:<then>] — пополнить (и купить): заказ ЮKassa создаётся здесь, ссылка на оплату — в том же сообщении.
   const topupMatch = data.match(/^tp:(\d{1,6})(?:~(\d{1,9}))?(?::(.+))?$/);
   if (topupMatch) {
     const amount = Number(topupMatch[1]);
     if (!wallet.validTopup(amount)) { await answerCallbackQuery(callback.id, 'Сумма больше не актуальна'); return; }
     answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {});
+    await dropTopupAmountWait(from.id);
     await startTopupPayment(from, chatId, amount, topupMatch[3] || '', messageId, topupMatch[2] ? Number(topupMatch[2]) / 100 : null, data);
     return;
   }
@@ -3448,7 +3570,7 @@ async function handleCallback(callback) {
   if (data === 'topup:custom') { answerCallbackQuery(callback.id).catch(() => {}); await askTopupAmount(from, chatId, messageId); return; }
   const shopPay = data.match(/^shop:pay:(\d+):(.+)$/);
   if (shopPay) { answerCallbackQuery(callback.id).catch(() => {}); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
-  if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
+  if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await dropTopupAmountWait(from.id); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
   if (data === 'rv:start' || data === 'rv:filters') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId, messageId); return; }
   if (data === 'rv:relogin') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await showReviewFilters(from, chatId, messageId); return; }
   if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); localGoodsSnapshots.delete(Number(from.id)); await clearSession(from.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }

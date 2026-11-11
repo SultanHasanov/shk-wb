@@ -33,7 +33,7 @@ describe('оплата из бота без Mini App', () => {
     const handler = vi.fn(async (req: any, res: any) => {
       expect(req.body.walletThen).toBeUndefined();
       expect(req.body.walletMessage).toBeUndefined();
-      res.status(400).json({ error: 'Сумма пополнения — от 20 до 50 000 ₽' });
+      res.status(400).json({ error: 'Сумма пополнения — от 25 до 50 000 ₽' });
     });
     const loadUser = vi.fn(async () => ({ id: 'u-2', email: null }));
     await expect(createTopupPayment({ userId: 'u-2', amount: 5 }, { handler, loadUser })).rejects.toThrow('Сумма пополнения');

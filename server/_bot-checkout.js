@@ -73,4 +73,19 @@ async function createIndividualPayment({ userId, orderId }, deps = {}) {
   return createPayment(userId, { productKind: 'individual_stickers', individualOrderId: orderId }, deps);
 }
 
-module.exports = { createIndividualPayment, createTopupPayment };
+/**
+ * «🔄 Проверить оплату» в боте: тот же запрос статуса, что у страницы результата оплаты (action=status) — он спрашивает
+ * ЮKassa и сам зачисляет оплаченное. Владельца заказа проверяет бот до вызова. → { status } заказа
+ * (succeeded | pending | canceled | …); отказ обработчика — Error с code и status.
+ */
+async function checkTopupPayment({ token }, { handler = require('../api/payments') } = {}) {
+  const req = { method: 'GET', query: { action: 'status', token }, headers: { host: 'shk-wb.ru' } };
+  const res = responseStub();
+  await handler(req, res);
+  if (res.statusCode >= 400 || !res.body?.status) {
+    throw checkoutError(res.body?.error || `Не удалось проверить оплату (${res.statusCode})`, { code: res.body?.code || null, status: res.statusCode });
+  }
+  return { status: String(res.body.status) };
+}
+
+module.exports = { checkTopupPayment, createIndividualPayment, createTopupPayment };

@@ -9,11 +9,12 @@ const {
   CUSTOM_GENERATION_PACKAGES,
   hasYookassa,
   LICENSE_PRICES,
+  notifyTopupCanceled,
   PACKAGE_PRICES,
   pricing,
   yookassa,
 } = require('../server/_payments');
-const { topupBonus, validTopup } = require('../server/_wallet');
+const { MAX_TOPUP, MIN_TOPUP, topupBonus, validTopup } = require('../server/_wallet');
 const { ADDONS, addonSnapshot, isSalePlan, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
 const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubUserDiscount } = require('../server/_club');
 const { isAccessCode } = require('../server/_access-code');
@@ -233,15 +234,15 @@ module.exports = async function handler(req, res) {
       }
       // Пополнение баланса (тратится в Telegram-боте): баланс живёт на аккаунте, без входа некуда зачислить.
       const walletAmount = Number(req.body?.walletAmount || 0);
-      // «Пополнить на X ₽ и купить» из бота: что купить сразу после зачисления (afterWalletTopup)
-      // и какой экран бота превратить в «Готово». Принимаем только известный формат.
+      // Пополнение из бота: что купить сразу после зачисления (afterWalletTopup, только известный формат)
+      // и какой экран бота править потом — «Готово», «Оплачено» или «Оплата не прошла». Экран храним всегда.
       const walletThen = String(req.body?.walletThen || '');
       const walletThenValid = /^(gen|rv:(all|[1-5]):\d{1,4}:\d(?::[0-9a-f]{8})?|qr:\d{1,12}|cqa:[0-9a-f-]{36}|shop:[a-z0-9:]{1,60})$/.test(walletThen);
       const walletMessage = Number(req.body?.walletMessage || 0);
       if (productKind === 'wallet_topup') {
         if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы пополнить баланс' });
         if (!validTopup(walletAmount))
-          return res.status(400).json({ error: 'Сумма пополнения — от 20 до 50 000 ₽, не более двух знаков после запятой' });
+          return res.status(400).json({ error: `Сумма пополнения — от ${MIN_TOPUP} до ${MAX_TOPUP.toLocaleString('ru-RU')} ₽, не более двух знаков после запятой` });
       }
       let individualOrder = null;
       if (productKind === 'individual_stickers') {
@@ -343,7 +344,7 @@ module.exports = async function handler(req, res) {
                 amount: walletAmount,
                 bonus: topupBonus(walletAmount),
                 ...(walletThenValid ? { then: walletThen } : {}),
-                ...(walletThenValid && Number.isSafeInteger(walletMessage) && walletMessage > 0 ? { message: walletMessage } : {}),
+                ...(Number.isSafeInteger(walletMessage) && walletMessage > 0 ? { message: walletMessage } : {}),
               },
               total: walletAmount,
             }
@@ -648,6 +649,10 @@ module.exports = async function handler(req, res) {
             updated_at: new Date().toISOString(),
           }),
         });
+        if (payment.status === 'canceled' && order.status !== 'canceled')
+          await notifyTopupCanceled(order, payment).catch(error => console.warn('Top-up cancel notice failed', error.message));
+        // Ответ — уже с новым статусом (бот по «Проверить оплату» сразу узнаёт об отмене, а не со следующего запроса).
+        if (payment.status !== 'succeeded') order = { ...order, provider_status: payment.status, status: payment.status };
         order = await completeOrder(order, payment);
       }
       return res.json(publicOrder(order));
@@ -788,6 +793,11 @@ module.exports = async function handler(req, res) {
           updated_at: new Date().toISOString(),
         }),
       });
+      // Пополнение из бота отменено (отказ банка, брошенная оплата) — экран оплаты в боте: «деньги не списаны».
+      // Только при первом переходе в canceled: повтор уведомления экран не трогает. Нужно включённое
+      // уведомление payment.canceled в настройках магазина ЮKassa.
+      if (payment.status === 'canceled' && order.status !== 'canceled')
+        await notifyTopupCanceled(order, payment).catch(error => console.warn('Top-up cancel notice failed', error.message));
       await completeOrder(order, payment);
       return res.status(200).end();
     }
