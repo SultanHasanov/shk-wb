@@ -5,7 +5,7 @@ const { supabaseFetch } = require('./_supabase');
 const { answerCallbackQuery, deleteMessage, downloadFile, editMessageText, sendDocument, sendMediaGroup, sendMessage, sendPhoto, telegramRequest } = require('./_telegram-api');
 const shkVision = require('./_shk-vision');
 const { customStickerLinks, generateStickers, getAccessStatus, selectAccessCode } = require('./_sticker-generation');
-const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, finalizeGeneration, generationPrices, refundGeneration, reserveGeneration } = require('./_generation-billing');
+const { BATCH_QUANTITY, GENERATION_DISCOUNT_PRICES, GENERATION_PRICES, ensureMonthlyStickers, finalizeGeneration, generationPrices, refundGeneration, reserveGeneration } = require('./_generation-billing');
 const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENSE_PRICES, REVIEW_PRICE } = require('./_payments');
 const { buildClientQr } = require('./_wb-code');
 const approvals = require('./_code-approvals');
@@ -1073,17 +1073,23 @@ function cheapestPackageUnit() {
 }
 
 /**
- * Цены мастера для этого человека (копейки) и остаток его пакета стикеров по номеру. wizardView синхронная,
- * а скидка и пакет — запросы, поэтому цены кладутся в черновик, когда мастер доходит до выбора «Пачка / По номеру».
- * Пакет считается как в reserve_sticker_generation: коды с режимом custom или без режима. Сбой — обычные цены.
+ * Цены мастера для этого человека (копейки) и что покроет его пакет. wizardView синхронная, а скидка и пакет —
+ * запросы, поэтому цены кладутся в черновик, когда мастер доходит до выбора «Пачка / По номеру».
+ * Пакет считается как в reserve_sticker_generation: «Один по номеру» берёт коды с режимом custom или без режима,
+ * «Пачка 50» — коды batch или без режима (месячные стикеры тарифа «Про»), где осталось не меньше 50.
+ * Месячный пакет «Про» создаём заранее — иначе в начале месяца здесь была бы цена, а спишется из пакета.
+ * Сбой — обычные цены.
  */
 async function wizardPrices(userId) {
+  await ensureMonthlyStickers(userId);
   const [prices, codes] = await Promise.all([
     generationPrices(userId).catch(() => ({ batch: GENERATION_PRICES.batch, custom: GENERATION_PRICES.custom, discountAvailable: false })),
-    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&or=(generation_mode.eq.custom,generation_mode.is.null)&select=generation_limit,generation_used`).catch(() => []),
+    supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=generation_limit,generation_used,generation_mode`).catch(() => []),
   ]);
-  const packageLeft = (Array.isArray(codes) ? codes : []).reduce((sum, row) => sum + remainingOf(row), 0);
-  return { batch: prices.batch, custom: prices.custom, discount: Boolean(prices.discountAvailable), packageLeft };
+  const rows = Array.isArray(codes) ? codes : [];
+  const packageLeft = rows.filter(row => row.generation_mode !== 'batch').reduce((sum, row) => sum + remainingOf(row), 0);
+  const batchFromPackage = rows.some(row => row.generation_mode !== 'custom' && remainingOf(row) >= BATCH_QUANTITY);
+  return { batch: prices.batch, custom: prices.custom, discount: Boolean(prices.discountAvailable), packageLeft, batchFromPackage };
 }
 
 /** Выбранные параметры над вопросом шага — теми же словами, что на кнопках. */
@@ -1115,18 +1121,18 @@ function wizardView(state, draft) {
   if (state === 'choose_mode') {
     const prices = draft.prices || { batch: GENERATION_PRICES.batch, custom: GENERATION_PRICES.custom, discount: false, packageLeft: 0 };
     const batch = wallet.formatRub(prices.batch / 100), custom = wallet.formatRub(prices.custom / 100);
-    const packageLeft = Number(prices.packageLeft || 0), cheapest = cheapestPackageUnit();
+    const packageLeft = Number(prices.packageLeft || 0), batchFromPackage = Boolean(prices.batchFromPackage), cheapest = cheapestPackageUnit();
     const box = draft.category === 'box';
     const lines = [
       `<b>${box ? 'Какие QR коробок нужны?' : 'Какие стикеры нужны?'}</b>`,
-      `• Пачка 50 — ${BATCH_QUANTITY} ${box ? 'QR с новыми номерами коробок' : 'стикеров с новыми номерами ШК'} одним PDF, ${batch} за всю пачку.`,
+      `• Пачка 50 — ${BATCH_QUANTITY} ${box ? 'QR с новыми номерами коробок' : 'стикеров с новыми номерами ШК'} одним PDF, ${batchFromPackage ? `из вашего пакета (спишется ${BATCH_QUANTITY} шт.)` : `${batch} за всю пачку`}.`,
       `• Один по номеру — ${box ? 'QR с номером коробки' : 'стикер с номером ШК'}, который вы пришлёте, ${packageLeft > 0 ? 'из вашего пакета' : custom}.`,
     ];
-    if (prices.discount) lines.push('Цены — с разовой скидкой 20%.');
-    if (packageLeft > 0) lines.push(`В вашем пакете ${packageLeft} шт. — «Один по номеру» спишется из него, баланс не тронется.`);
+    if (prices.discount && !(batchFromPackage && packageLeft > 0)) lines.push('Цены — с разовой скидкой 20%.');
+    if (packageLeft > 0) lines.push(`В вашем пакете ${packageLeft} шт. — ${batchFromPackage ? 'и «Пачка 50», и «Один по номеру» спишутся' : '«Один по номеру» спишется'} из него, баланс не тронется.`);
     else if (cheapest) lines.push(`Часто делаете по номеру? В пакете дешевле — от ${wallet.formatRub(cheapest)} за штуку.`);
     return { text: `${trail}${error}${lines.join('\n')}`, rows: [
-      [{ text: `Пачка 50 шт. — ${batch}`, callback_data: 'gen:mode:range' }],
+      [{ text: batchFromPackage ? 'Пачка 50 шт. — из пакета' : `Пачка 50 шт. — ${batch}`, callback_data: 'gen:mode:range' }],
       [{ text: packageLeft > 0 ? 'Один по номеру — из пакета' : `Один по номеру — ${custom}`, callback_data: 'gen:mode:custom' }],
       [{ text: cheapest ? `💎 Пакеты по номеру — от ${wallet.formatRub(cheapest)}/шт.` : '💎 Пакеты по номеру', callback_data: 'shop:gen:wizard' }],
       [GEN_BACK],
@@ -1198,10 +1204,15 @@ function parseWizardNumber(text, category) {
   const codes = [...new Set(tokens.filter(token => new RegExp(`^\\d{${length}}$`).test(token)))];
   if (codes.length > 1) return { codes: codes.slice(0, 5) };
   if (codes.length === 1) return { code: codes[0] };
-  const digits = (whole.match(/\d/g) || []).length;
+  // Одна цифровая серия нужной длины среди лишних знаков («47671114039.», «№47671114039», «ШК:47671114039») —
+  // это и есть номер; ничего не списывается до подтверждения, где номер виден.
+  const runs = whole.match(/\d+/g) || [];
+  if (runs.length === 1 && runs[0].length === length) return { code: runs[0] };
+  const digits = runs.join('').length;
   const shown = escapeHtml(raw.trim().slice(0, 24));
   const hint = `Пришлите номер ещё раз, например <code>${noun.example}</code>.`;
   if (!digits) return { error: `В сообщении нет цифр. ${noun.number[0].toUpperCase()}${noun.number.slice(1)} — ${length} цифр. ${hint}` };
+  if (digits === length) return { error: `Не понял номер в «${shown}»: цифры разделены другими знаками. Пришлите только цифры, например <code>${noun.example}</code>.` };
   const box = category === 'box' ? ' (без букв TRBX)' : '';
   return { error: `В «${shown}» ${digits} ${plural(digits, 'цифра', 'цифры', 'цифр')}, а в ${category === 'box' ? 'номере коробки' : 'номере ШК'} их ${length}${box}. ${hint}` };
 }
@@ -1517,8 +1528,9 @@ async function requestConfirmation(from, chatId, draft, messageId) {
   delete draft.packageRemaining;
   const packageMode = draft.mode === 'range' ? 'batch' : 'custom';
   // Код доступа (и его остаток), скидка и баланс не зависят друг от друга — читаем параллельно.
+  // Месячный пакет «Про» — до выбора кода: по номеру с фото или голыми цифрами сюда приходят, минуя выбор режима.
   const [packageInfo, discounts, balanceKopecks] = await Promise.all([
-    selectAccessCode(draft.userId, units, packageMode).then(async packageCode => {
+    ensureMonthlyStickers(draft.userId).then(() => selectAccessCode(draft.userId, units, packageMode)).then(async packageCode => {
       if (!packageCode) return null;
       const status = await getAccessStatus(packageCode);
       return { packageCode, remaining: Math.max(0, Number(status?.remaining || 0) - units) };
@@ -1539,9 +1551,12 @@ async function requestConfirmation(from, chatId, draft, messageId) {
   await renderWizard(from, chatId, 'confirm', draft, messageId);
 }
 
-/** Свой активный код доступа — на него докупаем генерации с баланса, чтобы не плодить коды. */
+/**
+ * Свой активный код доступа — на него докупаем генерации с баланса, чтобы не плодить коды. Месячный код тарифа «Про»
+ * (app_subscription_id) не годится: в конце окна подписки он выключается, и докупленное пропало бы вместе с ним.
+ */
 async function ownTopupCode(userId, mode = 'custom') {
-  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&or=(generation_mode.eq.${mode},generation_mode.is.null)&select=code,generation_mode&order=created_at.desc&limit=1`);
+  const rows = await supabaseFetch(`sticker_access_codes?owner_user_id=eq.${encodeURIComponent(userId)}&active=eq.true&app_subscription_id=is.null&or=(generation_mode.eq.${mode},generation_mode.is.null)&select=code,generation_mode&order=created_at.desc&limit=1`);
   return rows[0]?.code || null;
 }
 
@@ -1707,7 +1722,12 @@ function generationCaption(draft, charge) {
 
 /** Что сказать о деньгах, когда стикер не создан: по источнику оплаты и по тому, прошёл ли возврат. */
 function refundLine(charge, refunded) {
-  if (!refunded) return 'Деньги вернём сами. Если в течение часа они не вернутся — напишите в поддержку, назовите код ниже.';
+  // Сам по себе резерв не возвращается: его вернёт следующее создание стикера, начатое через 5 минут
+  // (reserve_sticker_generation), или поддержка.
+  if (!refunded) {
+    const what = charge?.paymentSource === 'package' ? ['стикер в пакет', 'Он вернётся сам'] : ['деньги', 'Они вернутся сами'];
+    return `Вернуть ${what[0]} сразу не получилось. ${what[1]}, когда вы создадите следующий стикер — но не раньше чем через 5 минут. Или напишите в поддержку и назовите код ниже.`;
+  }
   if (charge?.paymentSource === 'package') return 'Деньги не потеряны: стикер вернулся в ваш пакет.';
   return `Деньги не потеряны: ${wallet.formatRub(Number(charge?.priceKopecks || 0) / 100)} вернулись на баланс.`;
 }
@@ -1738,7 +1758,7 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
   } catch (error) {
     await releaseRequest();
     // Предыдущий стикер ещё создаётся (резерв держится до 5 минут) или резерв не прошёл — деньги не списаны.
-    const busy = { GENERATION_BUSY: 'Предыдущий стикер ещё создаётся. Подождите минуту и нажмите «Создать» ещё раз — деньги сейчас не списаны.', BILLING_ERROR: 'Не получилось провести оплату — деньги не списаны. Попробуйте ещё раз через минуту.' }[error?.code];
+    const busy = { GENERATION_BUSY: 'Предыдущий стикер ещё создаётся. Подождите несколько минут и нажмите «Создать» ещё раз — деньги сейчас не списаны.', BILLING_ERROR: 'Не получилось провести оплату — деньги не списаны. Попробуйте ещё раз через минуту.' }[error?.code];
     if (!busy) throw error;
     delete draft.billingRequestKey;
     draft.error = busy;
@@ -1758,16 +1778,24 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
   await saveSession(from, chatId, 'generating', draft);
   await showScreen(chatId, screenId, `${lead}${wizardTrail(draft)}⏳ Создаю ${draft.mode === 'range' ? 'стикеры' : kindNoun(draft.category).one} и PDF…`);
   let result;
+  let failure = null, refunded = true;
   try {
     const requesterHash = telegramRequesterHash(from.id);
     result = await generateStickers({ ...draft, quantity: draft.mode === 'range' ? BATCH_QUANTITY : 1, requesterHash, clientEntryId: `telegram:${requestId}`, channel: 'telegram' });
     result = { ...result, priceKopecks: bought.charge.priceKopecks, discountApplied: bought.charge.discountApplied, balanceKopecks: bought.charge.balanceKopecks };
     result.botCaption = generationCaption(draft, bought.charge);
     await finalizeGeneration(draft.chargeId, result);
-    await completeGenerationRequest(requestId, result);
-    await clearSession(from.id);
   } catch (error) {
-    const refunded = draft.chargeId ? await refundGeneration(draft.chargeId).then(() => true, () => false) : true;
+    // Возврат считается состоявшимся только по ответу ok. ALREADY_FINISHED — списание уже окончательное:
+    // finalize прошёл, а его ответ потерялся по дороге. Стикер тогда есть и оплачен — выдаём, а не «возвращаем».
+    const refund = draft.chargeId ? await refundGeneration(draft.chargeId).catch(() => null) : { ok: true };
+    if (!(result && refund?.code === 'ALREADY_FINISHED')) {
+      failure = error;
+      refunded = refund?.ok === true;
+    }
+  }
+  if (failure) {
+    const error = failure;
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     const incident = crypto.randomBytes(3).toString('hex');
     console.error(`Telegram sticker generation failed [${incident}]`, error.code || '', error.message);
@@ -1780,9 +1808,12 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
     const reason = error?.code === 'POOL_EMPTY'
       ? `Сейчас закончились свободные номера для пачки — ${draft.category === 'box' ? 'QR коробок' : 'стикеры'} не созданы.`
       : `Не получилось создать ${draft.mode === 'range' ? 'стикеры' : kindNoun(draft.category).one} — ошибка на нашей стороне.`;
-    const next = error?.code === 'POOL_EMPTY'
-      ? 'Попробуйте позже или сделайте один по своему номеру.'
-      : `Попробуйте ещё раз. Если повторится — напишите в поддержку, код ошибки: <code>${incident}</code>`;
+    // Возврат не прошёл — резерв держится, и «Повторить» раньше чем через 5 минут ответит «предыдущий ещё создаётся».
+    const next = !refunded
+      ? `Код ошибки: <code>${incident}</code>`
+      : error?.code === 'POOL_EMPTY'
+        ? 'Попробуйте позже или сделайте один по своему номеру.'
+        : `Попробуйте ещё раз. Если повторится — напишите в поддержку, код ошибки: <code>${incident}</code>`;
     await showScreen(chatId, screenId, [`${lead}${wizardTrail(draft)}${reason}`, refundLine(bought.charge, refunded), next].join('\n'), { reply_markup: choiceKeyboard([
       [{ text: '🔄 Повторить', callback_data: 'gen:recheck' }],
       [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
@@ -1790,6 +1821,12 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
     ]) }).catch(() => {});
     return;
   }
+  // Деньги списаны окончательно, стикер есть — сбой записи о выдаче или сессии не должен превращаться в «ошибку
+  // и возврат»: такой возврат не прошёл бы (ALREADY_FINISHED), а «Повторить» списал бы второй раз.
+  await completeGenerationRequest(requestId, result)
+    .catch(() => completeGenerationRequest(requestId, result))
+    .catch(error => console.warn('Telegram sticker request not marked completed', requestId, error.message));
+  await clearSession(from.id).catch(error => console.warn('Telegram sticker session not cleared', error.message));
   // Файл должен прийти сразу после списания. Для товарных стикеров отправляем
   // прежний вид по умолчанию, а новый остаётся доступен кнопкой под PDF.
   try {
@@ -1935,8 +1972,15 @@ async function handlePhoto(from, chatId, message, image, session) {
  */
 async function offerForNumber(from, chatId, digits) {
   const free = clientCodeFreeFor(from.id);
-  const { price } = free ? { price: 0 } : await clientCodePrice(from.id);
-  const sticker = wallet.formatRub(GENERATION_PRICES.custom / 100), qr = free ? 'бесплатно' : wallet.formatRub(price);
+  // Цена стикера — как на выборе режима мастера: со скидкой 20% или «из пакета», если пакет есть.
+  const [{ price }, stickerPrices] = await Promise.all([
+    free ? { price: 0 } : clientCodePrice(from.id),
+    digits.length === 10 || digits.length === 11
+      ? ensureUser(from).then(wizardPrices).catch(() => null)
+      : null,
+  ]);
+  const sticker = Number(stickerPrices?.packageLeft || 0) > 0 ? 'из пакета' : wallet.formatRub(Number(stickerPrices?.custom ?? GENERATION_PRICES.custom) / 100);
+  const qr = free ? 'бесплатно' : wallet.formatRub(price);
   const rows = [], lines = [`Вы прислали номер <code>${digits}</code>. Что с ним сделать?`];
   if (digits.length === 11) {
     rows.push([{ text: `🏷 Стикер товара — ${sticker}`, callback_data: `gen:num:${digits}` }]);
@@ -2840,7 +2884,7 @@ async function showShop(from, chatId, messageId, parts) {
       '<b>🏷 Пакеты стикеров по номеру</b>',
       table,
       `Без пакета один стикер по номеру стоит ${wallet.formatRub(GENERATION_PRICES.custom / 100)}.`,
-      'Пакет тратится сам: каждый следующий стикер или QR коробки по номеру спишется из него, а не с баланса. На «Пачку 50» пакет не действует.',
+      'Пакет тратится сам: каждый следующий стикер или QR коробки по номеру спишется из него, а не с баланса. На «Пачку 50» купленный пакет не действует (месячные стикеры тарифа «Про» — действуют).',
       ...(packageLeft > 0 ? [`Сейчас в вашем пакете: ${packageLeft} шт. — новый пакет добавится к ним.`] : []),
       balanceLine,
     ];

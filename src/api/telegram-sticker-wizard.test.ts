@@ -37,6 +37,9 @@ type World = {
   codes: Array<Record<string, unknown>>;
   reserve: Record<string, unknown>;
   failAuthorize: boolean;
+  refund: Record<string, unknown> | 'fail';
+  failFinalize: boolean;
+  failComplete: boolean;
   claims: string[];
   results: Record<string, unknown>;
 };
@@ -61,6 +64,7 @@ beforeEach(() => {
   process.env.PUBLIC_APP_URL = 'https://shk-wb.ru';
   world = {
     session: null, balance: 12000, codes: [], failAuthorize: false, claims: [], results: {},
+    refund: { ok: true, duplicate: false }, failFinalize: false, failComplete: false,
     reserve: { ok: true, chargeId: 'charge-1', paymentSource: 'wallet', priceKopecks: 750, balanceKopecks: 11250, discountApplied: false },
   };
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -85,6 +89,9 @@ beforeEach(() => {
     if (path.startsWith('wallet_accounts')) return json([{ balance_kopecks: world.balance }]);
     if (path.startsWith('sticker_access_codes')) return json(world.codes);
     if (path === 'rpc/reserve_sticker_generation') return json(world.reserve);
+    if (path === 'rpc/refund_sticker_generation') return world.refund === 'fail' ? json({ message: 'network' }, 500) : json(world.refund);
+    if (path === 'rpc/finalize_sticker_generation') return world.failFinalize ? json({ message: 'relay timeout' }, 500) : json({ ok: true, duplicate: false });
+    if (path.startsWith('telegram_generation_requests?request_id=eq.') && method === 'PATCH' && world.failComplete) return json({ message: 'relay timeout' }, 500);
     if (path === 'rpc/authorize_paid_custom_sticker') return world.failAuthorize ? json({ message: 'boom: secret detail' }, 500) : json(null);
     if (path === 'rpc/allocate_paid_return_stickers') return json(Array.from({ length: 50 }, (_, index) => ({ batch_id: 'bbbbbbbb-1111-4222-8333-444455556666', code: String(47600000000 + index) })));
     if (path.startsWith('telegram_generation_requests?on_conflict')) {
@@ -135,6 +142,38 @@ describe('шаги мастера: цены, ввод номера, подтве
     expect(bot.parseWizardNumber('4767111403912', 'product').error).toContain('13 цифр, а в номере ШК их 11');
     expect(bot.parseWizardNumber('TRBX12345', 'box').error).toContain('5 цифр, а в номере коробки их 10 (без букв TRBX)');
     expect(bot.parseWizardNumber('привет', 'product').error).toContain('нет цифр');
+    // Нужное число цифр одной серией и лишний знак рядом — это номер, а не «11 цифр, а нужно 11».
+    expect(bot.parseWizardNumber('47671114039.', 'product')).toEqual({ code: '47671114039' });
+    expect(bot.parseWizardNumber('№47671114039', 'product')).toEqual({ code: '47671114039' });
+    expect(bot.parseWizardNumber('ШК:47671114039', 'product')).toEqual({ code: '47671114039' });
+    const split = bot.parseWizardNumber('4767111/4039', 'product').error;
+    expect(split).toContain('цифры разделены другими знаками');
+    expect(split).not.toContain('их 11');
+  });
+
+  it('выбор режима: месячные стикеры «Про» покрывают и «Пачку 50» — без цены на ней', () => {
+    const view = bot.wizardView('choose_mode', { category: 'product', prices: { batch: 2000, custom: 750, discount: false, packageLeft: 50, batchFromPackage: true } });
+    const labels = view.rows.flat().map(button => button.text);
+    expect(labels).toContain('Пачка 50 шт. — из пакета');
+    expect(labels).toContain('Один по номеру — из пакета');
+    expect(view.text).toContain('и «Пачка 50», и «Один по номеру» спишутся из него');
+    expect(view.text).not.toContain('20 ₽');
+  });
+
+  it('цены мастера: месячный пакет «Про» создаётся до подсчёта, код без режима считается и для пачки', async () => {
+    world.session = { telegram_user_id: TG, chat_id: TG, state: 'choose_kind', updated_at: new Date().toISOString(), draft: { userId: USER, nonce: '1', msgId: 50 } };
+    world.codes = [{ generation_limit: 50, generation_used: 0, generation_mode: null }];
+    await bot.processUpdate(press('gen:kind:product'));
+    const quota = db.findIndex(call => call.path === 'rpc/app_sticker_quota_code');
+    const codes = db.findIndex(call => call.path.startsWith('sticker_access_codes'));
+    expect(quota).toBeGreaterThanOrEqual(0);
+    expect(quota).toBeLessThan(codes);
+    expect(buttons().map(button => button.text)).toContain('Пачка 50 шт. — из пакета');
+    // Купленный пакет по номеру (custom) на пачку не действует.
+    world.codes = [{ generation_limit: 50, generation_used: 0, generation_mode: 'custom' }];
+    await bot.processUpdate(press('gen:back'));
+    await bot.processUpdate(press('gen:kind:product'));
+    expect(buttons().map(button => button.text)).toContain('Пачка 50 шт. — 20 ₽');
   });
 
   it('подтверждение: «Проверьте и нажмите», что получите, цена на кнопке; нехватка — минимум и «Отмена»', () => {
@@ -273,6 +312,48 @@ describe('ошибки создания', () => {
     expect(editsOf(50).at(-1)!.body.text).toContain('стикер вернулся в ваш пакет');
   });
 
+  it('возврат не прошёл — не пишем «деньги вернулись», честно про 5 минут и код ошибки', async () => {
+    world.session = confirmSession();
+    world.failAuthorize = true;
+    world.refund = 'fail';
+    await bot.processUpdate(press('gen:confirm'));
+    const text = editsOf(50).at(-1)!.body.text;
+    expect(text).not.toContain('вернулись на баланс');
+    expect(text).toContain('Вернуть деньги сразу не получилось');
+    expect(text).toContain('не раньше чем через 5 минут');
+    expect(text).toMatch(/Код ошибки: <code>[0-9a-f]{6}<\/code>/);
+  });
+
+  it('возврат ответил «не ok» (ALREADY_FINISHED без готового стикера) — тоже не «вернулись»', async () => {
+    world.session = confirmSession();
+    world.failAuthorize = true;
+    world.refund = { ok: false, code: 'NOT_FOUND' };
+    await bot.processUpdate(press('gen:confirm'));
+    expect(editsOf(50).at(-1)!.body.text).toContain('Вернуть деньги сразу не получилось');
+  });
+
+  it('стикер создан и оплачен, а запись о выдаче не сохранилась — файл выдаётся, без возврата и «Повторить»', async () => {
+    world.session = confirmSession();
+    world.failComplete = true;
+    await bot.processUpdate(press('gen:confirm'));
+    expect(documents()).toHaveLength(1);
+    expect(rpcCalls('refund_sticker_generation')).toEqual([]);
+    expect(editsOf(50).at(-1)!.body.text).toContain('✅ Готово. Файл — ниже.');
+    expect(sent.flatMap(call => (call.body.reply_markup?.inline_keyboard || []).flat()).map((button: any) => button.callback_data)).not.toContain('gen:recheck');
+    expect(db.some(call => call.method === 'PATCH' && call.body?.status === 'failed')).toBe(false);
+  });
+
+  it('finalize прошёл, но ответ потерялся (возврат: ALREADY_FINISHED) — стикер выдаётся, деньги не «возвращаются»', async () => {
+    world.session = confirmSession();
+    world.failFinalize = true;
+    world.refund = { ok: false, code: 'ALREADY_FINISHED' };
+    await bot.processUpdate(press('gen:confirm'));
+    expect(documents()).toHaveLength(1);
+    expect(editsOf(50).at(-1)!.body.text).toContain('✅ Готово. Файл — ниже.');
+    expect(db.some(call => call.method === 'PATCH' && call.body?.status === 'completed')).toBe(true);
+    expect(db.some(call => call.method === 'PATCH' && call.body?.status === 'failed')).toBe(false);
+  });
+
   it('предыдущий стикер ещё создаётся — понятный текст на подтверждении, деньги не списаны, запрос освобождён', async () => {
     world.session = confirmSession();
     world.reserve = { ok: false, code: 'BUSY' };
@@ -356,6 +437,20 @@ describe('голые цифры и код доступа', () => {
   it('11 цифр — стикер товара и QR клиента', async () => {
     await bot.processUpdate(message('47671114039'));
     expect(buttons().map(button => button.callback_data)).toEqual(['gen:num:47671114039', 'code:ask:47671114039', 'menu:home']);
+    expect(buttons()[0].text).toBe('🏷 Стикер товара — 7,50 ₽');
+  });
+
+  it('покупка пакета не докладывается на месячный код «Про» — он выключится в конце окна', async () => {
+    await bot.processUpdate(press('shop:gen:10'));
+    const lookup = db.find(call => call.path.startsWith('sticker_access_codes') && call.path.includes('order=created_at.desc'));
+    expect(lookup?.path).toContain('app_subscription_id=is.null');
+  });
+
+  it('голые цифры: цена стикера — как в мастере (пакет — «из пакета»)', async () => {
+    world.codes = [{ generation_limit: 30, generation_used: 0, generation_mode: 'custom' }];
+    await bot.processUpdate(message('47671114039'));
+    expect(buttons()[0].text).toBe('🏷 Стикер товара — из пакета');
+    expect(lastScreen().body.text).toContain('если это ШК товара (11 цифр), из пакета');
   });
 
   it('отмена ввода кода доступа — профиль, а не «создание стикера отменено»', async () => {

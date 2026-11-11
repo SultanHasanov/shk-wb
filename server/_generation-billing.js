@@ -21,14 +21,23 @@ function parseResult(value) {
   return typeof value === 'string' ? JSON.parse(value) : value;
 }
 
+/**
+ * Месячный пакет стикеров тарифа «Про» (код без режима — действует и на «Пачку 50»): создаётся при первом обращении
+ * в окне подписки, повторный вызов ничего не меняет. Зовётся перед резервом и перед показом цен — иначе в начале
+ * месяца человек видел бы цену там, где спишется из пакета. Сбой не мешает оплате с баланса.
+ */
+async function ensureMonthlyStickers(userId) {
+  if (!userId) return null;
+  return supabaseFetch('rpc/app_sticker_quota_code', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
+}
+
 async function reserveGeneration({ userId, requestKey, mode, category }) {
   const normalizedMode = normalizeMode(mode);
   if (!userId || !normalizedMode || !['product', 'box'].includes(category) || !String(requestKey || '').trim()) {
     throw billingError('VALIDATION_ERROR', 'Некорректные параметры оплаты генерации');
   }
-  // Месячный пакет стикеров тарифа Про: создаётся при первом обращении в окне подписки,
-  // и резерв ниже спишет его раньше баланса. Сбой не должен мешать оплате с баланса.
-  await supabaseFetch('rpc/app_sticker_quota_code', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
+  // Резерв ниже спишет месячный пакет тарифа «Про» раньше баланса.
+  await ensureMonthlyStickers(userId);
   const result = parseResult(await supabaseFetch('rpc/reserve_sticker_generation', {
     method: 'POST',
     body: JSON.stringify({
@@ -83,6 +92,7 @@ async function generationPrices(userId) {
 
 module.exports = {
   BATCH_QUANTITY,
+  ensureMonthlyStickers,
   generationPrices,
   GENERATION_DISCOUNT_PRICES,
   GENERATION_PRICES,
