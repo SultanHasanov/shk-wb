@@ -412,6 +412,7 @@ function clubLine(until) {
 const CLUB_REF_DAYS = Math.round(CLUB_REF_MS / (24 * 60 * 60 * 1000));
 const CLUB_EXPIRED_LINE = `Скидка клуба закончилась. Чтобы включить её снова на ${CLUB_REF_DAYS} дней, откройте бота по кнопке из группы клуба.`;
 const CLUB_INACTIVE_LINE = `Скидка ${CLUB_DISCOUNT_PERCENT}% для участников клуба действует при активной подписке на клуб.`;
+const CLUB_LAPSED_LINE = `Скидка клуба закончилась. Чтобы включить её снова на ${CLUB_REF_DAYS} дней, продлите подписку на клуб и откройте бота по кнопке из группы клуба.`;
 const CLUB_ERROR_LINE = 'Не получилось проверить подписку на клуб — скидку покажу, когда проверка пройдёт.';
 
 /** Скидка клуба этого человека (server/_club.js: clubDiscountInfo); сбой — reason 'error'. */
@@ -421,13 +422,14 @@ function clubInfo(telegramId) {
 
 /**
  * Что сказать о скидке клуба: действует — на что и до какого числа (menu — длинная строка для приветствия);
- * закончилась или подписка неактивна — как вернуть. Сбой проверки — не «подписка неактивна»: говорим о нём
+ * закончилась или подписка неактивна — как вернуть (lapsed — оба условия сразу). Сбой проверки — не «подписка неактивна»: говорим о нём
  * только сразу после перехода из группы (fromClub), иначе молчим. Не из клуба (no_ref, off) — ничего.
  */
 function clubStatusLines(club, { fromClub = false, menu = false } = {}) {
   if (club?.reason === 'active') return [menu ? clubMenuLine(club.until) : clubLine(club.until)];
   if (club?.reason === 'expired') return [CLUB_EXPIRED_LINE];
   if (club?.reason === 'inactive') return [CLUB_INACTIVE_LINE];
+  if (club?.reason === 'lapsed') return [CLUB_LAPSED_LINE];
   if (club?.reason === 'error' && fromClub) return [CLUB_ERROR_LINE];
   return [];
 }
@@ -4029,7 +4031,15 @@ async function bindTelegramReferral(telegramId, userId) {
   return true;
 }
 
-const REFERRAL_NOTHING_TEXT = '⚠️ Переводить пока нечего — вознаграждение ещё не начислено.';
+/**
+ * «Переводить нечего»: если вознаграждение уже начислялось — значит, его уже перевели или вывели
+ * (в том числе вторым нажатием «✅ Перевести на баланс»), а не «ещё не начислено».
+ */
+function referralNothingText(earnedKopecks) {
+  return Number(earnedKopecks || 0) > 0
+    ? '⚠️ Переводить нечего — всё доступное уже переведено.'
+    : '⚠️ Переводить пока нечего — вознаграждение ещё не начислено.';
+}
 
 /** Ограничение «Выводы» (или всё): перевод и вывод вознаграждения закрыты — строка для экрана приглашений. */
 function referralRestrictedText(restriction) {
@@ -4038,9 +4048,10 @@ function referralRestrictedText(restriction) {
 
 /**
  * Экран «👥 Пригласить коллегу»: механика одной фразой, ссылка, три числа и как забрать деньги.
- * notice — строка сверху (итог перевода, ограничение); support — добавить кнопку поддержки (при ограничении).
+ * notice — строка сверху (итог перевода, ограничение); restricted — ограничение «Выводы»: вместо перевода и
+ * вывода только кнопка поддержки; nothing — сверху «переводить нечего» (текст по начисленному).
  */
-async function showReferrals(from, chatId, messageId, notice, { support = false } = {}) {
+async function showReferrals(from, chatId, messageId, notice, { restricted = false, nothing = false } = {}) {
   const userId = await ensureUser(from);
   const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
   const [invited, links] = await Promise.all([
@@ -4050,6 +4061,8 @@ async function showReferrals(from, chatId, messageId, notice, { support = false 
   const available = Number(account.available_kopecks || 0) / 100;
   const earned = Number(account.earned_kopecks || 0) / 100;
   const minWithdraw = wallet.formatRub(REFERRAL_WITHDRAW_MIN_RUB);
+  // nothing — «переводить нечего»: текст зависит от того, начислялось ли вознаграждение (см. referralNothingText).
+  if (nothing) notice = referralNothingText(account.earned_kopecks);
   const text = [
     ...(notice ? [notice, ''] : []),
     '<b>👥 Пригласить коллегу</b>',
@@ -4067,16 +4080,18 @@ async function showReferrals(from, chatId, messageId, notice, { support = false 
   ].join('\n');
   const share = links.telegram || links.site;
   const shareText = 'Стикеры и QR для возвратов WB, код клиента и отзывы ПВЗ — бот shk-wb.ru';
-  const canWithdraw = available >= REFERRAL_WITHDRAW_MIN_RUB;
+  // При ограничении «Выводы» кнопок перевода и вывода нет: они вели бы по кругу на этот же экран.
+  const canTransfer = available > 0 && !restricted;
+  const canWithdraw = available >= REFERRAL_WITHDRAW_MIN_RUB && !restricted;
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     // copy_text (Bot API 7.11) — кнопка кладёт ссылку в буфер обмена.
     [{ text: '📋 Скопировать ссылку', copy_text: { text: share } }],
     [{ text: '📤 Поделиться ссылкой', url: `https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent(shareText)}` }],
     // Перевод — через подтверждение (ref:towallet → ref:towallet:yes): обратно на карту его уже не вывести.
-    ...(available > 0 ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
+    ...(canTransfer ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
     // Вывод — через поддержку (сайт для этого не нужен); кнопка только когда сумма уже доступна к выводу.
     ...(canWithdraw ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_URL }]] : []),
-    ...(support && !canWithdraw ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]] : []),
+    ...(restricted ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]] : []),
     [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
   ]) });
 }
@@ -4085,7 +4100,7 @@ async function showReferrals(from, chatId, messageId, notice, { support = false 
 async function referralRestricted(from, chatId, messageId, userId) {
   const restriction = await controls.restrictionFor(userId);
   if (!controls.covers(restriction, 'withdrawals')) return null;
-  await showReferrals(from, chatId, messageId, referralRestrictedText(restriction), { support: true });
+  await showReferrals(from, chatId, messageId, referralRestrictedText(restriction), { restricted: true });
   return true;
 }
 
@@ -4096,7 +4111,7 @@ async function confirmReferralToWallet(from, chatId, messageId) {
   if (await referralRestricted(from, chatId, messageId, userId)) return;
   const account = await supabaseFetch('rpc/ensure_referral_account', { method: 'POST', body: JSON.stringify({ p_user_id: userId }) });
   const available = Number(account?.available_kopecks || 0) / 100;
-  if (!(available > 0)) return showReferrals(from, chatId, messageId, REFERRAL_NOTHING_TEXT);
+  if (!(available > 0)) return showReferrals(from, chatId, messageId, null, { nothing: true });
   return showScreen(chatId, messageId, [
     `<b>Перевести ${wallet.formatRub(available)} на баланс бота?</b>`,
     '',
@@ -4113,10 +4128,9 @@ async function referralToWallet(from, chatId, messageId) {
   if (await referralRestricted(from, chatId, messageId, userId)) return;
   // p_kopecks: null — вся доступная сумма на момент нажатия (rpc переводит атомарно; второе нажатие — «нечего»).
   const result = await supabaseFetch('rpc/referral_to_wallet', { method: 'POST', body: JSON.stringify({ p_user: userId, p_kopecks: null }) });
-  const notice = result?.ok
-    ? `✅ Переведено ${wallet.formatRub(Number(result.moved) / 100)} на баланс. На балансе: ${wallet.formatRub(Number(result.wallet_balance) / 100)}.`
-    : REFERRAL_NOTHING_TEXT;
-  return showReferrals(from, chatId, messageId, notice);
+  if (!result?.ok) return showReferrals(from, chatId, messageId, null, { nothing: true });
+  return showReferrals(from, chatId, messageId,
+    `✅ Переведено ${wallet.formatRub(Number(result.moved) / 100)} на баланс. На балансе: ${wallet.formatRub(Number(result.wallet_balance) / 100)}.`);
 }
 
 /**

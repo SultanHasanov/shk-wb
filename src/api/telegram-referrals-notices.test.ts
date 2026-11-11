@@ -41,6 +41,7 @@ type World = {
   clubStatus: number;
   clubActive: boolean;
   referralAvailable: number | null;
+  transferOk: boolean;
 };
 let world: World;
 let db: Array<{ method: string; path: string; body: any }>;
@@ -60,7 +61,7 @@ beforeEach(() => {
   process.env.WB_CONNECTION_STORE = 'memory';
   world = {
     referral: { referral_code: 'ABC123', available_kopecks: 45000, earned_kopecks: 90000 },
-    moved: 45000, clubRefAt: null, clubStatus: 200, clubActive: false, referralAvailable: 64000,
+    moved: 45000, clubRefAt: null, clubStatus: 200, clubActive: false, referralAvailable: 64000, transferOk: true,
   };
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -81,7 +82,7 @@ beforeEach(() => {
     if (path.startsWith('user_telegram_identities?user_id=eq.')) return json([{ telegram_user_id: TG }]);
     if (path === 'rpc/ensure_referral_account') return json(world.referral);
     if (path.startsWith('referral_attributions')) return json([{ invited_user_id: 'x' }, { invited_user_id: 'y' }]);
-    if (path === 'rpc/referral_to_wallet') return json({ ok: true, moved: world.moved, wallet_balance: 57000 });
+    if (path === 'rpc/referral_to_wallet') return json(world.transferOk ? { ok: true, moved: world.moved, wallet_balance: 57000 } : { ok: false });
     if (path.startsWith('referral_ledger')) return json([{ user_id: USER, amount_kopecks: 5000 }]);
     if (path.startsWith('referral_accounts?user_id')) return json(world.referralAvailable == null ? [] : [{ available_kopecks: world.referralAvailable }]);
     if (path.startsWith('telegram_bot_subscribers?telegram_user_id') && method === 'GET') return json([{ club_ref_at: world.clubRefAt }]);
@@ -148,6 +149,22 @@ describe('перевод вознаграждения на баланс', () => 
     expect(lastText()).toContain('Переводить пока нечего — вознаграждение ещё не начислено.');
   });
 
+  it('уже всё перевели (старая кнопка, второе нажатие) — не «ещё не начислено»', async () => {
+    world.referral = { referral_code: 'ABC123', available_kopecks: 0, earned_kopecks: 90000 };
+    await bot.processUpdate(press('ref:towallet'));
+    expect(transfers()).toHaveLength(0);
+    expect(lastText()).toContain('Переводить нечего — всё доступное уже переведено.');
+    expect(lastText()).not.toContain('ещё не начислено');
+
+    // Второе «✅ Перевести на баланс»: rpc уже нечего переводить (ok:false).
+    world.transferOk = false;
+    sent = [];
+    await bot.processUpdate(press('ref:towallet:yes'));
+    expect(transfers()).toHaveLength(1);
+    expect(lastText()).toContain('Переводить нечего — всё доступное уже переведено.');
+    expect(buttons().some(button => button.callback_data === 'ref:towallet')).toBe(false);
+  });
+
   it('ограничение «Выводы» — что закрыто, кнопка-ссылка поддержки; ни вопроса, ни перевода', async () => {
     controls.__setSnapshotForTests({ unlimited: [], restrictions: [{ id: 'r1', user_id: USER, telegram_user_id: TG, scopes: ['withdrawals'], until: null, public_message: null }] });
     for (const data of ['ref:towallet', 'ref:towallet:yes']) {
@@ -155,6 +172,9 @@ describe('перевод вознаграждения на баланс', () => 
       await bot.processUpdate(press(data));
       expect(lastText()).toContain('⛔ Перевод и вывод вознаграждения сейчас недоступны.');
       expect(buttons().find(button => button.url === SUPPORT_URL)?.text).toBe('✉️ Написать в поддержку');
+      // Ни «Перевести», ни «Вывести на карту» — они вели бы по кругу на этот же экран.
+      expect(buttons().some(button => button.callback_data === 'ref:towallet')).toBe(false);
+      expect(buttons().some(button => String(button.text).includes('Вывести на карту'))).toBe(false);
     }
     expect(transfers()).toHaveLength(0);
   });
@@ -187,7 +207,7 @@ describe('сообщение о вознаграждении (notifyReferralRewa
 });
 
 describe('скидка клуба: дата и причина', () => {
-  it('clubDiscountInfo различает «не настроено», «не из клуба», «действует», «закончилась», «неактивна», «сбой»', async () => {
+  it('clubDiscountInfo различает «не настроено», «не из клуба», «действует», «закончилась», «неактивна», «закончилась и неактивна», «сбой»', async () => {
     expect((await club.clubDiscountInfo(TG)).reason).toBe('off');
     enableClub();
     expect((await club.clubDiscountInfo(TG)).reason).toBe('no_ref');
@@ -202,6 +222,9 @@ describe('скидка клуба: дата и причина', () => {
 
     TG = ++tgSeq; world.clubRefAt = new Date(Date.now() - 5 * DAY).toISOString(); world.clubActive = false;
     expect((await club.clubDiscountInfo(TG)).reason).toBe('inactive');
+
+    TG = ++tgSeq; world.clubRefAt = new Date(Date.now() - 40 * DAY).toISOString(); world.clubActive = false;
+    expect(await club.clubDiscountInfo(TG)).toEqual({ active: false, until: null, reason: 'lapsed' });
 
     TG = ++tgSeq; world.clubStatus = 502;
     expect((await club.clubDiscountInfo(TG)).reason).toBe('error');
@@ -220,6 +243,15 @@ describe('скидка клуба: дата и причина', () => {
     world.clubRefAt = new Date(Date.now() - 40 * DAY).toISOString(); world.clubActive = true;
     await bot.processUpdate(press('menu:code'));
     expect(lastText()).toContain('Скидка клуба закончилась. Чтобы включить её снова на 30 дней, откройте бота по кнопке из группы клуба.');
+    expect(lastText()).toContain('50 ₽');
+  });
+
+  it('«Код клиента»: 30 дней прошли и подписка неактивна — оба шага сразу', async () => {
+    enableClub();
+    world.clubRefAt = new Date(Date.now() - 40 * DAY).toISOString(); world.clubActive = false;
+    await bot.processUpdate(press('menu:code'));
+    expect(lastText()).toContain('продлите подписку на клуб и откройте бота по кнопке из группы клуба.');
+    expect(lastText()).not.toContain('действует при активной подписке');
     expect(lastText()).toContain('50 ₽');
   });
 

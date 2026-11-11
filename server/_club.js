@@ -49,7 +49,8 @@ async function clubActive(telegramId) {
  *   'off'      — проверка не настроена (нет ZARA_CLUB_CHECK_URL / CLUB_CHECK_SECRET);
  *   'no_ref'   — перехода из группы клуба не было;
  *   'expired'  — 30 дней после перехода прошли, подписка на клуб при этом активна (включить снова — кнопкой из группы);
- *   'inactive' — переход был, но подписка на клуб неактивна;
+ *   'inactive' — переход был меньше 30 дней назад, но подписка на клуб неактивна (хватит продлить подписку);
+ *   'lapsed'   — 30 дней после перехода прошли И подписка неактивна (нужно и продлить, и снова открыть бота из группы);
  *   'error'    — проверить не удалось (zara-bot или база не ответили).
  * Ошибка проверки — без скидки (и без кэша, чтобы повторить при следующем действии).
  */
@@ -71,7 +72,7 @@ async function clubDiscountInfo(telegramId, { requireRef = true } = {}) {
     // Подписку спрашиваем и после 30 дней: «скидка закончилась — включите снова» говорим только участникам клуба.
     const subscribed = await clubActive(telegramId);
     const active = subscribed && fresh;
-    return remember({ active, until: active ? until : null, reason: active ? 'active' : subscribed ? 'expired' : 'inactive' });
+    return remember({ active, until: active ? until : null, reason: active ? 'active' : subscribed ? 'expired' : fresh ? 'inactive' : 'lapsed' });
   } catch (error) {
     console.warn('Скидка клуба: проверка не удалась', error?.message || error);
     return { active: false, until: null, reason: 'error' };
