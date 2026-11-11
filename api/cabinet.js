@@ -759,10 +759,14 @@ async function notifyFreePeriodEnd() {
     sent++;
     const tg = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(userId)}&select=telegram_user_id&limit=1`).catch(() => []);
     if (tg[0]?.telegram_user_id) {
-      await sendMessage(tg[0].telegram_user_id, `<b>${title}</b>
-
-${body}`, {
-        reply_markup: { inline_keyboard: [[{ text: 'Выбрать тариф', url: 'https://shk-wb.ru/cabinet/subscription' }]] },
+      // В боте тариф покупается с баланса (экран shop:helper) — ведём туда, а не в кабинет сайта.
+      // Кнопки обрабатывает узел бота: сообщение и бот выкладываются парой.
+      const telegramBody = `С ${day} разделы программы работают по тарифу. Выберите тариф здесь, в боте, — оплаченный срок начнётся после бесплатного периода. Архив клиентов на компьютере сохранится.`;
+      await sendMessage(tg[0].telegram_user_id, `<b>${title}</b>\n\n${telegramBody}`, {
+        reply_markup: { inline_keyboard: [
+          [{ text: '🛒 Выбрать тариф', callback_data: 'shop:helper' }],
+          [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '☰ Меню', callback_data: 'menu:home' }],
+        ] },
       }).catch(() => {});
     }
   }

@@ -319,3 +319,56 @@ describe('logoutAll: завершить все сеансы', () => {
     expect(JSON.parse(String((journal[1] as RequestInit).body))).toMatchObject({ action: 'logoutAll', payload: { via: 'session_on_behalf' }, reason: 'утечка пароля' });
   });
 });
+
+describe('выдачи из админки доходят до бота', () => {
+  beforeEach(() => { process.env.TELEGRAM_BOT_TOKEN = '1:' + 'a'.repeat(30); delete process.env.TELEGRAM_API_BASE; });
+  afterEach(() => { delete process.env.TELEGRAM_BOT_TOKEN; });
+
+  const telegramSends = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls
+    .filter(call => String(call[0]).includes('api.telegram.org'))
+    .map(call => JSON.parse(String((call[1] as RequestInit).body)));
+
+  function backend() {
+    return stubBackend((path, init) => {
+      // Адрес Telegram — не PostgREST и не GoTrue: stubBackend отдаёт его как 'auth:undefined'.
+      if (path === 'auth:undefined') return { ok: true, result: { message_id: 5 } };
+      if (String(path).startsWith('auth:')) return { id: USER, email: `telegram-77@users.invalid` };
+      if (path.startsWith('user_telegram_identities')) return [{ telegram_user_id: 77 }];
+      if (path === 'rpc/create_individual_sticker_order') return 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+      if (path === 'admin_actions' && init?.method === 'POST') return [{ id: 1 }];
+      return [];
+    });
+  }
+
+  it('выставленный заказ: сообщение в бот с суммой к оплате и кнопкой «Открыть заказ», без кабинета', async () => {
+    const fetchMock = backend();
+    const res = mockRes();
+    await handler({
+      method: 'POST', query: { action: 'createIndividualStickerOrder' },
+      body: { userId: USER, title: 'Склад <1>', codes: ['12345678901', '12345678902', '12345678903', '12345678904'], totalAmount: 400, creditUnits: 1 },
+      headers: {},
+    }, res);
+    expect(res.statusCode).toBe(201);
+    const [message] = telegramSends(fetchMock);
+    expect(message.chat_id).toBe(77);
+    expect(message.text).toContain('«Склад &lt;1&gt;» — 4 стикеров, 300 ₽');
+    expect(message.text).not.toMatch(/кабинет/i);
+    expect(message.reply_markup).toEqual({ inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'orders:list' }]] });
+  });
+
+  it('выданная подписка: текст бота и кнопка раздела; без Telegram — только уведомление в кабинете', async () => {
+    let fetchMock = backend();
+    const res = mockRes();
+    await handler({ method: 'POST', query: { action: 'grantAppSubscription' }, body: { userId: USER, plan: 'standard', months: 1 }, headers: {} }, res);
+    expect(res.statusCode).toBe(201);
+    const [message] = telegramSends(fetchMock);
+    expect(message.text).toContain('Вам выдана подписка «Помощник ПВЗ»');
+    expect(message.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['menu:helper', 'menu:home']);
+
+    fetchMock = stubBackend(path => (path === 'auth:undefined' ? { ok: true, result: { message_id: 5 } } : String(path).startsWith('auth:') ? { id: USER, email: 'u@x.ru' } : []));
+    const quiet = mockRes();
+    await handler({ method: 'POST', query: { action: 'grantAppSubscription' }, body: { userId: USER, plan: 'standard', months: 1 }, headers: {} }, quiet);
+    expect(quiet.statusCode).toBe(201);
+    expect(telegramSends(fetchMock)).toEqual([]);
+  });
+});

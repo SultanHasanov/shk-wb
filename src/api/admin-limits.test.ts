@@ -233,6 +233,11 @@ describe('действия лимитов', () => {
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0][0]).toMatchObject({ userId: USER, actionId: 77, dedupeBase: 'wallet:77', source: 'admin' });
     expect(String((deliver.mock.calls[0][0] as any).body)).toMatch(/С баланса списано 500 ₽: «возврат». Сейчас на балансе 820 ₽\./);
+    // В Telegram — свой текст и кнопки бота, без ссылки в кабинет сайта.
+    const telegram = (deliver.mock.calls[0][0] as any).telegram;
+    expect(telegram.subject).toBe('С баланса списано 500 ₽');
+    expect(telegram.body).toBe('Причина: возврат\n💰 На балансе: 820 ₽\nЕсть вопросы — напишите в поддержку.');
+    expect(telegram.keyboard.flat().map((b: any) => b.callback_data)).toEqual(['menu:profile', 'menu:home']);
     const finish = calls.find(c => c.method === 'PATCH' && c.path.startsWith('admin_actions?id=eq.77'))!;
     expect(finish.body).toMatchObject({ before: { balanceKopecks: 132000 }, after: { balanceKopecks: 82000 } });
   });

@@ -129,7 +129,8 @@ async function notifyCompleted(order){
   if(order.product_kind==='individual_stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
-    if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nСтикеры доступны в истории кабинета и через кнопку «Мои заказы» в боте.',{reply_markup:{inline_keyboard:[[{text:'📦 Мои заказы',callback_data:'orders:list'}],[{text:'🌐 Открыть кабинет',web_app:{url:'https://shk-wb.ru/cabinet/history'}}]]}}).catch(()=>{});
+    // Ссылки на PDF подписаны на час — в сообщение их не кладём: кнопка «Мои заказы» строит свежие.
+    if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nPDF со стикерами — по кнопке ниже.',{reply_markup:{inline_keyboard:[[{text:'📄 Скачать стикеры',callback_data:'orders:list'}],[{text:'☰ Меню',callback_data:'menu:home'}]]}}).catch(()=>{});
   }else if(order.product_kind==='wallet_topup'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;

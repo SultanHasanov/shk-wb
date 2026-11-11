@@ -154,8 +154,25 @@ function appLimits(ent, unlimited) {
   };
 }
 
-/** Ручная выдача должна выглядеть для клиента так же, как покупка. */
-async function notifyUser(userId, title, body, link = '/cabinet/packages') {
+function escapeTelegramHtml(value) {
+  return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function rubText(value) {
+  return `${Number(value || 0).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₽`;
+}
+
+/** Кнопки бота под сообщением о выдаче: раздел, куда смотреть, и меню (callback_data обрабатывает узел бота). */
+function botKeyboard(...buttons) {
+  return { inline_keyboard: [[...buttons, { text: '☰ Меню', callback_data: 'menu:home' }]] };
+}
+
+/**
+ * Ручная выдача должна выглядеть для клиента так же, как покупка. Уведомление в кабинете и письмо — как раньше;
+ * telegram ({ text, keyboard }) — отдельное сообщение в бот: у того, кто работает только в боте, почты нет
+ * (telegram-…@users.invalid), и без него о выдаче он не узнает. Сбой Telegram не мешает выдаче.
+ */
+async function notifyUser(userId, title, body, link = '/cabinet/packages', telegram = null) {
   try {
     const user = await getAuthUser(userId);
     await createNotification({
@@ -165,6 +182,19 @@ async function notifyUser(userId, title, body, link = '/cabinet/packages') {
     });
   } catch (error) {
     console.error('admin notification failed', error.message);
+  }
+  if (telegram?.text) await notifyTelegram(userId, telegram.text, telegram.keyboard);
+}
+
+async function notifyTelegram(userId, text, keyboard) {
+  try {
+    const rows = await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(userId)}&select=telegram_user_id&limit=1`);
+    const telegramId = rows?.[0]?.telegram_user_id;
+    if (!telegramId) return;
+    // Через _telegram-api — с VPS сообщение уходит релеем, как напоминания из api/cabinet.js.
+    await require('./_telegram-api').sendMessage(telegramId, text, keyboard ? { reply_markup: keyboard } : {});
+  } catch (error) {
+    console.warn('admin telegram notification failed', error.message);
   }
 }
 
@@ -625,7 +655,10 @@ async function handler(req, res) {
       if (created.error) return badRequest(res, created.error);
       await recordAdminAction(req, 'grantSticker', userId, { code: created.row.code, limit: created.row.generation_limit }, logOptions(req));
       await notifyUser(userId, 'Вам выдан код доступа',
-        `Код ${created.row.code} — ${created.row.generation_limit} генераций. Он уже доступен в кабинете.`);
+        `Код ${created.row.code} — ${created.row.generation_limit} генераций. Он уже доступен в кабинете.`, undefined, {
+          text: `🎁 <b>Вам выдан пакет стикеров</b>\n${created.row.generation_limit} шт., код доступа <code>${escapeTelegramHtml(created.row.code)}</code>. Он уже добавлен в ваш профиль.`,
+          keyboard: botKeyboard({ text: '👤 Профиль', callback_data: 'menu:profile' }),
+        });
       return res.status(201).json(RESOURCES.stickerAccess.fromDb(created.row));
     }
     if (req.method === 'POST' && action === 'createIndividualStickerOrder') {
@@ -651,8 +684,13 @@ async function handler(req, res) {
       await recordAdminAction(req, 'createIndividualStickerOrder', userId, {
         orderId, quantity: codes.length, totalAmount, creditUnits,
       }, logOptions(req));
+      // К оплате — как в create_individual_sticker_order: сумма минус зачтённые стикеры по средней цене.
+      const amountDue = Math.round((totalAmount - Math.round(creditUnits * (totalAmount / codes.length) * 100) / 100) * 100) / 100;
       await notifyUser(userId, 'Выставлен индивидуальный заказ',
-        `${title}: ${codes.length} стикеров. После оплаты они появятся в истории и станут доступны для скачивания.`, '/cabinet/orders');
+        `${title}: ${codes.length} стикеров. После оплаты они появятся в истории и станут доступны для скачивания.`, '/cabinet/orders', {
+          text: `<b>📦 Вам выставлен заказ</b>\n«${escapeTelegramHtml(title)}» — ${codes.length} стикеров, ${rubText(amountDue)}.\nОплатите — и PDF появятся здесь, в боте.`,
+          keyboard: { inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'orders:list' }]] },
+        });
       return res.status(201).json({ id: orderId, quantity: codes.length });
     }
     if (req.method === 'POST' && action === 'topupSticker') {
@@ -663,7 +701,10 @@ async function handler(req, res) {
       await recordAdminAction(req, 'topupSticker', userId, { codeId, add: Number(req.body?.add) }, logOptions(req));
       if (isUuid(userId)) {
         await notifyUser(userId, 'Пакет генераций пополнен',
-          `К коду ${result.row.code} добавлено ${Number(req.body?.add)} генераций.`);
+          `К коду ${result.row.code} добавлено ${Number(req.body?.add)} генераций.`, undefined, {
+            text: `🎁 <b>Пакет стикеров пополнен</b>\nК коду <code>${escapeTelegramHtml(result.row.code)}</code> добавлено ${Number(req.body?.add)} шт.`,
+            keyboard: botKeyboard({ text: '👤 Профиль', callback_data: 'menu:profile' }),
+          });
       }
       return res.json(RESOURCES.stickerAccess.fromDb(result.row));
     }
@@ -675,7 +716,10 @@ async function handler(req, res) {
       if (created.error) return badRequest(res, created.error);
       await recordAdminAction(req, 'grantProgramKey', userId, { key: created.row.key, limit: created.row.usage_limit }, logOptions(req));
       await notifyUser(userId, 'Вам выдан пакет подборов «Помощник ПВЗ»',
-        `Ключ ${created.row.key}, ${created.row.usage_limit} подборов.`, '/cabinet/keys');
+        `Ключ ${created.row.key}, ${created.row.usage_limit} подборов.`, '/cabinet/keys', {
+          text: `🎁 <b>Вам выдан пакет кодов клиента</b>\n${created.row.usage_limit} шт.`,
+          keyboard: botKeyboard({ text: '🔑 Код клиента', callback_data: 'menu:code' }),
+        });
       return res.status(201).json(RESOURCES.key.fromDb(created.row));
     }
     if (req.method === 'POST' && action === 'grantCellLicense') {
@@ -687,7 +731,10 @@ async function handler(req, res) {
       if (created.error) return badRequest(res, created.error);
       await recordAdminAction(req, 'grantCellLicense', userId, { key: created.row.key, durationDays: created.row.duration_days }, logOptions(req));
       await notifyUser(userId, 'Вам выдан ключ «Печати ячеек»',
-        `Ключ ${created.row.key} на ${created.row.duration_days} дней, устройств: ${created.row.device_limit}.`, '/cabinet/keys');
+        `Ключ ${created.row.key} на ${created.row.duration_days} дней, устройств: ${created.row.device_limit}.`, '/cabinet/keys', {
+          text: `🎁 <b>Вам выдан ключ «ПВЗ Принт» (печать ячеек)</b>\n<code>${escapeTelegramHtml(created.row.key)}</code> — ${created.row.duration_days} дн., компьютеров: ${created.row.device_limit}.\nВведите ключ в программе «ПВЗ Принт».`,
+          keyboard: botKeyboard({ text: '🖨 ПВЗ Принт', callback_data: 'menu:cellprint' }),
+        });
       return res.status(201).json(RESOURCES.cellLicense.fromDb(created.row));
     }
     // Выдать подписку «Помощник ПВЗ» помимо оплаты: тариф применяется той же
@@ -705,7 +752,10 @@ async function handler(req, res) {
       });
       await recordAdminAction(req, 'grantAppSubscription', userId, { plan, months }, logOptions(req));
       await notifyUser(userId, 'Вам выдана подписка «Помощник ПВЗ»',
-        `Тариф ${PLANS[plan].title} на ${months} мес. Программа готова к работе.`, '/cabinet/subscription');
+        `Тариф ${PLANS[plan].title} на ${months} мес. Программа готова к работе.`, '/cabinet/subscription', {
+          text: `🎁 <b>Вам выдана подписка «Помощник ПВЗ»</b>\nТариф «${escapeTelegramHtml(PLANS[plan].title)}» на ${months} мес. Программа готова к работе.`,
+          keyboard: botKeyboard({ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }),
+        });
       return res.status(201).json({ ok: true });
     }
     // Отозвать конкретный отрезок подписки (активный обрывается сейчас).
@@ -729,10 +779,14 @@ async function handler(req, res) {
         method: 'POST', body: JSON.stringify({ p_user: userId, p_addon: addon, p_months: months }),
       });
       await recordAdminAction(req, 'grantAppAddon', userId, { addon, months }, logOptions(req));
-      await notifyUser(userId, ADDONS[addon].kind === 'pack' ? `Вам подключено: «${ADDONS[addon].title}»` : `Вам подключена услуга «${ADDONS[addon].title}»`,
-        ADDONS[addon].kind === 'pack'
-          ? `Срок — ${months} мес. ${ADDONS[addon].summary}.`
-          : `Срок — ${months} мес. Услуга работает вместе с тарифом «${PLANS[ADDONS[addon].minPlan].title}» или выше.`, '/cabinet/subscription');
+      const addonTitle = ADDONS[addon].kind === 'pack' ? `Вам подключено: «${ADDONS[addon].title}»` : `Вам подключена услуга «${ADDONS[addon].title}»`;
+      const addonBody = ADDONS[addon].kind === 'pack'
+        ? `Срок — ${months} мес. ${ADDONS[addon].summary}.`
+        : `Срок — ${months} мес. Услуга работает вместе с тарифом «${PLANS[ADDONS[addon].minPlan].title}» или выше.`;
+      await notifyUser(userId, addonTitle, addonBody, '/cabinet/subscription', {
+        text: `🎁 <b>${escapeTelegramHtml(addonTitle)} («Помощник ПВЗ»)</b>\n${escapeTelegramHtml(addonBody)}`,
+        keyboard: botKeyboard({ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }),
+      });
       return res.status(201).json({ ok: true });
     }
     if (req.method === 'POST' && action === 'revokeAppAddon') {

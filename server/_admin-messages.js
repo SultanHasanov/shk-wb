@@ -89,7 +89,12 @@ function telegramText(subject, body) {
   return head + text;
 }
 
-function telegramOptions(link) {
+/**
+ * Кнопки под сообщением в Telegram. keyboard — свои кнопки бота (callback_data вместо ссылки в кабинет сайта:
+ * у того, кто работает только в боте, входа на сайт нет); без него — кнопка «Открыть» по ссылке.
+ */
+function telegramOptions(link, keyboard = null) {
+  if (Array.isArray(keyboard) && keyboard.length) return { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
   const url = absoluteLink(link);
   return { parse_mode: 'HTML', ...(url ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть', url }]] } } : {}) };
 }
@@ -230,7 +235,12 @@ async function telegramTarget(userId) {
   return { identity, subscriber: subscribers[0] || null, ref };
 }
 
-async function deliverTelegram({ userId, subject, body, link, key, source, actionId }) {
+async function deliverTelegram({ userId, subject, body, link, key, source, actionId, telegram = null }) {
+  // Свой текст и кнопки для Telegram (telegram: { subject?, body?, keyboard? }); кабинет и письмо — прежние.
+  if (telegram) {
+    subject = telegram.subject ? String(telegram.subject) : subject;
+    body = telegram.body ? String(telegram.body) : body;
+  }
   const { identity, subscriber, ref } = await telegramTarget(userId);
   if (!identity) return { channel: 'telegram', status: 'not_linked', recipient: null };
   if (!subscriber) return { channel: 'telegram', status: 'not_started', recipient: ref };
@@ -242,7 +252,7 @@ async function deliverTelegram({ userId, subject, body, link, key, source, actio
   });
   if (delivery === 'duplicate') return { channel: 'telegram', recipient: ref, ...(await duplicateOutcome(`tg:${key}`)) };
   try {
-    const sent = await sendWithRetry(subscriber.chat_id, telegramText(subject, body), telegramOptions(link));
+    const sent = await sendWithRetry(subscriber.chat_id, telegramText(subject, body), telegramOptions(link, telegram?.keyboard));
     const providerId = sent?.message_id != null ? String(sent.message_id) : null;
     await patchDelivery(delivery.id, { status: 'sent', provider_id: providerId, sent_at: new Date().toISOString() });
     return { channel: 'telegram', status: 'sent', recipient: ref, ...(providerId ? { providerId } : {}), ...(delivery.id ? { deliveryId: delivery.id } : {}) };
@@ -297,12 +307,13 @@ async function deliverPc({ userId, subject, body, key, source, actionId, deviceI
 /**
  * Разослать одно сообщение по каналам. Ошибка одного канала не мешает другим: она уходит в его итог.
  * dedupeBase обязателен и уникален на действие (см. шапку файла).
+ * telegram — необязательно: { subject?, body?, keyboard? } только для Telegram (keyboard — inline_keyboard бота).
  */
-async function deliver({ userId, channels, subject, body, link = null, deviceIds = [], actionId = null, source = 'admin', dedupeBase }) {
+async function deliver({ userId, channels, subject, body, link = null, deviceIds = [], actionId = null, source = 'admin', dedupeBase, telegram = null }) {
   if (dedupeBase == null || String(dedupeBase).trim() === '') throw new Error('deliver: dedupeBase is required');
   const key = `admin-msg:${String(dedupeBase)}`;
   const list = (Array.isArray(channels) ? channels : []).filter(channel => CHANNELS.includes(channel));
-  const ctx = { userId, subject: String(subject || ''), body: String(body || ''), link: link || null, key, source, actionId, deviceIds: Array.isArray(deviceIds) ? deviceIds : [] };
+  const ctx = { userId, subject: String(subject || ''), body: String(body || ''), link: link || null, key, source, actionId, deviceIds: Array.isArray(deviceIds) ? deviceIds : [], telegram: telegram && typeof telegram === 'object' ? telegram : null };
   const guard = (channel, extra = {}) => error => {
     console.error(`admin message ${channel}:`, error.message);
     return { channel, status: 'failed', ...extra, error: errorText(error) };

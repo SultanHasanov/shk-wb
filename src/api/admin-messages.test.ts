@@ -269,6 +269,35 @@ describe('deliver', () => {
       delete process.env.TELEGRAM_BOT_TOKEN;
     }
   });
+
+  it('Telegram: свой текст и кнопки бота вместо ссылки в кабинет, кабинет получает прежний текст', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'token';
+    delete process.env.TELEGRAM_API_BASE;
+    try {
+      stub((path, method) => {
+        if (path.startsWith('user_telegram_identities')) return [{ telegram_user_id: 55, username: 'ivan' }];
+        if (path.startsWith('telegram_bot_subscribers') && method === 'GET') return [{ telegram_user_id: 55, chat_id: 55, blocked_at: null }];
+        if (path.startsWith('notification_deliveries') && method === 'POST') return [{ id: 'd-tg' }];
+        if (path.startsWith('user_notifications') && method === 'POST') return [{ id: 'n-1' }];
+        if (path.includes('api.telegram.org')) return { ok: true, result: { message_id: 9 } };
+        return [];
+      });
+      const keyboard = [[{ text: '👤 Профиль', callback_data: 'menu:profile' }]];
+      const results = await messages.deliver({
+        userId: USER, channels: ['cabinet', 'telegram'], subject: 'Баланс пополнен', body: 'Для кабинета', link: '/cabinet', dedupeBase: '6',
+        telegram: { subject: '🎁 Поддержка начислила вам 100 ₽', body: 'Причина: тест', keyboard },
+      });
+      expect(results.find(r => r.channel === 'telegram')).toMatchObject({ status: 'sent' });
+      const send = calls.find(c => c.url.includes('api.telegram.org'))!;
+      expect(send.body.text).toBe('<b>🎁 Поддержка начислила вам 100 ₽</b>\n\nПричина: тест');
+      expect(send.body.reply_markup).toEqual({ inline_keyboard: keyboard });
+      expect(JSON.stringify(send.body)).not.toContain('/cabinet');
+      const cabinet = calls.find(c => c.url.startsWith('user_notifications') && c.method === 'POST');
+      if (cabinet) expect(JSON.stringify(cabinet.body)).toContain('Для кабинета');
+    } finally {
+      delete process.env.TELEGRAM_BOT_TOKEN;
+    }
+  });
 });
 
 describe('sendEmail', () => {

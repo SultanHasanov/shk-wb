@@ -255,6 +255,23 @@ function walletMessage(kopecks, comment, balanceKopecks) {
   };
 }
 
+// Тот же случай для Telegram: баланс тратится в боте — кнопки бота вместо ссылки в кабинет сайта,
+// и заголовок начисления не путается с оплатой картой.
+const WALLET_TELEGRAM_KEYBOARD = [[{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '☰ Меню', callback_data: 'menu:home' }]];
+
+function walletTelegramMessage(kopecks, comment, balanceKopecks) {
+  const credit = kopecks > 0;
+  return {
+    subject: credit ? `🎁 Поддержка начислила вам ${rub(kopecks)}` : `С баланса списано ${rub(kopecks)}`,
+    body: [
+      `Причина: ${comment}`,
+      `💰 На балансе: ${rub(balanceKopecks)}`,
+      ...(credit ? [] : ['Есть вопросы — напишите в поддержку.']),
+    ].join('\n'),
+    keyboard: WALLET_TELEGRAM_KEYBOARD,
+  };
+}
+
 async function walletAdjust(req, res, { userId }) {
   const body = req.body || {};
   const checked = validateWalletBody(body);
@@ -284,6 +301,7 @@ async function walletAdjust(req, res, { userId }) {
         const text = walletMessage(kopecks, comment, balanceKopecks);
         notified = await require('./_admin-messages').deliver({
           userId, channels: ['cabinet', 'telegram', 'email'], subject: text.subject, body: text.body, link: '/cabinet',
+          telegram: walletTelegramMessage(kopecks, comment, balanceKopecks),
           source: 'admin', actionId, dedupeBase: `wallet:${actionId}`,
         });
       } catch (error) {
