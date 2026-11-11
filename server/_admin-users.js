@@ -688,7 +688,10 @@ async function handler(req, res) {
       const amountDue = Math.round((totalAmount - Math.round(creditUnits * (totalAmount / codes.length) * 100) / 100) * 100) / 100;
       await notifyUser(userId, 'Выставлен индивидуальный заказ',
         `${title}: ${codes.length} стикеров. После оплаты они появятся в истории и станут доступны для скачивания.`, '/cabinet/orders', {
-          text: `<b>📦 Вам выставлен заказ</b>\n«${escapeTelegramHtml(title)}» — ${codes.length} стикеров, ${rubText(amountDue)}.\nОплатите — и PDF появятся здесь, в боте.`,
+          // Всё зачтено стикерами из пакета (0 ₽) — не «оплатите 0 ₽», а «доплата не нужна».
+          text: amountDue > 0
+            ? `<b>📦 Вам выставлен заказ</b>\n«${escapeTelegramHtml(title)}» — ${codes.length} стикеров, ${rubText(amountDue)}.\nОплатите — и PDF появятся здесь, в боте.`
+            : `<b>📦 Вам выставлен заказ</b>\n«${escapeTelegramHtml(title)}» — ${codes.length} стикеров, доплата не нужна.\nОткройте заказ и нажмите «Получить PDF».`,
           keyboard: { inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'orders:list' }]] },
         });
       return res.status(201).json({ id: orderId, quantity: codes.length });

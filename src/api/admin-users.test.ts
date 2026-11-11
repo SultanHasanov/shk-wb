@@ -356,6 +356,21 @@ describe('выдачи из админки доходят до бота', () => 
     expect(message.reply_markup).toEqual({ inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'orders:list' }]] });
   });
 
+  it('заказ целиком зачтён стикерами — «доплата не нужна», а не «оплатите 0 ₽»', async () => {
+    const fetchMock = backend();
+    const res = mockRes();
+    await handler({
+      method: 'POST', query: { action: 'createIndividualStickerOrder' },
+      body: { userId: USER, title: 'Склад', codes: ['12345678901', '12345678902', '12345678903'], totalAmount: 300, creditUnits: 3 },
+      headers: {},
+    }, res);
+    expect(res.statusCode).toBe(201);
+    const [message] = telegramSends(fetchMock);
+    expect(message.text).toContain('«Склад» — 3 стикеров, доплата не нужна');
+    expect(message.text).toContain('«Получить PDF»');
+    expect(message.text).not.toMatch(/Оплатите|0 ₽/);
+  });
+
   it('выданная подписка: текст бота и кнопка раздела; без Telegram — только уведомление в кабинете', async () => {
     let fetchMock = backend();
     const res = mockRes();

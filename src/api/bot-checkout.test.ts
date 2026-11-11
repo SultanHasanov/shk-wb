@@ -62,4 +62,13 @@ describe('оплата из бота без Mini App', () => {
     expect(seen[0].internalUser).toEqual({ id: 'u-5', email: 'telegram-5@users.invalid' });
     expect(seen[0].headers['x-forwarded-for']).toBe('telegram-bot:u-5');
   });
+
+  it('к оплате 0 ₽ — обработчик закрыл заказ и вернул относительный путь: боту «оплачен», а не ссылка', async () => {
+    const loadUser = vi.fn(async () => ({ id: 'u-6', email: null }));
+    const orderId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const relative = vi.fn(async (_req: any, res: any) => { res.status(201).json({ confirmationUrl: '/payment-result?token=t6', token: 't6' }); });
+    expect(await createIndividualPayment({ userId: 'u-6', orderId }, { handler: relative, loadUser })).toEqual({ confirmationUrl: null, token: 't6', paid: true });
+    const paidFlag = vi.fn(async (_req: any, res: any) => { res.status(201).json({ token: 't7', paid: true, amount: 0 }); });
+    expect(await createIndividualPayment({ userId: 'u-6', orderId }, { handler: paidFlag, loadUser })).toEqual({ confirmationUrl: null, token: 't7', paid: true });
+  });
 });

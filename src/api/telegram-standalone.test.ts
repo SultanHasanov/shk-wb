@@ -167,6 +167,24 @@ describe('индивидуальные заказы в боте', () => {
     expect(buttons()[0].url).toBe(PAY_URL);
   });
 
+  it('к оплате 0 ₽ — «Получить PDF» вместо «Оплатить 0 ₽»; после нажатия PDF сразу, без кнопки с относительным адресом', async () => {
+    world.orders = [{ id: ORDER, title: 'Склад', quantity: 300, amount_due: 0, status: 'pending_payment' }];
+    await bot.processUpdate(message('/orders'));
+    expect(lastScreen().body.text).toContain('доплата не нужна');
+    expect(buttons()[0]).toEqual({ text: '📄 Получить PDF', callback_data: `ord:pay:${ORDER}` });
+
+    sent = [];
+    // Обработчик уже закрыл заказ (completeOrder) — в базе он paid.
+    world.orders = [{ id: ORDER, title: 'Склад', quantity: 300, amount_due: 0, status: 'paid' }];
+    vi.spyOn(checkout, 'createIndividualPayment').mockResolvedValue({ confirmationUrl: null, token: 't', paid: true });
+    await bot.processUpdate(press(`ord:pay:${ORDER}`));
+    const screen = lastScreen();
+    expect(screen.body.text).toContain('Доплата не нужна, заказ закрыт');
+    expect(buttons(screen).filter(button => String(button.text).startsWith('📄 PDF')).length).toBe(1);
+    expect(buttons(screen).some(button => 'url' in button && !String(button.url).startsWith('https://'))).toBe(false);
+    expect(buttons(screen).some(button => button.callback_data === 'orders:list')).toBe(true);
+  });
+
   it('заказ уже оплачен — так и говорим, с кнопкой «Мои заказы»', async () => {
     vi.spyOn(checkout, 'createIndividualPayment').mockRejectedValue(Object.assign(new Error('Заказ не найден или уже оплачен'), { status: 404 }));
     await bot.processUpdate(press(`ord:pay:${ORDER}`));

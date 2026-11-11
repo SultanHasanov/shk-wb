@@ -2220,6 +2220,13 @@ function individualOrderView(order) {
     };
   }
   if (order.status === 'canceled') return { text: `${title}\n${order.quantity} стикеров · заказ отменён`, rows: [] };
+  // К оплате 0 ₽ (всё зачтено стикерами из пакета): платить нечего, та же кнопка ord:pay просто закрывает заказ.
+  if (!(Number(order.amount_due) > 0)) {
+    return {
+      text: `${title}\n${order.quantity} стикеров · доплата не нужна\nНажмите «Получить PDF» — файлы появятся здесь, в боте.`,
+      rows: [[{ text: '📄 Получить PDF', callback_data: `ord:pay:${order.id}` }]],
+    };
+  }
   return {
     text: `${title}\n${order.quantity} стикеров · ${amount}\nОплатите — и PDF появятся здесь, в боте.`,
     // ord:pay:<uuid> — 44 байта, в лимит callback_data (64) укладывается.
@@ -2257,8 +2264,21 @@ async function payIndividualOrder(from, chatId, messageId, orderId) {
     await showScreen(chatId, messageId, view.text, { reply_markup: paymentErrorKeyboard(view, `ord:pay:${orderId}`) });
     return;
   }
-  const rows = await supabaseFetch(`individual_sticker_orders?id=eq.${encodeURIComponent(orderId)}&user_id=eq.${encodeURIComponent(userId)}&select=title,quantity,amount_due&limit=1`).catch(() => []);
+  const rows = await supabaseFetch(`individual_sticker_orders?id=eq.${encodeURIComponent(orderId)}&user_id=eq.${encodeURIComponent(userId)}&select=id,title,quantity,amount_due,status&limit=1`).catch(() => []);
   const order = rows[0];
+  if (payment.paid) {
+    // К оплате было 0 ₽: обработчик уже закрыл заказ, ссылки на ЮKassa нет (Telegram не принял бы
+    // относительный адрес в кнопке). Заказ уже paid — сразу отдаём PDF.
+    const view = order?.status === 'paid' ? individualOrderView(order) : null;
+    await showScreen(chatId, messageId, view
+      ? `✅ Доплата не нужна, заказ закрыт.\n\n${view.text}`
+      : '✅ Доплата не нужна, заказ закрыт. PDF — в «📦 Мои заказы».', { reply_markup: choiceKeyboard([
+      ...(view ? view.rows : []),
+      [{ text: '📦 Мои заказы', callback_data: 'orders:list' }],
+      MENU_ROW,
+    ]) });
+    return;
+  }
   const amount = order ? wallet.formatRub(Number(order.amount_due || 0)) : '';
   await showScreen(chatId, messageId, [
     order ? `<b>💳 Оплата заказа «${escapeHtml(order.title)}»</b>` : '<b>💳 Оплата заказа</b>',

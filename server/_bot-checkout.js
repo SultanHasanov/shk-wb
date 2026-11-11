@@ -21,7 +21,8 @@ function checkoutError(message, { code = null, status = null } = {}) {
 }
 
 /**
- * Общий путь: аккаунт по userId → синтетический запрос в api/payments.js → { confirmationUrl, token }.
+ * Общий путь: аккаунт по userId → синтетический запрос в api/payments.js → { confirmationUrl, token }
+ * или { confirmationUrl: null, token, paid: true }, если платить нечего и заказ уже закрыт.
  * Нет аккаунта (объединён или удалён, а кеш связки ещё старый) — ошибка ACCOUNT_NOT_FOUND: бот сбросит кеш и повторит.
  */
 async function createPayment(userId, body, { handler = require('../api/payments'), loadUser = getAuthUser } = {}) {
@@ -37,6 +38,13 @@ async function createPayment(userId, body, { handler = require('../api/payments'
   };
   const res = responseStub();
   await handler(req, res);
+  // К оплате 0 ₽ (например, индивидуальный заказ целиком зачтён стикерами человека): обработчик уже закрыл заказ
+  // и вместо ЮKassa вернул относительный путь страницы результата (или paid: true). Такой адрес Telegram в кнопку
+  // не примет, а платить нечего — сообщаем боту, что заказ уже оплачен.
+  const url = res.body?.confirmationUrl;
+  if (res.statusCode < 400 && (res.body?.paid === true || (typeof url === 'string' && url.startsWith('/')))) {
+    return { confirmationUrl: null, token: res.body.token || null, paid: true };
+  }
   if (res.statusCode >= 400 || !res.body?.confirmationUrl) {
     throw checkoutError(res.body?.error || `Не удалось создать оплату (${res.statusCode})`, { code: res.body?.code || null, status: res.statusCode });
   }
