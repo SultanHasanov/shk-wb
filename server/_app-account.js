@@ -231,9 +231,14 @@ async function notifyNewDevice(userId, name, deviceId) {
   ]);
 }
 
-async function deviceKnown(userId, deviceHash) {
-  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${deviceHash}&select=id&limit=1`).catch(() => [1]);
-  return rows.length > 0;
+// Есть ли ПК в профиле и не отключён ли он. Отключённый ПК (кабинет, «🚫 Это не я», «выйти на всех других»)
+// при возврате — снова новый вход: уведомление с кнопкой «Это не я» приходит заново. Сбой чтения — как
+// «известный и активный»: вход не ломаем и лишних уведомлений не шлём.
+async function deviceState(userId, deviceHash) {
+  const rows = await supabaseFetch(`app_devices?user_id=eq.${encodeURIComponent(userId)}&device_hash=eq.${deviceHash}&select=id,name,revoked_at&limit=1`).catch(() => null);
+  if (!rows) return { exists: true, active: true, name: '' };
+  const row = rows[0];
+  return { exists: Boolean(row), active: Boolean(row && !row.revoked_at), name: row?.name || '' };
 }
 
 // В бесплатном режиме лимит ПК не действует: ПК добавляем/возвращаем напрямую.
@@ -257,12 +262,13 @@ async function registerDeviceFree(userId, deviceHash, name, version) {
 
 // Название ПК задаётся при первом входе (адрес пункта или «Домашний ноутбук») и дальше меняется
 // только переименованием — повторный вход его не затирает (пустое имя = оставить как есть).
+// Вернувшийся отключённый ПК сохраняет своё название и роль (assignInitialRole трогает только пустую роль).
 async function registerDevice(userId, deviceHash, name, version) {
-  const known = await deviceKnown(userId, deviceHash);
-  const id = await registerDeviceLimited(userId, deviceHash, known ? '' : name, version);
-  if (!known) {
+  const state = await deviceState(userId, deviceHash);
+  const id = await registerDeviceLimited(userId, deviceHash, state.exists ? '' : name, version);
+  if (!state.active) {
     await assignInitialRole(userId, id);
-    await notifyNewDevice(userId, name, id);
+    await notifyNewDevice(userId, state.name || name, id);
   }
   return id;
 }

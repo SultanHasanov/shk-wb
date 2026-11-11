@@ -116,7 +116,7 @@ describe('вход и списание в программе', () => {
     let sent: Record<string, unknown> | null = null;
     mockSupabase((url, init) => {
       if (url.includes('grant_type=password')) return { body: session };
-      if (url.includes('app_devices?') && url.includes('select=id&limit=1')) return { body: [{ id: 'dev-1' }] };
+      if (url.includes('app_devices?') && url.includes('select=id,name,revoked_at&limit=1')) return { body: [{ id: 'dev-1', name: 'Касса', revoked_at: null }] };
       if (url.includes('rpc/app_register_device')) { sent = JSON.parse(String(init.body)); return { body: 'dev-1' }; }
     });
     const res = response();

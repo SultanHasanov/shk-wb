@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import { useStores } from '../stores/root-store';
 import { Alert, Button, Card, Spinner } from '../ui';
 import { useDocumentMeta } from '../lib/seo';
+import { isFinalLoginStatusError, loginStatusInterval, retryLoginStatus } from '../lib/app-login-poll';
 
 // Куда можно вернуть после входа по ссылке из программы — только в кабинет.
 const SAFE_NEXT = /^\/cabinet(\/[a-z-]+)?(\?[a-z0-9=&_-]{0,80})?$/i;
@@ -35,8 +36,7 @@ const SiteLinkLogin = observer(({ tokenHash, next }: { tokenHash: string; next: 
 
 type LoginRequest = { deviceName: string; status: string; program?: string; telegramUrl?: string | null; telegramQr?: string | null };
 
-// Опрос статуса кода: подтверждение может прийти из Telegram-бота, пока страница открыта.
-const POLL_MS = 3000;
+// Опрос статуса кода (раз в 3 с): подтверждение может прийти из Telegram-бота, пока страница открыта.
 
 /**
  * Вход в программу: программа открыла страницу с кодом. Без входа на сайт главный путь — подтвердить
@@ -62,9 +62,12 @@ const ApproveProgramLogin = observer(({ code }: { code: string }) => {
     queryKey: ['app-login-status', code],
     queryFn: () => api<LoginRequest>(`/api/app/login/request?code=${encodeURIComponent(code)}&poll=1`),
     enabled: initiallyPending && !approve.isSuccess,
-    refetchInterval: query => (query.state.data && query.state.data.status !== 'pending') || query.state.error ? false : POLL_MS,
-    retry: false,
+    // Временный сбой (сеть, 502 при перезапуске) не ломает экран: повторяем и опрашиваем дальше.
+    // Стоп и сообщение — только на окончательном ответе (код устарел или не найден).
+    refetchInterval: query => loginStatusInterval(query.state.data, query.state.error),
+    retry: retryLoginStatus,
   });
+  const statusFinalError = status.isError && isFinalLoginStatusError(status.error) ? status.error : null;
   // Код был свободен при открытии страницы, а теперь занят — его подтвердили (в боте или в другой вкладке).
   const confirmedElsewhere = initiallyPending && Boolean(status.data && status.data.status !== 'pending');
   const program = request.data?.program || 'Помощник ПВЗ';
@@ -79,7 +82,7 @@ const ApproveProgramLogin = observer(({ code }: { code: string }) => {
       <p className="muted" style={{ margin: 0 }}>Вход выполнится сам через несколько секунд. Эту вкладку можно закрыть.</p>
     </>
   );
-  else if (status.isError) body = <Alert tone="error">{status.error.message}</Alert>;
+  else if (statusFinalError) body = <Alert tone="error">{statusFinalError.message}</Alert>;
   else if (request.data.status !== 'pending') body = <Alert tone="warning">Этот код уже использован. Если вы не входили в программу, напишите в поддержку.</Alert>;
   else if (!auth.user) body = (
     <>

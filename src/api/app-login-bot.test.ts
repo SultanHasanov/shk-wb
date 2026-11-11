@@ -9,7 +9,10 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   processUpdate: (update: Record<string, unknown>) => Promise<void>;
   newUserSource: (text: string) => { source: string };
 };
-const account = require('../../server/_app-account.js') as { notifyNewDevice: (userId: string, name: string, deviceId: string) => Promise<void> };
+const account = require('../../server/_app-account.js') as {
+  notifyNewDevice: (userId: string, name: string, deviceId: string) => Promise<void>;
+  registerDevice: (userId: string, deviceHash: string, name: string, version: string) => Promise<string>;
+};
 const userCache = require('../../server/_telegram-user-cache.js') as { clearTelegramUserCache: () => void };
 const controls = require('../../server/_user-controls.js') as { __setSnapshotForTests: (json: unknown) => void };
 
@@ -17,6 +20,7 @@ const TG = 716976910;
 const USER = '9f9f9f9f-1111-4222-8333-444455556666';
 const DEVICE_ID = '12345678-aaaa-4bbb-8ccc-1234567890ab';
 const CODE = 'ABCD2345';
+const HASH = 'c'.repeat(64);
 const from = { id: TG, first_name: 'Аня', username: 'pvz_anna' };
 const chat = { id: TG, type: 'private' };
 const start = (text: string, id = 1) => ({ update_id: id, message: { message_id: id, text, from, chat } });
@@ -29,6 +33,8 @@ type World = {
   approvePatch: unknown[];
   rateAllowed: boolean;
   devices: Array<Record<string, unknown>>;
+  /** Строка ПК по device_hash для registerDevice: null — ПК в профиле нет. */
+  byHash: Record<string, unknown> | null;
 };
 
 let world: World;
@@ -49,6 +55,7 @@ beforeEach(() => {
     approvePatch: [{ code: CODE, status: 'approved' }],
     rateAllowed: true,
     devices: [{ id: DEVICE_ID, name: 'Чужой ноутбук', revoked_at: null }],
+    byHash: null,
   };
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -69,6 +76,8 @@ beforeEach(() => {
       if (method === 'PATCH') return json(world.approvePatch);
       return json(world.login ? [world.login] : []);
     }
+    if (path.startsWith('app_devices?user_id=eq.') && path.includes('device_hash=eq.') && method === 'GET') return json(world.byHash ? [world.byHash] : []);
+    if (path === 'rpc/app_register_device') return json(DEVICE_ID);
     if (path.startsWith('app_devices?id=eq.') && method === 'GET') return json(world.devices);
     if (path.startsWith('app_devices?id=eq.') && method === 'PATCH') return json(world.devices.map(row => ({ ...row, revoked_at: body.revoked_at })));
     if (path.startsWith('auth:admin/users/')) return json({ id: USER, email: `telegram-${TG}@users.invalid`, email_confirmed_at: '2026-01-01T00:00:00Z' });
@@ -221,6 +230,29 @@ describe('«🚫 Это не я» под сообщением о новом ко
     const all = texts().join('\n');
     expect(all).toContain('Компьютер «Чужой ноутбук» отключён');
     expect(all).toContain('Все входы в ваш профиль завершены');
+  });
+
+  it('отключённый ПК вернулся — снова сообщение с «Это не я», название прежнее', async () => {
+    world.byHash = { id: DEVICE_ID, name: 'Чужой ноутбук', revoked_at: '2026-11-10T10:00:00Z' };
+    await account.registerDevice(USER, HASH, 'DESKTOP-NEW', '1.12.0');
+    const register = db.find(call => call.path === 'rpc/app_register_device')!;
+    expect(register.body).toMatchObject({ p_name: '' });
+    const message = sent.find(call => call.method === 'sendMessage')!;
+    expect(String(message.body.text)).toContain('Компьютер «Чужой ноутбук» вошёл в ваш профиль');
+    expect(buttons().map(b => b.callback_data)).toContain(`dv:no:${DEVICE_ID}`);
+  });
+
+  it('активный ПК при повторном входе — без сообщения', async () => {
+    world.byHash = { id: DEVICE_ID, name: 'Касса', revoked_at: null };
+    await account.registerDevice(USER, HASH, 'DESKTOP-NEW', '1.12.0');
+    expect(db.some(call => call.path === 'rpc/app_register_device')).toBe(true);
+    expect(sent.some(call => call.method === 'sendMessage')).toBe(false);
+  });
+
+  it('новый ПК — сообщение с его названием', async () => {
+    await account.registerDevice(USER, HASH, 'DESKTOP-NEW', '1.12.0');
+    expect(db.find(call => call.path === 'rpc/app_register_device')!.body).toMatchObject({ p_name: 'DESKTOP-NEW' });
+    expect(texts().join('\n')).toContain('Компьютер «DESKTOP-NEW» вошёл в ваш профиль');
   });
 
   it('чужой или несуществующий ПК — ничего не отключаем', async () => {
