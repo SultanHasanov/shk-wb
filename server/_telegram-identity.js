@@ -65,6 +65,16 @@ async function ensureTechnicalAccount(telegram) {
   return { userId, created: true };
 }
 
+/** Пользователь GoTrue (или null, если его нет). Без публичного ключа — работает и на узле бота. */
+async function authUser(userId) {
+  try {
+    return await authAdmin(`/users/${encodeURIComponent(userId)}`);
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+}
+
 /** Аккаунт, к которому привязан этот Telegram (или null). */
 async function findIdentity(telegramId) {
   const rows = await supabaseFetch(`user_telegram_identities?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=user_id,username,first_name&limit=1`);
@@ -182,6 +192,6 @@ async function mergeTelegramAccount(userId, telegram) {
 }
 
 module.exports = {
-  ensureTechnicalAccount, findIdentity, identityForUser, mergeTelegramAccount, relinkIdentity, saveIdentity,
+  authUser, ensureTechnicalAccount, findIdentity, identityForUser, mergeTelegramAccount, relinkIdentity, saveIdentity,
   technicalEmail, telegramLabel,
 };

@@ -10,12 +10,12 @@ const { CELL_PRINT_PRICES, CLIENT_CODE_PRICE, CUSTOM_GENERATION_PACKAGES, LICENS
 const { buildClientQr } = require('./_wb-code');
 const approvals = require('./_code-approvals');
 const account = require('./_app-account');
-const { ensureTechnicalAccount, findIdentity, identityForUser, saveIdentity, telegramLabel } = require('./_telegram-identity');
+const { authUser, ensureTechnicalAccount, findIdentity, identityForUser, relinkIdentity, saveIdentity, telegramLabel } = require('./_telegram-identity');
 const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
-const { isTechnicalTelegramUser } = require('./_telegram-account');
+const { accountMergeSummary, isTechnicalTelegramUser } = require('./_telegram-account');
 const userCache = require('./_telegram-user-cache');
 const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
@@ -482,14 +482,70 @@ async function loadLinkToken(token) {
   return row;
 }
 
+// Профиль бота, который можно отдать программе без поддержки: технический (создан ботом) и пустой по сводке
+// базы — кошелёк, подписки, ПК, покупки, отзывы… (account_merge_summary). Нет сводки (миграция не применена)
+// или сбой — «не знаем»: удалять аккаунт с непроверенными данными нельзя, такой случай идёт в поддержку.
+// → 'empty' | 'data' (технический с данными) | 'site' (аккаунт с почтой) | 'other' (ограничен, не проверить)
+async function linkSourceState(userId) {
+  let summary = null;
+  try {
+    summary = await accountMergeSummary(userId);
+  } catch (error) {
+    console.warn('Link from app: account summary failed', error.message);
+  }
+  if (!summary || typeof summary.empty !== 'boolean') return 'other';
+  if (!summary.technical) return 'site';
+  if (summary.restricted) return 'other';
+  return summary.empty ? 'empty' : 'data';
+}
+
+const LINK_SUPPORT_TEXT = {
+  data: 'У этого Telegram уже есть профиль с балансом или покупками. Напишите в поддержку — объединим, ничего не потеряется.',
+  site: 'Этот Telegram уже привязан к другому аккаунту. Напишите в поддержку — разберёмся и свяжем.',
+  other: 'Подключить этот Telegram автоматически не получилось. Напишите в поддержку — свяжем вручную.',
+};
+
+function sendLinkSupport(chatId, from, state) {
+  return sendMessage(chatId, [
+    LINK_SUPPORT_TEXT[state] || LINK_SUPPORT_TEXT.other,
+    `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
+  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]) });
+}
+
+// Отказы перепривязки, которые решает только поддержка (supabase/migrations/20261120_account_merge_full.sql).
+const LINK_REFUSAL = /TELEGRAM_ACCOUNT_NOT_EMPTY|TELEGRAM_ACCOUNT_FINANCIAL_CONFLICT|SOURCE_ACCOUNT_NOT_TECHNICAL|TARGET_ACCOUNT_|MERGE_/;
+
 async function completeLink(from, chatId, tokenRow) {
-  await saveIdentity(tokenRow.user_id, from, { replace: true });
+  const existing = await findIdentity(from.id);
+  if (existing && existing.user_id !== tokenRow.user_id) {
+    // У Telegram свой профиль бота. Пустой — перепривязка через RPC: связка переходит к аккаунту программы,
+    // пустой аккаунт удаляется (голый saveIdentity оставил бы аккаунт-сироту). Проверяем заново: между
+    // вопросом «переключить?» и ответом на профиль могли прийти деньги.
+    const state = await linkSourceState(existing.user_id);
+    if (state !== 'empty') return sendLinkSupport(chatId, from, state);
+    // RPC требует у аккаунта программы подтверждённую почту — проверяем до того, как снимать его прежний Telegram.
+    const target = await authUser(tokenRow.user_id);
+    if (!target?.email_confirmed_at || /@users[.]invalid$/i.test(String(target.email || ''))) return sendLinkSupport(chatId, from, 'other');
+    await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(tokenRow.user_id)}&telegram_user_id=neq.${encodeURIComponent(from.id)}`, { method: 'DELETE' });
+    userCache.forgetSiteUser(tokenRow.user_id);
+    try {
+      await relinkIdentity(tokenRow.user_id, from);
+    } catch (error) {
+      if (!LINK_REFUSAL.test(String(error?.message || ''))) throw error;
+      console.warn('Link from app refused', error.message);
+      return sendLinkSupport(chatId, from, 'other');
+    }
+  } else {
+    await saveIdentity(tokenRow.user_id, from, { replace: true });
+  }
+  // В черновике сессии лежит прежний userId — начинаем с чистой.
+  await clearSession(from.id).catch(error => console.warn('Link from app: clear session failed', error.message));
   await supabaseFetch(`app_telegram_link_tokens?token=eq.${encodeURIComponent(tokenRow.token)}`, { method: 'PATCH', body: JSON.stringify({ used_at: new Date().toISOString() }) }).catch(() => {});
   await bindTelegramReferral(from.id, tokenRow.user_id).catch(() => {});
   await sendMessage(chatId, [
     '<b>✅ Telegram подключён к аккаунту «Помощника ПВЗ»</b>',
     'Теперь запросы QR-кода клиента с ваших компьютеров будут приходить сюда — вы решаете, выдать или отклонить.',
-    'Этим же Telegram можно входить на сайт.',
+    'Баланс и покупки в боте и в программе теперь общие.',
   ].join('\n'));
   return showMainMenu(from, chatId);
 }
@@ -499,12 +555,17 @@ async function handleLinkStart(from, chatId, token) {
   if (!tokenRow) return sendMessage(chatId, 'Ссылка устарела — получите новую в программе: Профиль → «Подключить Telegram».', { reply_markup: choiceKeyboard([MENU_ROW]) });
   const existing = await findIdentity(from.id);
   if (existing && existing.user_id !== tokenRow.user_id) {
-    return sendMessage(chatId, 'Этот Telegram уже привязан к другому аккаунту. Отвяжите его в кабинете на сайте (Профиль → Telegram) и откройте ссылку снова.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+    const state = await linkSourceState(existing.user_id);
+    if (state !== 'empty') return sendLinkSupport(chatId, from, state);
   }
   const current = await identityForUser(tokenRow.user_id);
   if (current && Number(current.telegram_user_id) !== Number(from.id)) {
-    return sendMessage(chatId, `К аккаунту уже привязан Telegram ${escapeHtml(telegramLabel(current))}. Заменить на этот? Прежний Telegram потеряет вход на сайт и перестанет получать запросы.`, {
-      reply_markup: choiceKeyboard([[{ text: '✅ Да, заменить', callback_data: `cq:link:yes:${token}` }, { text: 'Нет', callback_data: `cq:link:no:${token}` }]]),
+    return sendMessage(chatId, [
+      `К аккаунту программы уже подключён Telegram ${escapeHtml(telegramLabel(current))}. Переключить на этот?`,
+      '',
+      'Прежний Telegram перестанет видеть баланс и покупки этого аккаунта и получать запросы QR.',
+    ].join('\n'), {
+      reply_markup: choiceKeyboard([[{ text: '✅ Да, переключить', callback_data: `cq:link:yes:${token}` }, { text: 'Нет', callback_data: `cq:link:no:${token}` }]]),
     });
   }
   return completeLink(from, chatId, tokenRow);
@@ -1486,6 +1547,8 @@ async function showProfile(from, chatId, messageId) {
     ...(stickers ? [`🏷 Стикеры: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
     `🖥 Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
     `🖨 Печать ячеек: ${cellPrintStatusLine(cellKeys)}`,
+    '',
+    `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ technical }) });
 }
@@ -1974,6 +2037,24 @@ async function notifyMiniAppAuthorized(telegramId) {
   if (session?.draft?.authPromptMessageId) await deleteMessage(session.chat_id, session.draft.authPromptMessageId);
   await clearSession(telegramId);
   await showMainMenu({ id: telegramId }, telegramId, undefined, { notice: '✅ <b>Вход выполнен</b> — кабинет подключён, баланс и покупки доступны.' });
+}
+
+/**
+ * Поддержка связала этот Telegram с аккаунтом сайта (server/_admin-link.js, по RPC с сайта): сбросить связку
+ * и черновик, сообщить человеку. Не бросает — сайт показывает админу { delivered }.
+ */
+async function notifyAccountLinked(telegramId) {
+  userCache.forgetTelegramUser(telegramId);
+  await clearSession(telegramId).catch(error => console.warn('notifyAccountLinked: clear session failed', error.message));
+  try {
+    await showMainMenu({ id: telegramId }, telegramId, undefined, {
+      notice: '✅ <b>Готово:</b> бот связан с вашим аккаунтом на сайте. Баланс, покупки и подписки теперь общие.',
+    });
+    return { delivered: true };
+  } catch (error) {
+    console.warn('notifyAccountLinked: message not delivered', error.message);
+    return { delivered: false };
+  }
 }
 
 // ── Баланс: пополнение и покупки с баланса (server/_wallet.js) ──
@@ -2992,4 +3073,4 @@ function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramI
 /** Админка сняла/поставила ограничение или безлимит — сбросить снимок на узле бота (по RPC с сайта). */
 function invalidateUserControls() { controls.invalidate(); return true; }
 
-module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
