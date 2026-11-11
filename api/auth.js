@@ -2,7 +2,9 @@ const { validateTelegram, validateTelegramWebApp } = require('../server/_telegra
 const { handleTelegramUpdate } = require('../server/_telegram-wb-bot');
 // Уведомления и привязка реферала выполняются на узле бота (BOT_RPC_URL) или локально — см. server/_bot-rpc.js.
 const { callBot } = require('../server/_bot-rpc');
-const notifyMiniAppAuthorized = telegramId => callBot('notifyMiniAppAuthorized', telegramId);
+// reason: 'login' — связка уже была, 'created' — аккаунт создан здесь, 'linked' — Telegram привязан к аккаунту сайта.
+// Бот пишет в чат и сбрасывает черновик только при 'linked' (обычный вход в Mini App ничего не стирает).
+const notifyMiniAppAuthorized = (telegramId, reason) => callBot('notifyMiniAppAuthorized', telegramId, reason);
 const bindTelegramReferral = (telegramId, userId) => callBot('bindTelegramReferral', telegramId, userId);
 const { accountHasValuableData } = require('../server/_telegram-account');
 const { forgetTelegramUser } = require('../server/_telegram-user-cache');
@@ -190,6 +192,8 @@ module.exports = async function handler(req, res) {
       const existing = await findIdentity(telegram.id);
       if (existing && existing.user_id !== user.id) return json(res, 409, { error: 'Этот Telegram уже привязан к другому аккаунту' });
       await saveIdentity(user.id, telegram);
+      // Новая связка: узел бота сбросит закешированное «связки нет» и сообщит в чат. Повторная запись той же — без сообщения.
+      if (!existing) await notifyMiniAppAuthorized(telegram.id, 'linked').catch(error => console.warn('Unable to notify Telegram user about link', error.message));
       return json(res, 200, { linked: true });
     }
 
@@ -206,7 +210,7 @@ module.exports = async function handler(req, res) {
       if (!webAppUser) await bindTelegramReferral(telegram.id, account.id).catch(error => console.warn('Telegram referral bind failed', error.message));
     }
     const tokenHash = await magicLink(account.email);
-    if (webAppUser) await notifyMiniAppAuthorized(telegram.id).catch(error => console.warn('Unable to notify Telegram Mini App user', error.message));
+    if (webAppUser) await notifyMiniAppAuthorized(telegram.id, identity ? 'login' : 'created').catch(error => console.warn('Unable to notify Telegram Mini App user', error.message));
     return json(res, 200, { token_hash: tokenHash });
   } catch (error) {
     console.error('Telegram auth failed', error.message);

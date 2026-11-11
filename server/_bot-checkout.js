@@ -15,34 +15,54 @@ function responseStub() {
   return stub;
 }
 
+/** Ошибка создания оплаты: текст обработчика (для лога), его код и HTTP-статус — по ним бот выбирает, что показать. */
+function checkoutError(message, { code = null, status = null } = {}) {
+  return Object.assign(new Error(message), { code, status });
+}
+
 /**
- * Пополнение баланса из бота. then — что сделать после зачисления (afterWalletTopup), messageId — экран бота,
- * который после оплаты станет «Готово». Возвращает { confirmationUrl, token }; при отказе бросает Error с текстом для человека.
+ * Общий путь: аккаунт по userId → синтетический запрос в api/payments.js → { confirmationUrl, token }.
+ * Нет аккаунта (объединён или удалён, а кеш связки ещё старый) — ошибка ACCOUNT_NOT_FOUND: бот сбросит кеш и повторит.
  */
-async function createTopupPayment({ userId, amount, then = '', messageId = null }, { handler = require('../api/payments'), loadUser = getAuthUser } = {}) {
+async function createPayment(userId, body, { handler = require('../api/payments'), loadUser = getAuthUser } = {}) {
   const account = await loadUser(userId);
-  if (!account?.id) throw new Error('Кабинет не найден — войдите заново');
+  if (!account?.id) throw checkoutError('Account not found for bot checkout', { code: 'ACCOUNT_NOT_FOUND', status: 404 });
   const req = {
     method: 'POST',
     query: { action: 'create' },
     // Лимит попыток считается по этому адресу: у каждого пользователя бота свой счётчик.
     headers: { host: 'shk-wb.ru', 'x-forwarded-for': `telegram-bot:${userId}` },
-    body: {
-      productKind: 'wallet_topup',
-      walletAmount: amount,
-      walletThen: then || undefined,
-      walletMessage: messageId || undefined,
-      accepted: true,
-      returnTo: 'telegram',
-    },
+    body: { ...body, accepted: true, returnTo: 'telegram' },
     internalUser: { id: account.id, email: account.email || null },
   };
   const res = responseStub();
   await handler(req, res);
   if (res.statusCode >= 400 || !res.body?.confirmationUrl) {
-    throw new Error(res.body?.error || `Не удалось создать оплату (${res.statusCode})`);
+    throw checkoutError(res.body?.error || `Не удалось создать оплату (${res.statusCode})`, { code: res.body?.code || null, status: res.statusCode });
   }
   return { confirmationUrl: res.body.confirmationUrl, token: res.body.token || null };
 }
 
-module.exports = { createTopupPayment };
+/**
+ * Пополнение баланса из бота. then — что сделать после зачисления (afterWalletTopup), messageId — экран бота,
+ * который после оплаты станет «Готово». Возвращает { confirmationUrl, token }; при отказе бросает Error с code и status.
+ */
+async function createTopupPayment({ userId, amount, then = '', messageId = null }, deps = {}) {
+  return createPayment(userId, {
+    productKind: 'wallet_topup',
+    walletAmount: amount,
+    walletThen: then || undefined,
+    walletMessage: messageId || undefined,
+  }, deps);
+}
+
+/**
+ * Оплата индивидуального заказа стикеров из бота — тот же путь, что у кабинета (OrdersPage: productKind
+ * individual_stickers + individualOrderId). Обработчик сам проверяет, что заказ этого пользователя и ждёт
+ * оплаты, и отдаёт прежнюю ссылку, если заказ ЮKassa уже создан и не закрыт.
+ */
+async function createIndividualPayment({ userId, orderId }, deps = {}) {
+  return createPayment(userId, { productKind: 'individual_stickers', individualOrderId: orderId }, deps);
+}
+
+module.exports = { createIndividualPayment, createTopupPayment };

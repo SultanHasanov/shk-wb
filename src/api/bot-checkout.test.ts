@@ -2,11 +2,13 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { createTopupPayment } = require('../../server/_bot-checkout.js') as {
+type Deps = { handler?: (req: any, res: any) => Promise<unknown>; loadUser?: (id: string) => Promise<any> };
+const { createIndividualPayment, createTopupPayment } = require('../../server/_bot-checkout.js') as {
   createTopupPayment: (
     input: { userId: string; amount: number; then?: string; messageId?: number | null },
-    deps?: { handler?: (req: any, res: any) => Promise<unknown>; loadUser?: (id: string) => Promise<any> },
+    deps?: Deps,
   ) => Promise<{ confirmationUrl: string; token: string | null }>;
+  createIndividualPayment: (input: { userId: string; orderId: string }, deps?: Deps) => Promise<{ confirmationUrl: string; token: string | null }>;
 };
 
 describe('оплата из бота без Mini App', () => {
@@ -35,6 +37,29 @@ describe('оплата из бота без Mini App', () => {
     });
     const loadUser = vi.fn(async () => ({ id: 'u-2', email: null }));
     await expect(createTopupPayment({ userId: 'u-2', amount: 5 }, { handler, loadUser })).rejects.toThrow('Сумма пополнения');
-    await expect(createTopupPayment({ userId: 'u-3', amount: 100 }, { handler, loadUser: async () => null })).rejects.toThrow('Кабинет не найден');
+    // Нет аккаунта — не «войдите заново», а код: бот сбросит кеш связки и повторит сам.
+    await expect(createTopupPayment({ userId: 'u-3', amount: 100 }, { handler, loadUser: async () => null })).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
+  });
+
+  it('передаёт боту код и статус отказа (ограничение аккаунта, лимит попыток)', async () => {
+    const loadUser = vi.fn(async () => ({ id: 'u-4', email: null }));
+    const restricted = vi.fn(async (_req: any, res: any) => { res.status(403).json({ error: 'Покупки ограничены', code: 'ACCOUNT_RESTRICTED' }); });
+    await expect(createTopupPayment({ userId: 'u-4', amount: 500 }, { handler: restricted, loadUser })).rejects.toMatchObject({ code: 'ACCOUNT_RESTRICTED', status: 403, message: 'Покупки ограничены' });
+    const limited = vi.fn(async (_req: any, res: any) => { res.status(429).json({ error: 'Слишком много запросов' }); });
+    await expect(createTopupPayment({ userId: 'u-4', amount: 500 }, { handler: limited, loadUser })).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('оплата индивидуального заказа — тот же обработчик, что у кабинета, с возвратом в бот', async () => {
+    const seen: any[] = [];
+    const handler = vi.fn(async (req: any, res: any) => {
+      seen.push(req);
+      res.status(200).json({ confirmationUrl: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=2', token: 't2' });
+    });
+    const loadUser = vi.fn(async () => ({ id: 'u-5', email: 'telegram-5@users.invalid' }));
+    const orderId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    expect(await createIndividualPayment({ userId: 'u-5', orderId }, { handler, loadUser })).toEqual({ confirmationUrl: 'https://yoomoney.ru/checkout/payments/v2/contract?orderId=2', token: 't2' });
+    expect(seen[0].body).toEqual({ productKind: 'individual_stickers', individualOrderId: orderId, accepted: true, returnTo: 'telegram' });
+    expect(seen[0].internalUser).toEqual({ id: 'u-5', email: 'telegram-5@users.invalid' });
+    expect(seen[0].headers['x-forwarded-for']).toBe('telegram-bot:u-5');
   });
 });

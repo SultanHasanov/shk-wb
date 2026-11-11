@@ -15,7 +15,7 @@ const { PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = requi
 const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
-const { accountMergeSummary, isTechnicalTelegramUser } = require('./_telegram-account');
+const { accountMergeSummary } = require('./_telegram-account');
 const userCache = require('./_telegram-user-cache');
 const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
@@ -127,8 +127,8 @@ async function findUser(telegramId) {
 }
 
 /**
- * Кабинет для этого Telegram — создаётся сам при первом действии (технический аккаунт, как через Mini App).
- * Бот работает без входа на сайт; настоящий кабинет привязывается по желанию из профиля или «Вход в кабинет».
+ * Аккаунт для этого Telegram — создаётся сам при первом действии (технический аккаунт, как через Mini App).
+ * Бот работает без входа на сайт; связать бота с аккаунтом сайта может только поддержка (server/_admin-link.js).
  */
 async function ensureUser(from) {
   const known = await findUser(from.id);
@@ -327,17 +327,17 @@ const MENU_KEYBOARD = { inline_keyboard: [MENU_ROW] };
 // Во время входа в WB (ждём телефон или SMS-код) — выйти из него можно кнопкой, а не только /cancel.
 const WB_LOGIN_KEYBOARD = { inline_keyboard: [[{ text: 'Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW]] };
 
-function mainMenuKeyboard(signedIn) {
+function mainMenuKeyboard() {
   // По две кнопки в ряд с короткими подписями — меню не растягивается. style (Bot API 9.4) — цвет кнопки.
   return choiceKeyboard([
     [{ text: '🏷 Стикеры и QR для коробок', callback_data: 'menu:stickers' }],
     [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
     [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
-    // Кабинет создаётся сам при первом действии — отдельной кнопки «Войти» нет; привязка настоящего
-    // кабинета с сайта — в профиле («Подключить основной кабинет»). signedIn оставлен для совместимости.
+    // Аккаунт создаётся сам при первом действии — кнопки «Войти» нет. Сайта в меню тоже нет: бот работает
+    // сам по себе, связку с аккаунтом сайта делает поддержка.
     [{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🎁 +10% за друга', callback_data: 'menu:ref' }],
-    [{ text: '📣 Канал', url: CHANNEL_URL, style: 'success' }, { text: '🌐 Сайт', web_app: { url: publicUrl('/') }, style: 'primary' }],
-    [{ text: '🛡 Наш VPN', url: VPN_URL }, { text: '🆘 Поддержка', callback_data: 'menu:support' }],
+    [{ text: '📣 Канал', url: CHANNEL_URL, style: 'success' }, { text: '🛡 Наш VPN', url: VPN_URL }],
+    [{ text: '🆘 Поддержка', callback_data: 'menu:support' }],
   ]);
 }
 
@@ -364,7 +364,6 @@ function greetingTitle(from) {
 
 /** greet — после /start: приветствие по имени вместо заголовка «Главное меню». */
 async function showMainMenu(from, chatId, messageId, { greet = false, invited = false, notice = '' } = {}) {
-  const userId = await findUser(from.id);
   // Без ссылок в тексте: канал, VPN и сайт — кнопками ниже.
   const lines = greet
     ? [
@@ -380,7 +379,7 @@ async function showMainMenu(from, chatId, messageId, { greet = false, invited = 
     ]
     : [notice || '<b>Главное меню</b>'];
   if (invited) lines.push('', 'Вас пригласил коллега — откройте «👤 Профиль», и приглашение засчитается.');
-  await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard(Boolean(userId)) });
+  await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard() });
 }
 
 // Подписанная ссылка на «голый» QR кода клиента (отдаёт api/stickers/image в режиме qr) — общая с подтверждениями.
@@ -1134,19 +1133,6 @@ async function wizardBack(from, chatId, session, messageId) {
   return renderWizard(from, chatId, 'choose_kind', draft, messageId);
 }
 
-function miniAppKeyboard() {
-  return choiceKeyboard([
-    [{ text: 'У меня уже есть кабинет', web_app: { url: publicUrl('/telegram-account') } }],
-    [{ text: '🌐 Открыть сайт', web_app: { url: publicUrl('/') } }],
-    MENU_ROW,
-  ]);
-}
-
-async function sendLoginPrompt(from, chatId, text) {
-  const message = await sendMessage(chatId, text, { reply_markup: miniAppKeyboard() });
-  await saveSession(from, chatId, 'choose_kind', { authPromptMessageId: message.message_id });
-}
-
 // Кнопки пополнения ведут не в Mini App, а на tp:<сумма>[:<then>]: бот сам создаёт заказ ЮKassa и присылает
 // ссылку на оплату (server/_bot-checkout.js). Экран покупки, который после оплаты станет «Готово», — это
 // сообщение с кнопкой, его id известен в момент нажатия, в callback_data его не кладём.
@@ -1195,15 +1181,52 @@ const OFFER_LINE = `Нажимая «Перейти к оплате», вы пр
  * Нажата кнопка пополнения: создать заказ ЮKassa и показать ссылку на оплату в том же сообщении.
  * then — что купить после зачисления (afterWalletTopup), screenId — экран, который после оплаты станет «Готово».
  */
-async function startTopupPayment(from, chatId, amount, then, screenId, missing = null) {
-  const userId = await ensureUser(from);
-  const bonus = wallet.topupBonus(amount);
-  let payment;
+/**
+ * Заказ ЮKassa из бота (server/_bot-checkout.js) за аккаунт этого Telegram. Аккаунта нет — значит, кеш связки
+ * устарел (поддержка объединила аккаунты): сбрасываем кеш, берём аккаунт заново и пробуем ещё раз — один раз.
+ * create(userId) → { confirmationUrl }. Возвращает { userId, payment }.
+ */
+async function createBotPayment(from, create) {
+  let userId = await ensureUser(from);
   try {
-    payment = await require('./_bot-checkout').createTopupPayment({ userId, amount, then, messageId: then ? screenId : null });
+    return { userId, payment: await create(userId) };
   } catch (error) {
-    console.warn('Telegram topup payment failed', error.message);
-    await showScreen(chatId, screenId, `⚠️ ${escapeHtml(error.message)}`, { reply_markup: choiceKeyboard([[{ text: '🔄 Попробовать снова', callback_data: 'topup:home' }], MENU_ROW]) });
+    if (error?.code !== 'ACCOUNT_NOT_FOUND') throw error;
+    console.warn('Bot checkout: account not found, retrying with a fresh link', from.id);
+    userCache.forgetTelegramUser(from.id);
+    userId = await ensureUser(from);
+    return { userId, payment: await create(userId) };
+  }
+}
+
+/**
+ * Не получилось создать оплату: что сказать человеку. Как есть показываем только ответы, написанные для
+ * человека и узнаваемые по коду (ограничение аккаунта); остальное — общий текст, исходная ошибка — в лог.
+ * retry: false — повтор сейчас не поможет (лимит попыток), кнопку «Попробовать снова» не даём.
+ */
+function paymentErrorView(error) {
+  if (error?.code === 'ACCOUNT_RESTRICTED') return { text: `⛔ ${escapeHtml(error.message)}`, retry: false };
+  if (Number(error?.status) === 429) return { text: '⚠️ Слишком много попыток оплаты подряд. Подождите 10 минут и попробуйте снова.', retry: false };
+  return { text: '⚠️ Не получилось создать оплату. Деньги не списаны. Попробуйте ещё раз через минуту, а если не выйдет — напишите в поддержку.', retry: true };
+}
+
+function paymentErrorKeyboard(view, retryData) {
+  return choiceKeyboard([
+    ...(view.retry ? [[{ text: '🔄 Попробовать снова', callback_data: retryData }]] : []),
+    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+    MENU_ROW,
+  ]);
+}
+
+async function startTopupPayment(from, chatId, amount, then, screenId, missing = null) {
+  const bonus = wallet.topupBonus(amount);
+  let userId, payment;
+  try {
+    ({ userId, payment } = await createBotPayment(from, id => require('./_bot-checkout').createTopupPayment({ userId: id, amount, then, messageId: then ? screenId : null })));
+  } catch (error) {
+    console.warn('Telegram topup payment failed', error.code || '', error.message);
+    const view = paymentErrorView(error);
+    await showScreen(chatId, screenId, view.text, { reply_markup: paymentErrorKeyboard(view, 'topup:home') });
     return;
   }
   const balance = then && missing != null ? await walletRub(userId).catch(() => null) : null;
@@ -1221,24 +1244,38 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
   ]) });
 }
 
-function profileKeyboard({ technical = false } = {}) {
+/** Кнопки профиля. orders — у человека есть индивидуальные заказы стикеров: кнопка «Мои заказы». */
+function profileKeyboard({ orders = false } = {}) {
   const rows = [
     [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '🛒 Купить с баланса', callback_data: 'shop:home' }],
     [{ text: '👥 Пригласить друга', callback_data: 'menu:ref' }, { text: '🔑 Ввести код доступа', callback_data: 'code:enter' }],
   ];
-  if (technical) rows.push([{ text: 'Подключить основной кабинет', web_app: { url: publicUrl('/telegram-account') } }]);
+  if (orders) rows.push([{ text: '📦 Мои заказы', callback_data: 'orders:list' }]);
   rows.push(MENU_ROW);
   return choiceKeyboard(rows);
 }
 
-/** Текст ошибки claim_user_asset для человека; null — ошибка не из этих, пусть летит дальше. */
-function claimErrorText(error) {
+/**
+ * Ответ claim_user_asset для человека: { text, retry } — retry: бот ждёт код дальше (опечатка в цифрах).
+ * null — ошибка не из этих, пусть летит дальше.
+ */
+function claimError(error) {
   const details = JSON.stringify(error?.details || error?.message || '');
-  if (details.includes('Asset belongs to another user')) return 'Этот код уже привязан к другому аккаунту. Если это ваш код, напишите в поддержку.';
-  if (details.includes('Asset not found')) return 'Код не найден. Проверьте цифры и отправьте код ещё раз.';
-  if (details.includes('User is not confirmed')) return 'Кабинет не подтверждён. Откройте сайт через Mini App и войдите заново.';
+  if (details.includes('Asset belongs to another user')) return { text: 'Этот код уже принадлежит другому аккаунту. Если код ваш (например, куплен на сайте) — напишите в поддержку, перенесём его в бот.', retry: false };
+  if (details.includes('Asset not found')) return { text: 'Код не найден. Проверьте цифры и пришлите код ещё раз.', retry: true };
+  if (details.includes('User is not confirmed')) return { text: 'Не получилось добавить код. Напишите в поддержку — поможем.', retry: false };
   return null;
 }
+
+function claimErrorText(error) {
+  return claimError(error)?.text || null;
+}
+
+// Под ответами о коде доступа: отмена ввода и поддержка (раньше ответ приходил без кнопок, выйти — только /cancel).
+const ACCESS_CODE_REPLY_KEYBOARD = choiceKeyboard([
+  [{ text: '✖️ Отмена', callback_data: 'gen:cancel' }],
+  [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+]);
 
 /**
  * Попытка из лимита «N в час на Telegram ID» (коды доступа, вход в программу). Счётчик в базе
@@ -1277,20 +1314,23 @@ async function askAccessCode(from, chatId, draft = {}) {
 async function redeemAccessCode(from, chatId, session, text) {
   const draft = session.draft || {};
   const code = normalizeAccessCode(text.replace(/\s+/g, ''));
-  if (!isAccessCode(code)) return sendMessage(chatId, 'Код — это 6 цифр, например <code>123456</code>. Отправьте его ещё раз или нажмите /cancel.');
+  if (!isAccessCode(code)) return sendMessage(chatId, 'Код — это 6 цифр, например <code>123456</code>. Пришлите его ещё раз.', { reply_markup: ACCESS_CODE_REPLY_KEYBOARD });
   if (!await consumeCodeAttempt(from.id)) return sendMessage(chatId, 'Слишком много попыток. Попробуйте через час.', { reply_markup: MENU_KEYBOARD });
   try {
     await supabaseFetch('rpc/claim_user_asset', { method: 'POST', body: JSON.stringify({ p_user_id: draft.userId, p_kind: 'sticker', p_value: code }) });
   } catch (error) {
-    const reason = claimErrorText(error);
+    const reason = claimError(error);
     if (!reason) throw error;
-    return sendMessage(chatId, reason);
+    // Опечатка — ждём код дальше; чужой код или сбой проверки — ввод закончен, дальше только поддержка.
+    if (reason.retry) return sendMessage(chatId, reason.text, { reply_markup: ACCESS_CODE_REPLY_KEYBOARD });
+    await clearSession(from.id);
+    return sendMessage(chatId, reason.text, { reply_markup: supportKeyboard() });
   }
   const rows = await supabaseFetch(`sticker_access_codes?code=eq.${encodeURIComponent(code)}&select=active,generation_limit,generation_used&limit=1`);
   const row = rows[0];
   if (row && !row.active) {
     await clearSession(from.id);
-    return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> привязан к кабинету, но сейчас отключён. Обратитесь к тому, кто выдал код.`, { reply_markup: MENU_KEYBOARD });
+    return sendMessage(chatId, `Код <code>${escapeHtml(code)}</code> добавлен, но сейчас отключён. Обратитесь к тому, кто его выдал.`, { reply_markup: supportKeyboard() });
   }
   const left = row ? Math.max(0, Number(row.generation_limit || 0) - Number(row.generation_used || 0)) : 0;
   await sendMessage(chatId, `✅ Код <code>${escapeHtml(code)}</code> добавлен: <b>+${left}</b> генераций.`, { reply_markup: MENU_KEYBOARD });
@@ -1525,7 +1565,7 @@ async function runGeneration(from, chatId, messageId, session, onDuplicate = asy
   } catch (error) {
     console.warn('Telegram sticker delivery failed', error.message);
     const retryRows = result.variant === 'box'
-      ? [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], [{ text: '🌐 История в кабинете', web_app: { url: publicUrl('/cabinet/history') } }], MENU_ROW]
+      ? [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], [{ text: '🌐 История стикеров на сайте', web_app: { url: publicUrl('/cabinet/history') } }], MENU_ROW]
       : [[{ text: '📄 Скачать PDF', url: absoluteAssetUrl(result.pdfUrl) }], ...formatKeyboard(requestId).inline_keyboard];
     await sendMessage(chatId, `Стикеры созданы (${result.quantity || 1} шт.), но Telegram не принял файл. Скачайте PDF по кнопке — повторно платить не нужно.`, { reply_markup: choiceKeyboard(retryRows) }).catch(() => {});
     return;
@@ -1672,13 +1712,14 @@ function dayMonthShort(value) {
 async function showProfile(from, chatId, messageId) {
   const userId = await ensureUser(from);
   const id = encodeURIComponent(userId);
-  const [codes, balance, ent, cellKeys, free, technical] = await Promise.all([
+  const [codes, balance, ent, cellKeys, free, orders] = await Promise.all([
     supabaseFetch(`sticker_access_codes?owner_user_id=eq.${id}&active=eq.true&select=generation_limit,generation_used`),
     walletRub(userId).catch(() => 0),
     supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
     supabaseFetch(`cell_print_licenses?owner_user_id=eq.${id}&active=eq.true&select=activated_at,expires_at`).catch(() => []),
     helperFreeText(),
-    isTechnicalTelegramUser(userId),
+    // Индивидуальные заказы — редкость: кнопка «Мои заказы» только у тех, у кого они есть. Сбой — без кнопки.
+    supabaseFetch(`individual_sticker_orders?user_id=eq.${id}&select=id&limit=1`).catch(() => []),
   ]);
   const stickers = codes.reduce((sum, row) => sum + remainingOf(row), 0);
   const text = [
@@ -1691,7 +1732,7 @@ async function showProfile(from, chatId, messageId) {
     '',
     `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
   ].join('\n');
-  await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ technical }) });
+  await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ orders: Array.isArray(orders) && orders.length > 0 }) });
 }
 
 async function showHelp(chatId, messageId) {
@@ -2147,37 +2188,112 @@ async function beginPointSelection(from, chatId, connection) {
   await sendMessage(chatId, '<b>Выберите ПВЗ</b>', { reply_markup: pointKeyboard(points) });
 }
 
+// Ссылки на PDF индивидуального заказа подписаны на час: сообщение со списком устаревает,
+// свежие ссылки — снова по кнопке «Мои заказы».
+const ORDER_PDF_PART = 500;
+const ORDER_PDF_TTL_S = 3600;
+
+function individualPdfRows(order) {
+  const parts = Math.ceil(Number(order.quantity) / ORDER_PDF_PART);
+  const expires = Math.floor(Date.now() / 1000) + ORDER_PDF_TTL_S;
+  const rows = [];
+  for (let part = 0; part < parts; part += 1) {
+    const signedValue = `individual:${order.id}:${part}:${expires}`;
+    const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
+    rows.push([{ text: `📄 PDF ${part + 1} из ${parts}`, url: publicUrl(`/api/stickers/pdf?individual=${encodeURIComponent(order.id)}&part=${part}&expires=${expires}&token=${encodeURIComponent(token)}`) }]);
+  }
+  return rows;
+}
+
+/** Экран одного индивидуального заказа: { text, rows }. Оплата — в боте (ord:pay), каждый стикер — по желанию на сайте. */
+function individualOrderView(order) {
+  const title = `<b>${escapeHtml(order.title)}</b>`;
+  const amount = wallet.formatRub(Number(order.amount_due || 0));
+  if (order.status === 'paid') {
+    return {
+      text: `${title}\n${order.quantity} стикеров · оплачен ✅\nPDF — кнопками ниже. Ссылки действуют час, потом откройте «Мои заказы» снова.`,
+      rows: [
+        ...individualPdfRows(order),
+        // Просмотр по одному стикеру боту заменить нечем — открываем историю на сайте, с понятной подписью.
+        [{ text: '🌐 Каждый стикер — на сайте', web_app: { url: publicUrl('/cabinet/history') } }],
+      ],
+    };
+  }
+  if (order.status === 'canceled') return { text: `${title}\n${order.quantity} стикеров · заказ отменён`, rows: [] };
+  return {
+    text: `${title}\n${order.quantity} стикеров · ${amount}\nОплатите — и PDF появятся здесь, в боте.`,
+    // ord:pay:<uuid> — 44 байта, в лимит callback_data (64) укладывается.
+    rows: [[{ text: `💳 Оплатить ${amount}`, callback_data: `ord:pay:${order.id}` }]],
+  };
+}
+
 async function showIndividualOrders(from, chatId) {
-  const userId = await findUser(from.id);
-  if (!userId) return sendMessage(chatId, 'Сначала подключите кабинет.', { reply_markup: miniAppKeyboard() });
+  const userId = await ensureUser(from);
   const orders = await supabaseFetch(`individual_sticker_orders?user_id=eq.${encodeURIComponent(userId)}&select=id,title,quantity,amount_due,status&order=created_at.desc&limit=10`);
-  if (!orders.length) return sendMessage(chatId, 'Индивидуальных заказов пока нет.', { reply_markup: MENU_KEYBOARD });
-  for (const order of orders) {
-    const paid = order.status === 'paid';
-    const rows = [[{ text: paid ? '🌐 Посмотреть каждый стикер' : `💳 Оплатить ${Number(order.amount_due).toFixed(2)} ₽`, web_app: { url: publicUrl(paid ? '/cabinet/history' : '/cabinet/orders') } }]];
-    if (paid) {
-      const parts = Math.ceil(Number(order.quantity) / 500);
-      const expires = Math.floor(Date.now()/1000)+3600;
-      for (let part=0;part<parts;part+=1) {
-        const signedValue=`individual:${order.id}:${part}:${expires}`;
-        const token=crypto.createHmac('sha256',process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
-        rows.push([{text:`📄 PDF ${part+1} из ${parts}`,url:publicUrl(`/api/stickers/pdf?individual=${encodeURIComponent(order.id)}&part=${part}&expires=${expires}&token=${encodeURIComponent(token)}`)}]);
-      }
-    }
-    await sendMessage(chatId, `<b>${escapeHtml(order.title)}</b>\n${order.quantity} стикеров\nСтатус: ${paid?'оплачен ✅':'ожидает оплаты'}`, { reply_markup: choiceKeyboard(rows) });
+  if (!orders.length) {
+    return sendMessage(chatId, 'Индивидуальных заказов пока нет. Нужен большой заказ стикеров — напишите в поддержку.', { reply_markup: supportKeyboard() });
+  }
+  for (const [index, order] of orders.entries()) {
+    const view = individualOrderView(order);
+    // Меню — под последним заказом, чтобы из списка было куда уйти.
+    const rows = index === orders.length - 1 ? [...view.rows, MENU_ROW] : view.rows;
+    await sendMessage(chatId, view.text, rows.length ? { reply_markup: choiceKeyboard(rows) } : {});
   }
 }
 
-async function notifyMiniAppAuthorized(telegramId) {
-  // Связку записал сайт (другой процесс): узел бота мог только что закешировать «связки нет» —
-  // иначе меню и кнопки ещё минуту отвечают «Кабинет не подключён».
+/** «Оплатить» под индивидуальным заказом: заказ ЮKassa здесь же, ссылка на оплату — в том же сообщении. */
+async function payIndividualOrder(from, chatId, messageId, orderId) {
+  let userId, payment;
+  try {
+    ({ userId, payment } = await createBotPayment(from, id => require('./_bot-checkout').createIndividualPayment({ userId: id, orderId })));
+  } catch (error) {
+    console.warn('Telegram individual order payment failed', error.code || '', error.message);
+    // «Заказ не найден или уже оплачен» — 404 от обработчика: показываем свежий список вместо общего «не получилось».
+    if (Number(error?.status) === 404 && error?.code !== 'ACCOUNT_NOT_FOUND') {
+      await showScreen(chatId, messageId, 'Этот заказ уже оплачен или отменён.', { reply_markup: choiceKeyboard([[{ text: '📦 Мои заказы', callback_data: 'orders:list' }], MENU_ROW]) });
+      return;
+    }
+    const view = paymentErrorView(error);
+    await showScreen(chatId, messageId, view.text, { reply_markup: paymentErrorKeyboard(view, `ord:pay:${orderId}`) });
+    return;
+  }
+  const rows = await supabaseFetch(`individual_sticker_orders?id=eq.${encodeURIComponent(orderId)}&user_id=eq.${encodeURIComponent(userId)}&select=title,quantity,amount_due&limit=1`).catch(() => []);
+  const order = rows[0];
+  const amount = order ? wallet.formatRub(Number(order.amount_due || 0)) : '';
+  await showScreen(chatId, messageId, [
+    order ? `<b>💳 Оплата заказа «${escapeHtml(order.title)}»</b>` : '<b>💳 Оплата заказа</b>',
+    ...(order ? [`${order.quantity} стикеров · ${amount}`] : []),
+    'Откроется страница оплаты ЮKassa. После оплаты я пришлю сюда сообщение, PDF будут в «Мои заказы».',
+    '',
+    OFFER_LINE,
+  ].join('\n'), { reply_markup: choiceKeyboard([
+    [{ text: `💳 Перейти к оплате${amount ? ` ${amount}` : ''}`, url: payment.confirmationUrl }],
+    [{ text: '📦 Мои заказы', callback_data: 'orders:list' }],
+    MENU_ROW,
+  ]) });
+}
+
+// Причины, по которым сайт сообщает о входе через Telegram (api/auth.js). Сообщение в чат и сброс черновика —
+// только когда связка действительно поменялась; обычный вход в Mini App (кнопка истории на сайте и т. п.)
+// ничего не пишет и не стирает начатый мастер.
+const LINK_CHANGED_REASONS = new Set(['linked']);
+
+/**
+ * Сайт записал связку Telegram с аккаунтом (вход в Mini App, виджет, привязка в кабинете).
+ * reason: 'login' (связка была) | 'created' (аккаунт создан сайтом) | 'linked' (Telegram привязан к аккаунту
+ * сайта в кабинете). Без reason — старый сайт, это обычный вход.
+ */
+async function notifyMiniAppAuthorized(telegramId, reason = 'login') {
+  // Связку записал сайт (другой процесс): узел бота мог только что закешировать «связки нет».
   userCache.forgetTelegramUser(telegramId);
-  // Пришёл по приглашению и только что создал кабинет — привязываем к пригласившему.
+  // Пришёл по приглашению и только что создал аккаунт — привязываем к пригласившему.
   await bindTelegramReferral(telegramId).catch(error => console.warn('Telegram referral bind failed', error.message));
-  const session = await getSession(telegramId);
-  if (session?.draft?.authPromptMessageId) await deleteMessage(session.chat_id, session.draft.authPromptMessageId);
-  await clearSession(telegramId);
-  await showMainMenu({ id: telegramId }, telegramId, undefined, { notice: '✅ <b>Вход выполнен</b> — кабинет подключён, баланс и покупки доступны.' });
+  if (!LINK_CHANGED_REASONS.has(reason)) return;
+  // В черновике мог остаться прежний userId — начинаем с чистого.
+  await clearSession(telegramId).catch(error => console.warn('notifyMiniAppAuthorized: clear session failed', error.message));
+  await showMainMenu({ id: telegramId }, telegramId, undefined, {
+    notice: '✅ <b>Готово:</b> Telegram привязан к вашему аккаунту на сайте. Баланс и покупки в боте и на сайте теперь общие.',
+  }).catch(error => console.warn('notifyMiniAppAuthorized: message not delivered', error.message));
 }
 
 /**
@@ -2199,8 +2315,6 @@ async function notifyAccountLinked(telegramId) {
 }
 
 // ── Баланс: пополнение и покупки с баланса (server/_wallet.js) ──
-
-const LOGIN_FOR_WALLET = 'Баланс хранится в кабинете shk-wb.ru. Войдите через Telegram — это пара секунд, кабинет создастся сам.';
 
 async function showTopup(from, chatId, messageId) {
   const userId = await ensureUser(from);
@@ -2502,6 +2616,8 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
 // ── Рефералка (поверх referral_accounts / bind_referral сайта, миграция 20261025_bot_referrals.sql) ──
 
 const REFERRAL_PERCENT = 10; // = award_referral_order (0.10) в SQL — менять вместе
+// Минимум вывода реферальных денег на карту = WithdrawalInput в api/cabinet.js (50 000 коп.) — менять вместе.
+const REFERRAL_WITHDRAW_MIN_RUB = 500;
 const REFERRAL_PAYLOAD = /^r_([A-Za-z0-9]{6,16})$/;
 let cachedBotUsername = null;
 
@@ -2591,6 +2707,7 @@ async function showReferrals(from, chatId, messageId, notice) {
     '',
     `Приглашено: <b>${invited.length}</b> · заработано: <b>${wallet.formatRub(earned)}</b>`,
     `Доступно: <b>${wallet.formatRub(available)}</b>`,
+    `Вывод на карту — от ${wallet.formatRub(REFERRAL_WITHDRAW_MIN_RUB)}, через поддержку.`,
   ].join('\n');
   const share = links.telegram || links.site;
   const shareText = 'Стикеры и QR для возвратов WB, код клиента и отзывы ПВЗ — бот shk-wb.ru';
@@ -2599,7 +2716,8 @@ async function showReferrals(from, chatId, messageId, notice) {
     [{ text: '📋 Скопировать ссылку', copy_text: { text: share } }],
     [{ text: '📤 Поделиться ссылкой', url: `https://t.me/share/url?url=${encodeURIComponent(share)}&text=${encodeURIComponent(shareText)}` }],
     ...(available > 0 ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
-    [{ text: '🏦 Вывести на карту (от 500 ₽)', web_app: { url: publicUrl('/cabinet/referrals') } }],
+    // Вывод — через поддержку (сайт для этого не нужен); кнопка только когда сумма уже доступна к выводу.
+    ...(available >= REFERRAL_WITHDRAW_MIN_RUB ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_URL }]] : []),
     MENU_ROW,
   ]) });
 }
@@ -2660,11 +2778,23 @@ async function afterWalletTopup(order, noticeId = null) {
   return false;
 }
 
-async function showSupport(chatId, messageId) {
-  const text = [
+/** Экран поддержки: что прислать, Telegram ID (нажатием копируется) и связка с покупками на сайте. */
+function supportText(from) {
+  return [
     '<b>🆘 Поддержка</b>',
-    'Есть вопрос или что-то не работает — напишите нам. Скриншот ускорит ответ.',
+    'Есть вопрос или что-то не работает — напишите нам, отвечает человек.',
+    '',
+    'Чтобы помочь быстрее, пришлите:',
+    '• скриншот экрана с проблемой;',
+    '• код ошибки, если бот его показал;',
+    ...(from?.id ? [`• ваш ID: <code>${Number(from.id)}</code> (нажмите, чтобы скопировать).`] : []),
+    '',
+    'Покупали на сайте shk-wb.ru? Напишите — свяжем сайт с ботом, баланс и покупки станут общими.',
   ].join('\n');
+}
+
+async function showSupport(from, chatId, messageId) {
+  const text = supportText(from);
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
     [{ text: '❓ Как пользоваться ботом', callback_data: 'menu:help' }],
@@ -2680,7 +2810,7 @@ async function cancelWbLogin(from, chatId) {
 
 /** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
 async function handleMenu(from, chatId, item, messageId) {
-  // Три независимых запроса — параллельно: черновик мастера, незаконченный вход в WB и связка с кабинетом
+  // Три независимых запроса — параллельно: черновик мастера, незаконченный вход в WB и связка с аккаунтом
   // (последняя греет кеш для экрана, который откроется ниже).
   await Promise.all([
     // Ушли из мастера кнопкой меню — его черновик больше не нужен.
@@ -2695,10 +2825,11 @@ async function handleMenu(from, chatId, item, messageId) {
   if (item === 'helper') return showHelperInfo(chatId, messageId);
   if (item === 'cellprint') return showCellPrintInfo(chatId, messageId);
   if (item === 'profile') return showProfile(from, chatId, messageId);
-  if (item === 'support') return showSupport(chatId, messageId);
+  // menu:login — кнопка «Войти» из старых сообщений. Входить никуда не нужно; связать бота с аккаунтом
+  // сайта может поддержка — показываем её экран.
+  if (item === 'support' || item === 'login') return showSupport(from, chatId, messageId);
   if (item === 'ref') return showReferrals(from, chatId, messageId);
   if (item === 'help') return showHelp(chatId, messageId);
-  if (item === 'login') return sendLoginPrompt(from, chatId, '<b>Кабинет на сайте</b>\n\nБот работает и без сайта: баланс и покупки хранятся в кабинете, который создаётся сам. Уже покупали на shk-wb.ru? Подключите тот кабинет — «У меня уже есть кабинет».');
   return showMainMenu(from, chatId, messageId);
 }
 
@@ -2881,6 +3012,8 @@ async function handleCallback(callback) {
   const numMatch = data.match(/^gen:num:(\d{11})$/);
   if (numMatch) { answerCallbackQuery(callback.id).catch(() => {}); await startWithCode(from, chatId, numMatch[1], messageId); return; }
   if (data === 'orders:list') { answerCallbackQuery(callback.id).catch(() => {}); await showIndividualOrders(from, chatId); return; }
+  const orderPay = data.match(/^ord:pay:([0-9a-f-]{36})$/i);
+  if (orderPay) { answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {}); await payIndividualOrder(from, chatId, messageId, orderPay[1].toLowerCase()); return; }
   if (data === 'gen:cancel') {
     answerCallbackQuery(callback.id).catch(() => {}); await clearSession(from.id);
     await showScreen(chatId, messageId, 'Генерация отменена.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
@@ -2906,6 +3039,7 @@ async function handleCallback(callback) {
     await askAccessCode(from, chatId, current?.state === 'confirm' && current.draft?.mode ? current.draft : {});
     return;
   }
+  // Устаревшая кнопка (старый экран входа на сайт) — бот её больше не создаёт, в старых сообщениях ведёт в меню.
   if (data === 'account:continue') { answerCallbackQuery(callback.id).catch(() => {}); await showMainMenu(from, chatId); return; }
   const formatMatch = data.match(/^gen:format:(old|new):([^:]+:\d+)$/);
   if (formatMatch) {
@@ -2980,7 +3114,7 @@ async function handleMessage(message) {
   touchSubscriber(from, chatId, text).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
   if (startMatch) {
-    // Сброс черновика и связка с кабинетом (греет кеш для меню) — параллельно.
+    // Сброс черновика и связка с аккаунтом (греет кеш) — параллельно.
     await Promise.all([clearSession(from.id), findUser(from.id).catch(() => null)]);
     // t.me/<бот>?start=link_<token> — привязать этот Telegram к аккаунту из программы «Помощник ПВЗ».
     const link = LINK_PAYLOAD.exec(startMatch[1] || '');

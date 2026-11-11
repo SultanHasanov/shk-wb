@@ -7,7 +7,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   publicUrl: (path: string) => string;
   validWebhookSecret: (req: {headers: Record<string, string>}) => boolean;
   LEGACY_BUTTONS: Set<string>;
-  mainMenuKeyboard: (signedIn: boolean) => {inline_keyboard: Array<Array<Record<string, any>>>};
+  mainMenuKeyboard: () => {inline_keyboard: Array<Array<Record<string, any>>>};
   profileKeyboard: (options?: Record<string, boolean>) => {inline_keyboard: Array<Array<Record<string, any>>>};
   topupRows: (missing?: number) => Array<Array<Record<string, any>>>;
   isBonusAdmin: (telegramId: number) => boolean;
@@ -47,6 +47,10 @@ describe('Telegram sticker generator bot', () => {
   it('предлагает ввести код при покупке и в профиле', () => {
     const profile = bot.profileKeyboard().inline_keyboard.flat().map(button => button.callback_data);
     expect(profile).toEqual(expect.arrayContaining(['topup:home', 'shop:home', 'code:enter', 'menu:home']));
+    // Подключать «основной кабинет» из профиля больше нельзя — только через поддержку.
+    expect(bot.profileKeyboard().inline_keyboard.flat().some(button => button.web_app)).toBe(false);
+    expect(profile).not.toContain('orders:list');
+    expect(bot.profileKeyboard({ orders: true }).inline_keyboard.flat().map(button => button.callback_data)).toContain('orders:list');
   });
 
   it('показывает короткий выбор режима без цен и лишней отмены', () => {
@@ -100,6 +104,10 @@ describe('Telegram sticker generator bot', () => {
   it('переводит ошибки привязки кода на понятный язык', () => {
     expect(bot.claimErrorText({ details: { message: 'Asset not found' } })).toMatch(/не найден/);
     expect(bot.claimErrorText({ details: { message: 'Asset belongs to another user' } })).toMatch(/другому аккаунту/);
+    // Без сайта, Mini App и «кабинета»: дальше — только поддержка.
+    const notConfirmed = bot.claimErrorText({ details: { message: 'User is not confirmed' } });
+    expect(notConfirmed).toMatch(/поддержку/);
+    expect(notConfirmed).not.toMatch(/Mini App|сайт|[Кк]абинет/);
     expect(bot.claimErrorText(new Error('Supabase request failed (500)'))).toBeNull();
   });
 
@@ -109,17 +117,17 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.validWebhookSecret({ headers: { 'x-telegram-bot-api-secret-token': 'telegram-wrong-value' } })).toBe(false);
   });
 
-  it('строит абсолютные Mini App URL', () => {
+  it('строит абсолютные URL, а главное меню не уводит на сайт', () => {
     process.env.PUBLIC_APP_URL = 'https://example.test/';
     expect(bot.publicUrl('/login')).toBe('https://example.test/login');
-    const menu = bot.mainMenuKeyboard(true).inline_keyboard.flat();
-    expect(menu.find(button => button.web_app)?.web_app.url).toMatch(/^https:\/\//);
+    const menu = bot.mainMenuKeyboard().inline_keyboard.flat();
+    // Бот работает сам по себе: ни Mini App сайта, ни кнопки «Войти» в меню нет.
+    expect(menu.some(button => button.web_app)).toBe(false);
+    expect(menu.some(button => /Сайт/.test(String(button.text)))).toBe(false);
+    expect(menu.some(button => button.callback_data === 'menu:login')).toBe(false);
     expect(menu.some(button => button.callback_data === 'menu:profile')).toBe(true);
     expect(menu.some(button => button.callback_data === 'menu:ref')).toBe(true);
-    // Кабинет создаётся сам при первом действии — отдельной кнопки «Войти» нет даже без связки.
-    const guest = bot.mainMenuKeyboard(false).inline_keyboard.flat();
-    expect(guest.some(button => button.callback_data === 'menu:login')).toBe(false);
-    expect(guest.some(button => button.callback_data === 'menu:profile')).toBe(true);
+    expect(menu.some(button => button.callback_data === 'menu:support')).toBe(true);
     // Постоянной клавиатуры больше нет; подписи старых reply-кнопок известны — по ним бот снимает её у человека.
     for (const label of ['☰ Меню', '🏷 Стикеры и QR', '🆘 Помощь', '🌐 Открыть сайт', '📦 QR для коробок']) expect(bot.LEGACY_BUTTONS.has(label)).toBe(true);
     expect(bot.LEGACY_BUTTONS.has('/menu')).toBe(false);
@@ -139,7 +147,7 @@ describe('Telegram sticker generator bot', () => {
     expect(bot.maskWbPhone(79600003574)).toBe('+7 960 ***-35-74');
     expect(bot.maskWbPhone(79201112233)).toBe('+7 920 111-22-33');
     expect(bot.reviewText({ stars: 1, comment: '<плохо>', rate_dt: '2026-10-06T10:00:00+03:00' }, 1, 6)).toContain('&lt;плохо&gt;');
-    expect(bot.mainMenuKeyboard(true).inline_keyboard.flat().some(button => button.callback_data === 'menu:reviews')).toBe(true);
+    expect(bot.mainMenuKeyboard().inline_keyboard.flat().some(button => button.callback_data === 'menu:reviews')).toBe(true);
   });
 
   it('кнопки пополнения создают оплату в боте (без Mini App) и не предлагают суммы меньше нехватки', () => {
