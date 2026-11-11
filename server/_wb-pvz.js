@@ -157,18 +157,30 @@ function desktopHeaders(session, includeToken = false) {
   return headers;
 }
 
-async function requestCode(session, phone) {
+/** Ответ WB 200 без токена: текст самого WB (если есть) — в wbMessage, как у ошибок HTTP в request(). */
+function noTokenError(data, fallback) {
+  const wbMessage = messageFrom(data, null);
+  const error = new WbPvzError(wbMessage || fallback);
+  error.wbMessage = wbMessage;
+  return error;
+}
+
+/**
+ * Запросить код входа. resend — повторная отправка на тот же номер с того же устройства («Выслать код заново»):
+ * WB различает первый запрос и повтор флагом resend; как он отвечает на повтор с resend: false, не проверено.
+ */
+async function requestCode(session, phone, { resend = false } = {}) {
   const result = await request(session, `${ORGS_ORIGIN}/api/v1/login`, {
     method: 'POST', headers: desktopHeaders(session), body: {
       device_type: 'DEVICE_ANDROID',
       device_uuid: session.deviceId,
       phone: String(phone),
-      resend: false,
+      resend: Boolean(resend),
     },
   });
   const payload = result.data?.data ?? result.data;
   const loginToken = tokenValue(payload) || tokenValue(payload?.token) || tokenValue(result.data?.token);
-  if (!loginToken) throw new WbPvzError(messageFrom(result.data, 'WB Desktop не вернул токен подтверждения'));
+  if (!loginToken) throw noTokenError(result.data, 'WB Desktop не вернул токен подтверждения');
   session.phone = phone;
   session.desktopLoginToken = loginToken;
   session.authKind = 'desktop';
@@ -188,7 +200,7 @@ async function confirmCode(session, code) {
   });
   const payload = result.data?.data && typeof result.data.data === 'object' ? result.data.data : result.data;
   const token = tokenValue(payload?.access) || tokenValue(payload?.token) || tokenValue(payload?.access_token);
-  if (!token) throw new WbPvzError(messageFrom(result.data, 'WB Desktop не вернул access token'));
+  if (!token) throw noTokenError(result.data, 'WB Desktop не вернул access token');
   session.token = token;
   session.desktopToken = token;
   session.authKind = 'desktop';

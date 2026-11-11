@@ -121,7 +121,7 @@ describe('телефон и код', () => {
   it('10 цифр с девятки дополняются семёркой; в ответе только последние 4 цифры и кнопки нового кода', async () => {
     const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: string) => ({ session: { ...session, phone, desktopLoginToken: 'lt' }, ttl: 60 }));
     await bot.processUpdate(message('999 123-45-67'));
-    expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567');
+    expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567', { resend: false });
     const text = String(lastScreen().body.text);
     expect(text).toContain('<b>4567</b>');
     expect(text).not.toContain('9991234567');
@@ -136,6 +136,25 @@ describe('телефон и код', () => {
     expect(request).not.toHaveBeenCalled();
     expect(lastScreen().body.text).toContain('только по российским номерам +7');
     expect(buttons().some(button => button.url)).toBe(true);
+  });
+
+  it('12 цифр не с семёрки без «+» — тоже номер другой страны', async () => {
+    const request = vi.spyOn(wbPvz, 'requestCode');
+    await bot.processUpdate(message('375291234567'));
+    expect(request).not.toHaveBeenCalled();
+    expect(lastScreen().body.text).toContain('только по российским номерам +7');
+  });
+
+  it('11 цифр не с 7/8 (ШК, опечатка) — обычная подсказка про ШК, без «другой страны» и поддержки', async () => {
+    const request = vi.spyOn(wbPvz, 'requestCode');
+    await bot.processUpdate(message('12345678901'));
+    expect(request).not.toHaveBeenCalled();
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('Это не похоже на номер телефона');
+    expect(text).toContain('Прислали ШК');
+    expect(text).not.toContain('российским номерам');
+    expect(buttons().some(button => button.url)).toBe(false);
+    expect(actions()).toContain('rv:cancel');
   });
 
   it('вопрос словами вместо номера не удаляется молча: подсказка и «Отменить вход»', async () => {
@@ -161,6 +180,17 @@ describe('телефон и код', () => {
     vi.spyOn(wbPvz, 'requestCode').mockRejectedValueOnce(wbError(429));
     await bot.processUpdate(message('79991234567'));
     expect(lastScreen().body.text).toContain('слишком много попыток');
+  });
+
+  it('WB ответил 200 без токена, но со своим текстом — показываем текст WB, а не «WB не отвечает»', async () => {
+    world.wb = { state: 'await_code', session: { deviceId: 'dev', phone: '79991234567', desktopLoginToken: 'lt' }, updated_at: new Date().toISOString() };
+    const base = (globalThis.fetch as any).getMockImplementation();
+    (globalThis.fetch as any).mockImplementation(async (url: string, init: RequestInit) => (
+      String(url).includes('/api/v1/validate') ? json({ message: 'Неверный код' }) : base(url, init)));
+    await bot.processUpdate(message('1234'));
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('WB ответил: «Неверный код»');
+    expect(text).not.toContain('не отвечает');
   });
 
   it('неверный код — понятный текст и те же кнопки, без сырого ответа', async () => {
@@ -195,7 +225,7 @@ describe('«Выслать код заново» и «Другой номер»'
     const request = vi.spyOn(wbPvz, 'requestCode').mockImplementation(async (session: any, phone: string) => ({ session: { ...session, phone, desktopLoginToken: 'lt2' }, ttl: 60 }));
     await bot.processUpdate(press('rv:resend', 70));
     expect(request).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567');
+    expect(request).toHaveBeenCalledWith(expect.anything(), '79991234567', { resend: true });
     expect(lastScreen().method).toBe('editMessageText');
     expect(lastScreen().body.text).toContain('Новый код от WB');
     await bot.processUpdate(press('rv:resend', 70));
@@ -292,6 +322,15 @@ describe('ошибки WB', () => {
     expect(world.wb?.state).toBe('await_phone');
   });
 
+  it('401 на «Кто поставил» — к входу заново и прямо «Деньги не списаны»', async () => {
+    vi.spyOn(wbPvz, 'loadReviews').mockRejectedValue(wbError(401));
+    await bot.processUpdate(press('rv:who2:5:0:0:07d5a547', 333));
+    expect(allText()).toContain('Вход в WB устарел');
+    expect(allText()).toContain('Деньги не списаны');
+    expect(db.some(call => call.path === 'rpc/bot_review_spend')).toBe(false);
+    expect(world.wb?.state).toBe('await_phone');
+  });
+
   it('сбой WB — «WB сейчас не отвечает» и «Повторить» той же кнопкой', async () => {
     vi.spyOn(wbPvz, 'loadReviews').mockRejectedValue(wbError(502));
     await bot.processUpdate(press('rv:page:all:2'));
@@ -367,6 +406,24 @@ describe('«Кто поставил оценку»', () => {
     expect(toasts()).toContain('Ищу клиента в WB…');
   });
 
+  it('не хватило денег — пэйвол под отзывом; после пополнения карточка тоже ответом на этот отзыв', async () => {
+    vi.spyOn(wbPvz, 'loadGoodsInPickPoint').mockResolvedValue({ goods: [
+      { buyer_sid: 0x07d5a547, buyer: { user_sid: 0x07d5a547, name: 'Анна', mobile: '79990000067' }, status: 'GOODS_RECIEVED', status_updated: '2026-11-01T10:00:00+03:00', cell: '12' },
+    ], cursor: null });
+    world.balance = 0;
+    await bot.processUpdate(press('rv:who2:5:0:0:07d5a547', 335));
+    const paywall = lastScreen();
+    expect(paywall.body.text).toContain('не хватает');
+    expect(paywall.body.reply_parameters).toEqual({ message_id: 335, allow_sending_without_reply: true });
+    expect(db.some(call => call.path === 'rpc/bot_review_spend')).toBe(false);
+    world.balance = 10000;
+    const started = await bot.afterWalletTopup({ id: 'o2', user_id: USER, pricing_snapshot: { wallet: { then: 'rv:5:0:0:07d5a547' } } }, null);
+    expect(started).toBe(true);
+    const card = screens().find(call => String(call.body.text).startsWith('<b>👤 Кто поставил оценку</b>'))!;
+    expect(card.body.text).toContain('Списано 25 ₽');
+    expect(card.body.reply_parameters).toEqual({ message_id: 335, allow_sending_without_reply: true });
+  });
+
   it('«⬅️ Назад» с экрана оплаты автора — к отзывам, а не в главное меню', () => {
     const topupScreen = require('../../server/_topup-screen.js') as { topupBackData: (then: string) => string };
     expect(topupScreen.topupBackData('rv:5:0:3:07d5a547')).toBe('rv:filters');
@@ -391,5 +448,30 @@ describe('«Кто поставил оценку»', () => {
     expect(card.body.text).toContain('Имя: Анна');
     expect(card.body.text).toContain('Телефон: <code>+7 999 ***-**-67</code>');
     expect(card.body.text).toContain('Списано 25 ₽');
+  });
+});
+
+describe('wbPvz: повтор кода и ответ без токена', () => {
+  const calls: Array<{ url: string; body: any }> = [];
+  beforeEach(() => {
+    calls.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : null;
+      calls.push({ url: String(url), body });
+      if (String(url).includes('/api/v1/login')) return json(body?.phone === '70000000000' ? { message: 'Неверный номер телефона' } : { data: { token: 'lt', ttl: 60 } });
+      return json({});
+    }));
+  });
+
+  it('«Выслать код заново» уходит в WB с resend: true, первый запрос — с resend: false', async () => {
+    await wbPvz.requestCode({ deviceId: 'dev' }, '79991234567');
+    await wbPvz.requestCode({ deviceId: 'dev' }, '79991234567', { resend: true });
+    expect(calls.map(call => call.body.resend)).toEqual([false, true]);
+  });
+
+  it('200 без токена — текст WB в wbMessage', async () => {
+    const error = await wbPvz.requestCode({ deviceId: 'dev' }, '70000000000').catch((caught: any) => caught);
+    expect(error).toBeInstanceOf(wbPvz.WbPvzError);
+    expect(error.wbMessage).toBe('Неверный номер телефона');
   });
 });

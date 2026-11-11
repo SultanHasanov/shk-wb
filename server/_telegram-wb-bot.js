@@ -2545,14 +2545,20 @@ function wbCodeText(phone, { ttl = 0, repeat = false, fresh = false } = {}) {
 /**
  * Телефон для входа в WB: 8… → 7…, 10 цифр с девятки — дописываем 7. Не номер — { error }; foreign — номер
  * другой страны: вход проверен только по номерам +7, поэтому говорим прямо, а не повторяем «неверный формат».
+ * Другая страна — только явный «+» не с семёрки или 12–15 цифр не с семёрки: 11 цифр не с 7/8 — скорее ШК
+ * или опечатка, на них обычная подсказка.
  */
 function parseWbPhone(text) {
-  let digits = String(text || '').replace(/\D/g, '');
+  const raw = String(text || '');
+  let digits = raw.replace(/\D/g, '');
   if (digits.length === 11 && digits.startsWith('8')) digits = `7${digits.slice(1)}`;
   if (digits.length === 10 && digits.startsWith('9')) digits = `7${digits}`;
   if (/^7\d{10}$/.test(digits)) return { phone: digits };
-  if (digits.length >= 11) return { foreign: true, error: 'Пока я вхожу в WB только по российским номерам +7. Если ваш номер другой страны — напишите в поддержку.' };
-  return { error: 'Это не похоже на номер телефона. Отправьте 11 цифр, например <code>79991234567</code>. Передумали — нажмите «Отменить вход».' };
+  const plusOther = /^\s*\+\s*[0-689]/.test(raw) && digits.length >= 10 && digits.length <= 15;
+  if (plusOther || (digits.length >= 12 && digits.length <= 15 && !digits.startsWith('7'))) {
+    return { foreign: true, error: 'Пока я вхожу в WB только по российским номерам +7. Если ваш номер другой страны — напишите в поддержку.' };
+  }
+  return { error: 'Это не похоже на номер телефона. Отправьте 11 цифр, например <code>79991234567</code>. Прислали ШК или передумали — нажмите «Отменить вход».' };
 }
 
 /** Ошибка WB (его ответ или сеть до него), а не наша: 'expired' | 'forbidden' | 'busy' | 'down'; иначе null. */
@@ -2599,7 +2605,7 @@ function wbCodeConfirmErrorText(error, session) {
  */
 async function requestWbCode(from, chatId, session, phone, { messageId, fresh = false } = {}) {
   try {
-    const result = await wbPvz.requestCode(session, phone);
+    const result = await wbPvz.requestCode(session, phone, { resend: fresh });
     await saveWbConnection(from, chatId, 'await_code', result.session);
     await showScreen(chatId, messageId, wbCodeText(phone, { ttl: result.ttl, fresh }), { reply_markup: WB_CODE_KEYBOARD });
   } catch (error) {
@@ -2624,7 +2630,7 @@ async function replyWbFailure(from, chatId, error, { purpose = 'reviews', retry 
   if (kind === 'expired') {
     localGoodsSnapshots.delete(Number(from.id));
     await deleteWbConnection(from.id);
-    const notice = `${lead}Вход в WB устарел — WB просит войти заново. Это минута: номер и код.`;
+    const notice = `${lead}Вход в WB устарел — WB просит войти заново. Это минута: номер и код.${money ? '\nДеньги не списаны.' : ''}`;
     if (purpose === 'search') await startClientSearch(from, chatId, undefined, { notice });
     else await showReviewFilters(from, chatId, undefined, { notice });
     return true;
@@ -2646,12 +2652,31 @@ function replyTo(messageId) {
   return messageId ? { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } } : {};
 }
 
+// Отзыв, под которым не хватило денег на «Кто поставил»: после пополнения (afterWalletTopup → then) карточка автора
+// придёт ответом на него. В памяти процесса по «Telegram + then» (в строке then id сообщения нет, а в лимит
+// callback_data он не влезает); потеря после перезапуска безобидна — карточка придёт просто новым сообщением.
+const REVIEW_TOPUP_MESSAGES_MAX = 5000;
+const reviewTopupMessages = new Map();
+
+function rememberReviewTopupMessage(telegramId, then, reviewMessageId) {
+  if (!then || !reviewMessageId) return;
+  const key = `${Number(telegramId)}:${then}`;
+  reviewTopupMessages.delete(key);
+  reviewTopupMessages.set(key, Number(reviewMessageId));
+  if (reviewTopupMessages.size > REVIEW_TOPUP_MESSAGES_MAX) reviewTopupMessages.delete(reviewTopupMessages.keys().next().value);
+}
+
+function reviewTopupMessage(telegramId, then) {
+  return reviewTopupMessages.get(`${Number(telegramId)}:${then}`) || undefined;
+}
+
 /**
  * «Кто поставил оценку» — цена и пополнение. reason='empty' — нажали «Кто поставил оценку», а денег не хватило;
  * then — какой отзыв раскрыть сразу после пополнения ('rv:<фильтр>:<стр>:<№>'); reviewMessageId — отзыв, на который
  * отвечаем (экран открывается новым сообщением прямо под ним).
  */
 async function showReviewPaywall(from, chatId, reason, messageId, then, reviewMessageId) {
+  rememberReviewTopupMessage(from.id, then, reviewMessageId);
   const userId = await ensureUser(from);
   const [balance, free, { price, club }] = await Promise.all([walletRub(userId), helperFreeText(), reviewPrice(from.id)]);
   const missing = Math.round((price - balance) * 100) / 100;
@@ -4048,7 +4073,7 @@ async function afterWalletTopup(order, noticeId = null) {
   if (review) {
     await settleNotice();
     try {
-      await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4]);
+      await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4], reviewTopupMessage(telegramId, then));
     } catch (error) {
       // Вызов идёт мимо processUpdate (с сайта по RPC) — ошибку WB разбираем здесь: деньги уже на балансе.
       const retry = `rv:who2:${review[1]}:${review[2]}:${review[3]}${review[4] ? `:${review[4]}` : ''}`;
