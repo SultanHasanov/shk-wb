@@ -200,16 +200,26 @@ async function clearSession(telegramId) {
 // Писатели (saveWbConnection, deleteWbConnection) живут здесь же и сбрасывают запись.
 const WB_CONNECTION_CACHE_MS = 60 * 1000;
 const wbConnectionCache = new Map();
+// Незаконченный вход (ждём телефон или код) живёт 15 минут. Потом цифры в чате — снова обычный ввод (ШК, ID
+// клиента), а не «телефон» для WB: иначе ШК из 11 цифр на 7… ушёл бы в WB как номер. Запись в базе не трогаем —
+// читаем её как отменённую (готовый вход и выбор пункта срока не имеют).
+const WB_LOGIN_TTL_MS = 15 * 60 * 1000;
+
+function expirePendingLogin(row, now = Date.now()) {
+  if (!row || (row.state !== 'await_phone' && row.state !== 'await_code')) return row;
+  const updated = Date.parse(row.updated_at || '');
+  return Number.isFinite(updated) && now - updated > WB_LOGIN_TTL_MS ? { ...row, state: 'idle' } : row;
+}
 
 async function getWbConnection(telegramId) {
   if (process.env.WB_CONNECTION_STORE === 'memory' || process.env.WB_CONNECTION_STORE === 'file') {
     loadLocalConnections();
     const row = localWbConnections.get(Number(telegramId));
-    return row ? { ...row, session: wbPvz.decryptSession(row.encrypted_session) } : null;
+    return row ? expirePendingLogin({ ...row, session: wbPvz.decryptSession(row.encrypted_session) }) : null;
   }
   const key = Number(telegramId);
   const cached = wbConnectionCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.row ? structuredClone(cached.row) : null;
+  if (cached && cached.expiresAt > Date.now()) return cached.row ? expirePendingLogin(structuredClone(cached.row)) : null;
   const rows = await supabaseFetch(`telegram_wb_connections?telegram_user_id=eq.${encodeURIComponent(telegramId)}&select=*&limit=1`);
   const row = rows[0] || null;
   if (row) {
@@ -218,7 +228,7 @@ async function getWbConnection(telegramId) {
   }
   if (wbConnectionCache.size > 5000) wbConnectionCache.clear();
   wbConnectionCache.set(key, { row, expiresAt: Date.now() + WB_CONNECTION_CACHE_MS });
-  return row ? structuredClone(row) : null;
+  return row ? expirePendingLogin(structuredClone(row)) : null;
 }
 
 async function saveWbConnection(from, chatId, state, session, extra = {}) {
@@ -335,8 +345,13 @@ function choiceKeyboard(rows) { return { inline_keyboard: rows }; }
 const MENU_ROW = [{ text: '☰ Меню', callback_data: 'menu:home' }];
 // Под короткими ответами — кнопка меню (постоянную нижнюю клавиатуру больше не показываем).
 const MENU_KEYBOARD = { inline_keyboard: [MENU_ROW] };
-// Во время входа в WB (ждём телефон или SMS-код) — выйти из него можно кнопкой, а не только /cancel.
-const WB_LOGIN_KEYBOARD = { inline_keyboard: [[{ text: 'Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW]] };
+// Во время входа в WB (ждём телефон или код) — выйти из него можно кнопкой, а не только /cancel.
+const WB_LOGIN_KEYBOARD = { inline_keyboard: [[{ text: '✖️ Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW]] };
+// Шаг кода: новый код на тот же номер (rv:resend), другой номер (rv:phone), отмена.
+const WB_CODE_KEYBOARD = { inline_keyboard: [
+  [{ text: '🔁 Выслать код заново', callback_data: 'rv:resend' }, { text: '📱 Другой номер', callback_data: 'rv:phone' }],
+  [{ text: '✖️ Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW],
+] };
 
 function mainMenuKeyboard() {
   // По две кнопки в ряд с короткими подписями — меню не растягивается.
@@ -1101,30 +1116,46 @@ async function promptClientQuery(from, chatId, messageId) {
     '',
     'Ищу среди заказов, которые сейчас лежат в пункте.',
   ].join('\n'), { reply_markup: choiceKeyboard([
-    [{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
-    [{ text: '⬅️ Назад', callback_data: 'menu:code' }],
-    MENU_ROW,
+    [{ text: '🔁 Сменить ПВЗ', callback_data: 'cs:points' }],
+    [{ text: '🚪 Выйти из WB', callback_data: 'cs:logout' }],
+    [{ text: '⬅️ Назад', callback_data: 'menu:code' }, ...MENU_ROW],
   ]) });
 }
 
-/** После входа в кабинет WB: если ждали поиск клиента — к поиску, иначе к отзывам. */
-async function afterWbReady(from, chatId) {
+/** После входа в WB (или выбора пункта): если ждали поиск клиента — к поиску, иначе к отзывам. */
+async function afterWbReady(from, chatId, messageId) {
   localGoodsSnapshots.delete(Number(from.id)); // пункт мог смениться — товары старого ПВЗ не показывать
   const session = await getSession(from.id);
-  if (session?.state === 'await_wb_for_search') { await clearSession(from.id); return promptClientQuery(from, chatId); }
-  return showReviewFilters(from, chatId);
+  if (session?.state === 'await_wb_for_search') { await clearSession(from.id); return promptClientQuery(from, chatId, messageId); }
+  return showReviewFilters(from, chatId, messageId);
 }
 
-/** «Найти ID в боте»: нужен вход в кабинет WB (как для отзывов), затем запрос телефона/ячейки. */
-async function startClientSearch(from, chatId, messageId) {
+/** Вход в WB начат ради поиска клиента (или поиск уже открыт) — иначе ради отзывов. */
+async function wbPurpose(from) {
+  const session = await getSession(from.id).catch(() => null);
+  return session?.state === 'await_wb_for_search' || session?.state === 'await_client_query' ? 'search' : 'reviews';
+}
+
+/** Вернуться с экрана входа / выбора пункта туда, откуда пришли: в поиск клиента или к отзывам. */
+async function backToWbScreen(from, chatId, messageId) {
+  if (await wbPurpose(from) === 'search') { await clearSession(from.id); return startClientSearch(from, chatId, messageId); }
+  return showReviewFilters(from, chatId, messageId);
+}
+
+/** «Найти ID в боте»: нужен вход в WB (как для отзывов), затем запрос телефона/ячейки. notice — строка сверху. */
+async function startClientSearch(from, chatId, messageId, { notice = '' } = {}) {
   const userId = await ensureUser(from);
   const connection = await getWbConnection(from.id);
   if (connection?.session?.token && connection.state === 'ready') return promptClientQuery(from, chatId, messageId);
   await saveSession(from, chatId, 'await_wb_for_search', { userId });
-  if (connection?.session?.token && connection.state === 'await_point') return beginPointSelection(from, chatId, connection);
-  const session = { deviceId: crypto.randomUUID() };
-  await saveWbConnection(from, chatId, 'await_phone', session);
-  await showScreen(chatId, messageId, '<b>Вход в кабинет WB</b>\nДля поиска клиента по телефону или ячейке нужен вход в кабинет WB.\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.', { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }], MENU_ROW]) });
+  if (connection?.session?.token && connection.state === 'await_point') return beginPointSelection(from, chatId, connection, messageId);
+  // Код уже отправлен — повторное «Найти клиента» не сбрасывает вход, а напоминает, что ждём код.
+  if (connection?.state === 'await_code' && connection.session?.desktopLoginToken) {
+    await showScreen(chatId, messageId, wbCodeText(connection.session.phone, { repeat: true }), { reply_markup: WB_CODE_KEYBOARD });
+    return;
+  }
+  await saveWbConnection(from, chatId, 'await_phone', { deviceId: crypto.randomUUID() });
+  await showScreen(chatId, messageId, await wbLoginPromptText(from, 'search', notice), { reply_markup: choiceKeyboard([[{ text: '⬅️ Назад', callback_data: 'menu:code' }, ...MENU_ROW]]) });
 }
 
 /** Похоже на полный номер телефона: у WB середина номера затёрта, совпасть может только хвост. */
@@ -1154,7 +1185,7 @@ async function runClientSearch(from, chatId, query) {
   try {
     goods = await loadGoodsSnapshot(from.id, connection);
   } catch (error) {
-    if (error.status === 401 || error.status === 403) { await deleteWbConnection(from.id); await clearSession(from.id); await sendMessage(chatId, 'Вход в WB устарел — войдите заново.'); return startClientSearch(from, chatId); }
+    if (await replyWbFailure(from, chatId, error, { purpose: 'search' })) return;
     throw error;
   }
   let matches = findClientsByQuery(goods, digits);
@@ -2227,7 +2258,7 @@ async function handlePhoto(from, chatId, message, image, session) {
   if (session?.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
   const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения', await_client_query: 'номер ячейки или телефон' }[session?.state];
   const wb = waiting ? null : await getWbConnection(from.id);
-  const wbWaiting = wb?.state === 'await_phone' ? 'номер телефона сотрудника' : wb?.state === 'await_code' ? 'код из SMS WB' : null;
+  const wbWaiting = wb?.state === 'await_phone' ? 'номер телефона для входа в WB' : wb?.state === 'await_code' ? 'код от WB' : null;
   if (waiting || wbWaiting) return sendMessage(chatId, `Сейчас жду ${waiting || wbWaiting} цифрами — фото здесь не подойдёт. /cancel — отменить.`);
   return acceptLoosePhoto(from, chatId, image);
 }
@@ -2432,7 +2463,7 @@ async function helpText(from) {
     '',
     `🏷 <b>Стикеры.</b> «По номеру» — стикер для вашего ШК (11 цифр с этикетки товара), ${custom}: пришлите номер или фото/скриншот, где он виден. «Пачка ${BATCH_QUANTITY}» — ${BATCH_QUANTITY} новых стикеров одним PDF, ${batch}.`,
     '📦 <b>QR коробки</b> — те же цены, номер коробки — 10 цифр.',
-    `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке или телефону (нужен вход в WB по SMS).`,
+    `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке или телефону (нужен вход в WB по номеру телефона).`,
     `⭐ <b>Отзывы ПВЗ.</b> После входа в WB смотреть бесплатно. «Кто поставил оценку» — ${wallet.formatRub(authorPrice)}, того же клиента повторно — бесплатно.`,
     `💰 <b>Оплата</b> — с баланса бота: «👤 Профиль и баланс» → «💰 Пополнить баланс», от ${wallet.formatRub(wallet.MIN_TOPUP)}.`,
     '↩️ Передумали — «☰ Меню» или /cancel.',
@@ -2456,37 +2487,202 @@ function reviewFilterKeyboard() {
     [1, 2, 3, 4, 5].map(star => ({ text: `${star} ⭐`, callback_data: `rv:filter:${star}` })),
     [{ text: 'Все оценки', callback_data: 'rv:filter:all' }],
     [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
-    [{ text: 'Сменить ПВЗ', callback_data: 'rv:points' }, { text: 'Отключить WB', callback_data: 'rv:disconnect' }],
-    MENU_ROW,
+    [{ text: '🔁 Сменить ПВЗ', callback_data: 'rv:points' }, ...MENU_ROW],
+    // Выход — отдельным рядом и с подтверждением (rv:logout): промах по кнопке не стирает вход.
+    [{ text: '🚪 Выйти из WB', callback_data: 'rv:logout' }],
   ]);
+}
+
+// ── Вход в WB: один текст для отзывов и поиска клиента, шаг кода, ошибки WB ──
+
+// «Выслать код заново» — не чаще раза в 30 секунд на человека (WB и сам ограничивает частые запросы).
+const WB_RESEND_COOLDOWN_MS = 30 * 1000;
+const wbResendAt = new Map();
+
+/** Последние 4 цифры номера: полный номер в чат не возвращаем — сообщение с ним бот удалил. */
+function phoneTail(phone) { return String(phone || '').replace(/\D/g, '').slice(-4); }
+
+/**
+ * Первый шаг входа в WB: зачем вход, чей номер, что придёт и что хранится. purpose — 'reviews' | 'search';
+ * notice — строка сверху (например, «вход устарел»). Цена «Кто поставил» — только для отзывов.
+ */
+async function wbLoginPromptText(from, purpose, notice = '') {
+  const search = purpose === 'search';
+  let priceLine = '';
+  if (!search && reviewFreeFor(from.id)) priceLine = `Смотреть отзывы и «Кто поставил оценку» — без оплаты. ${unlimitedLine(from.id)}`;
+  else if (!search) {
+    const { price } = await reviewPrice(from.id).catch(() => ({ price: REVIEW_PRICE }));
+    priceLine = `Смотреть отзывы — бесплатно. «Кто поставил оценку» — ${wallet.formatRub(price)} за клиента.`;
+  }
+  return [
+    ...(notice ? [notice, ''] : []),
+    search ? '<b>🔎 Поиск клиента — вход в WB</b>' : '<b>⭐ Отзывы ПВЗ — вход в WB</b>',
+    search
+      ? 'Чтобы найти клиента по ячейке или телефону, мне нужен вход в WB: оттуда я беру заказы вашего пункта.'
+      : 'Чтобы показать отзывы вашего пункта, мне нужен вход в WB.',
+    '',
+    'Отправьте номер телефона, с которым вы входите в программу WB на пункте, например <code>79991234567</code>. WB пришлёт на него код — его тоже отправьте сюда.',
+    '',
+    '🔒 Сообщения с номером и кодом я сразу удаляю. Данные входа (и номер) хранятся в зашифрованном виде. Выйти можно в любой момент кнопкой «Выйти из WB».',
+    ...(priceLine ? ['', priceLine] : []),
+  ].join('\n');
+}
+
+function ttlText(seconds) {
+  const value = Math.round(Number(seconds));
+  return value >= 60 && value % 60 === 0 ? `${value / 60} мин` : `${value} сек`;
+}
+
+/** Шаг кода. repeat — человек снова открыл отзывы или поиск, пока бот ждёт код; fresh — код запрошен заново. */
+function wbCodeText(phone, { ttl = 0, repeat = false, fresh = false } = {}) {
+  const tail = phoneTail(phone);
+  const number = tail ? `номер, который заканчивается на <b>${tail}</b>` : 'ваш номер';
+  if (repeat) return `<b>Вход в WB</b>\nЖду код от WB — он отправлен на ${number}. Пришлите его сюда.\nНе пришёл? Нажмите «Выслать код заново».`;
+  const time = Number(ttl) > 0 ? ` в течение ${ttlText(ttl)}` : '';
+  return `<b>Вход в WB</b>\n${fresh ? 'Новый код' : 'Код'} от WB отправлен на ${number}. Пришлите его сюда${time} — сообщение с кодом я удалю.\nНе пришёл? Нажмите «Выслать код заново».`;
+}
+
+/**
+ * Телефон для входа в WB: 8… → 7…, 10 цифр с девятки — дописываем 7. Не номер — { error }; foreign — номер
+ * другой страны: вход проверен только по номерам +7, поэтому говорим прямо, а не повторяем «неверный формат».
+ */
+function parseWbPhone(text) {
+  let digits = String(text || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('8')) digits = `7${digits.slice(1)}`;
+  if (digits.length === 10 && digits.startsWith('9')) digits = `7${digits}`;
+  if (/^7\d{10}$/.test(digits)) return { phone: digits };
+  if (digits.length >= 11) return { foreign: true, error: 'Пока я вхожу в WB только по российским номерам +7. Если ваш номер другой страны — напишите в поддержку.' };
+  return { error: 'Это не похоже на номер телефона. Отправьте 11 цифр, например <code>79991234567</code>. Передумали — нажмите «Отменить вход».' };
+}
+
+/** Ошибка WB (его ответ или сеть до него), а не наша: 'expired' | 'forbidden' | 'busy' | 'down'; иначе null. */
+function wbErrorKind(error) {
+  if (error?.name !== 'WbPvzError') return null;
+  const status = Number(error.status);
+  if (status === 401) return 'expired';
+  if (status === 403) return 'forbidden';
+  if (status === 429) return 'busy';
+  return 'down';
+}
+
+/** Текст, который написал сам WB по-русски (не 5xx), — его можно показать. Технические строки — нет. */
+function wbHumanText(error) {
+  const text = String(error?.wbMessage || '').trim();
+  return text && !(Number(error?.status) >= 500) && text.length <= 200 && /[а-яё]/i.test(text) ? text : '';
+}
+
+function wbCodeRequestErrorText(error, fresh) {
+  if (Number(error?.status) === 429) return 'WB временно не отправляет код на этот номер — слишком много попыток. Подождите 10–15 минут и попробуйте снова.';
+  const said = wbHumanText(error);
+  if (said) {
+    return `WB не отправил код: «${escapeHtml(said)}».\n${fresh
+      ? 'Попробуйте ещё раз через минуту или войдите другим номером.'
+      : 'Проверьте номер — тот, с которым вы входите в WB на пункте, — и отправьте его ещё раз.'}`;
+  }
+  return fresh ? 'WB сейчас не отвечает — новый код не отправлен. Попробуйте через минуту.' : 'WB сейчас не отвечает. Отправьте номер ещё раз через минуту.';
+}
+
+function wbCodeConfirmErrorText(error, session) {
+  if (!session?.desktopLoginToken) return 'Этот код уже не подойдёт. Нажмите «Выслать код заново».';
+  if (Number(error?.status) === 429) return 'Слишком много попыток входа. Подождите 10–15 минут и нажмите «Выслать код заново».';
+  const said = wbHumanText(error);
+  const status = Number(error?.status);
+  if (said || (status >= 400 && status < 500)) {
+    return `${said ? `WB ответил: «${escapeHtml(said)}».\n` : ''}Код не подошёл или его срок истёк. Отправьте код ещё раз или нажмите «Выслать код заново».`;
+  }
+  return 'WB сейчас не отвечает. Отправьте код ещё раз через минуту.';
+}
+
+/**
+ * Запросить код WB на номер и показать шаг кода. fresh — «Выслать код заново» (вход остаётся на шаге кода, прежний
+ * код ещё можно ввести); messageId — править этот экран, без него — новое сообщение (номер пришёл сообщением).
+ */
+async function requestWbCode(from, chatId, session, phone, { messageId, fresh = false } = {}) {
+  try {
+    const result = await wbPvz.requestCode(session, phone);
+    await saveWbConnection(from, chatId, 'await_code', result.session);
+    await showScreen(chatId, messageId, wbCodeText(phone, { ttl: result.ttl, fresh }), { reply_markup: WB_CODE_KEYBOARD });
+  } catch (error) {
+    console.warn('WB login code request failed', error?.status || '', error?.message);
+    await saveWbConnection(from, chatId, fresh ? 'await_code' : 'await_phone', session, { lastError: String(error?.message).slice(0, 500) });
+    await showScreen(chatId, messageId, wbCodeRequestErrorText(error, fresh), { reply_markup: fresh ? WB_CODE_KEYBOARD : WB_LOGIN_KEYBOARD });
+  }
+}
+
+/**
+ * Ошибка WB посреди отзывов или поиска клиента — понятный ответ вместо «сбоя на нашей стороне», без текста
+ * ошибки (он — в журнал). 401 — вход устарел: удаляем его и сразу просим номер; 403 — вход не удаляем (что именно
+ * WB отвечает без прав, не проверено — по кругу входа не гоняем), даём повтор и вход заново; 429 и сбой — повтор.
+ * purpose — куда вести вход заново; retry — кнопка, повторяющая действие; note — строка сверху;
+ * money — дописать «Деньги не списаны» (там, где за действие платят). Не ошибка WB — false.
+ */
+async function replyWbFailure(from, chatId, error, { purpose = 'reviews', retry = '', note = '', money = false } = {}) {
+  const kind = wbErrorKind(error);
+  if (!kind) return false;
+  console.warn('WB request failed', kind, error.status || '', error.message);
+  const lead = note ? `${note}\n\n` : '';
+  if (kind === 'expired') {
+    localGoodsSnapshots.delete(Number(from.id));
+    await deleteWbConnection(from.id);
+    const notice = `${lead}Вход в WB устарел — WB просит войти заново. Это минута: номер и код.`;
+    if (purpose === 'search') await startClientSearch(from, chatId, undefined, { notice });
+    else await showReviewFilters(from, chatId, undefined, { notice });
+    return true;
+  }
+  const text = kind === 'forbidden'
+    ? 'WB не дал доступ к данным пункта. Так бывает, если у этого номера нет нужных прав в WB или вход устарел. Попробуйте ещё раз, а если не поможет — войдите заново (можно номером владельца или менеджера).'
+    : kind === 'busy' ? 'WB просит подождать: слишком много запросов подряд. Попробуйте ещё раз через пару минут.'
+      : 'WB сейчас не отвечает. Попробуйте ещё раз через минуту.';
+  const rows = [];
+  if (retry && Buffer.byteLength(retry) <= 64) rows.push([{ text: '🔄 Повторить', callback_data: retry }]);
+  if (kind === 'forbidden') rows.push([{ text: '📱 Войти заново', callback_data: purpose === 'search' ? 'cs:relogin' : 'rv:relogin:ok' }]);
+  rows.push(MENU_ROW);
+  await sendMessage(chatId, `${lead}${text}${money ? '\nДеньги не списаны.' : ''}`, { reply_markup: choiceKeyboard(rows) });
+  return true;
+}
+
+/** Ответ на сообщение (карточку автора — под отзывом): исходное могли удалить — тогда просто новым сообщением. */
+function replyTo(messageId) {
+  return messageId ? { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } } : {};
 }
 
 /**
  * «Кто поставил оценку» — цена и пополнение. reason='empty' — нажали «Кто поставил оценку», а денег не хватило;
- * then — какой отзыв раскрыть сразу после пополнения ('rv:<фильтр>:<стр>:<№>').
+ * then — какой отзыв раскрыть сразу после пополнения ('rv:<фильтр>:<стр>:<№>'); reviewMessageId — отзыв, на который
+ * отвечаем (экран открывается новым сообщением прямо под ним).
  */
-async function showReviewPaywall(from, chatId, reason, messageId, then) {
+async function showReviewPaywall(from, chatId, reason, messageId, then, reviewMessageId) {
   const userId = await ensureUser(from);
   const [balance, free, { price, club }] = await Promise.all([walletRub(userId), helperFreeText(), reviewPrice(from.id)]);
+  const missing = Math.round((price - balance) * 100) / 100;
   const text = [
     `<b>👤 Кто поставил оценку — ${wallet.formatRub(price)}</b>`,
     ...(club ? [clubLine] : []),
-    'Телефон клиента, когда забрал или отказался, ячейка. Повторно — бесплатно.',
+    'Покажу ID клиента, телефон (WB может скрыть часть цифр), когда он забрал заказ или отказался, и ячейку.',
+    'Того же клиента в этом ПВЗ повторно — бесплатно, даже по другому отзыву. Если WB не отдал данные — не списываю.',
     '',
-    `💰 На балансе: <b>${wallet.formatRub(balance)}</b>${reason === 'empty' ? ' — не хватает' : ''}`,
+    `💰 На балансе: <b>${wallet.formatRub(balance)}</b>${reason === 'empty' && missing > 0 ? ` — не хватает ${wallet.formatRub(missing)}` : ''}`,
     ...(then ? ['После пополнения автор откроется сам.'] : []),
-    ...(free ? ['', `💡 В Помощнике ПВЗ — ${free}: ${PROGRAM_URL}`] : []),
+    ...(free ? ['', `💡 В программе «Помощник ПВЗ» для компьютера тоже видно, кто поставил оценку (${free}): ${PROGRAM_URL}`] : []),
   ].join('\n');
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-    ...(then ? [topupAndBuyRow(price - balance, then)] : topupRows(price - balance)),
+    ...(then ? [topupAndBuyRow(missing, then)] : topupRows(missing)),
     [{ text: '⭐ К отзывам', callback_data: 'rv:filters' }, ...MENU_ROW],
-  ]) });
+  ]), ...(messageId ? {} : replyTo(reviewMessageId)) });
 }
 
-function pointKeyboard(points) {
+/** «✅ ПВЗ 12345 · адрес» — галочка у открытого пункта; адрес — только если WB его прислал. */
+function pointLabel(point, current) {
+  const address = typeof point?.address === 'string' ? point.address.trim() : '';
+  const text = `${current && Number(point.id) === current ? '✅ ' : ''}ПВЗ ${point.id}${address ? ` · ${address}` : ''}`;
+  return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+}
+
+/** Список пунктов. current — открытый сейчас: тогда выход — «Оставить текущий ПВЗ» (вход не трогаем). */
+function pointKeyboard(points, current = null) {
   return choiceKeyboard([
-    ...points.slice(0, 30).map(point => [{ text: `ПВЗ ${point.id}`, callback_data: `rv:point:${point.id}` }]),
-    [{ text: 'Отмена', callback_data: 'rv:cancel' }],
+    ...points.slice(0, 30).map(point => [{ text: pointLabel(point, current), callback_data: `rv:point:${point.id}` }]),
+    [current ? { text: '⬅️ Оставить текущий ПВЗ', callback_data: 'rv:cancel' } : { text: '✖️ Отмена', callback_data: 'rv:cancel' }],
   ]);
 }
 
@@ -2589,40 +2785,53 @@ async function loadPickupEvents(telegramId, connection, userIds) {
   return findPickupEvents(await loadGoodsSnapshot(telegramId, connection), userIds);
 }
 
-async function showReviewFilters(from, chatId, messageId) {
+/** Экран отзывов: вход в WB (если его нет), выбор пункта или выбор оценок. notice — строка сверху. */
+async function showReviewFilters(from, chatId, messageId, { notice = '' } = {}) {
   const connection = await getWbConnection(from.id);
   if (connection?.session?.token && connection.state === 'await_point') {
-    await beginPointSelection(from, chatId, connection);
+    await beginPointSelection(from, chatId, connection, messageId);
+    return;
+  }
+  // Код уже отправлен — повторное «Отзывы ПВЗ» не сбрасывает вход на ввод телефона, а напоминает про код.
+  if (connection?.state === 'await_code' && connection.session?.desktopLoginToken) {
+    await showScreen(chatId, messageId, wbCodeText(connection.session.phone, { repeat: true }), { reply_markup: WB_CODE_KEYBOARD });
     return;
   }
   if (!connection?.session?.token || connection.state !== 'ready') {
-    const session = { deviceId: crypto.randomUUID() };
-    await saveWbConnection(from, chatId, 'await_phone', session);
-    await showScreen(chatId, messageId, '<b>Подключение кабинета WB</b>\n\nОтправьте номер телефона сотрудника в формате <code>79991234567</code>. Сообщение с номером будет удалено после обработки.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+    await saveWbConnection(from, chatId, 'await_phone', { deviceId: crypto.randomUUID() });
+    await showScreen(chatId, messageId, await wbLoginPromptText(from, 'reviews', notice), { reply_markup: choiceKeyboard([MENU_ROW]) });
     return;
   }
-  const userId = await findUser(from.id);
-  const [balance, { price, club }] = await Promise.all([userId ? walletRub(userId).catch(() => null) : null, reviewPrice(from.id)]);
-  const balanceLine = balance == null ? '' : ` · 💰 ${wallet.formatRub(balance)}`;
-  const clubText = club ? `\n${clubLine}` : '';
-  await showScreen(chatId, messageId, `<b>⭐ Отзывы ПВЗ ${connection.session.pointId}</b>\nКто поставил оценку — ${wallet.formatRub(price)}${balanceLine}${clubText}\n\nКакие оценки показать?`, { reply_markup: reviewFilterKeyboard() });
+  const free = reviewFreeFor(from.id);
+  const userId = free ? null : await findUser(from.id);
+  const [balance, { price, club }] = await Promise.all([
+    free ? null : userId ? walletRub(userId).catch(() => null) : 0,
+    reviewPrice(from.id),
+  ]);
+  const text = [
+    ...(notice ? [notice, ''] : []),
+    `<b>⭐ Отзывы ПВЗ ${escapeHtml(connection.session.pointId)}</b>`,
+    'Смотреть отзывы — бесплатно.',
+    free
+      ? `👤 «Кто поставил оценку» — без оплаты. ${unlimitedLine(from.id)}`
+      : `👤 «Кто поставил оценку» — ${wallet.formatRub(price)} за клиента: ID, телефон (WB может скрыть часть цифр), когда забрал или отказался, ячейка. Того же клиента в этом ПВЗ повторно — бесплатно.`,
+    ...(balance == null ? [] : [`💰 На балансе: ${wallet.formatRub(balance)}`]),
+    ...(club && !free ? [clubLine] : []),
+    '',
+    'Отзывы с какой оценкой показать?',
+  ].join('\n');
+  const screenId = await showScreen(chatId, messageId, text, { reply_markup: reviewFilterKeyboard() });
+  // «💰 Пополнить баланс» отсюда — «⬅️ Назад» с пополнения вернёт к отзывам, а не в профиль.
+  rememberTopupOrigin(from.id, screenId, 'rv:filters');
 }
 
+/** Страница отзывов. Ошибки WB (вход устарел, WB не отвечает) разбирает processUpdate — replyWbFailure. */
 async function sendReviewPage(from, chatId, filterKey, page) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   const stars = reviewStars(filterKey);
   if (!stars.length) return;
-  let result;
-  try { result = await wbPvz.loadReviews(connection.session, stars, page, 5); }
-  catch (error) {
-    if (error.status === 401 || error.status === 403) {
-      await deleteWbConnection(from.id);
-      await sendMessage(chatId, 'Сессия WB истекла. Подключите кабинет заново.');
-      return showReviewFilters(from, chatId);
-    }
-    throw error;
-  }
+  const result = await wbPvz.loadReviews(connection.session, stars, page, 5);
   const totalPages = Math.max(1, Math.ceil(result.total / 5));
   const safePage = Math.max(0, Math.min(Number(page) || 0, totalPages - 1));
   if (safePage !== Number(page) && result.total) return sendReviewPage(from, chatId, filterKey, safePage);
@@ -2633,19 +2842,24 @@ async function sendReviewPage(from, chatId, filterKey, page) {
     await sendMessage(chatId, noReviews, { reply_markup: reviewFilterKeyboard() });
     return;
   }
+  // Цена — прямо на кнопке (со скидкой клуба); безлимиту — без цены: с него не спишется.
+  const free = reviewFreeFor(from.id);
+  const { price } = free ? { price: 0 } : await reviewPrice(from.id).catch(() => ({ price: REVIEW_PRICE }));
+  const whoText = free ? '👤 Кто поставил' : `👤 Кто поставил — ${wallet.formatRub(price)}`;
   for (let index = 0; index < result.data.length; index += 1) {
     const review = result.data[index];
     // Метка отзыва (первые 8 символов id): если список сдвинется, найдём именно этот отзыв, а не соседа по позиции.
     const tag = reviewTag(review);
     const callbackData = `rv:who2:${filterKey}:${safePage}:${index}${tag ? `:${tag}` : ''}`;
-    const keyboard = choiceKeyboard([[{ text: '👤 Кто поставил оценку', callback_data: callbackData }]]);
+    const keyboard = choiceKeyboard([[{ text: whoText, callback_data: callbackData }]]);
     await sendMessage(chatId, reviewText(review, safePage * 5 + index + 1, result.total), { reply_markup: keyboard });
   }
   const navigation = [];
-  if (safePage > 0) navigation.push({ text: '⬅️ Назад', callback_data: `rv:page:${filterKey}:${safePage - 1}` });
-  if (safePage + 1 < totalPages) navigation.push({ text: 'Далее ➡️', callback_data: `rv:page:${filterKey}:${safePage + 1}` });
-  await sendMessage(chatId, `Страница <b>${safePage + 1}</b> из <b>${totalPages}</b>`, {
-    reply_markup: choiceKeyboard([navigation, [{ text: 'Изменить оценку', callback_data: 'rv:filters' }]].filter(row => row.length)),
+  if (safePage > 0) navigation.push({ text: '⬅️ Предыдущие', callback_data: `rv:page:${filterKey}:${safePage - 1}` });
+  if (safePage + 1 < totalPages) navigation.push({ text: 'Следующие ➡️', callback_data: `rv:page:${filterKey}:${safePage + 1}` });
+  const terms = free ? '' : `\n«Кто поставил» — ${wallet.formatRub(price)} с баланса за клиента. Того же клиента повторно — бесплатно; если WB не отдал данные — не списываю.`;
+  await sendMessage(chatId, `Страница <b>${safePage + 1}</b> из <b>${totalPages}</b>${terms}`, {
+    reply_markup: choiceKeyboard([navigation, [{ text: '⭐ Выбрать другую оценку', callback_data: 'rv:filters' }, ...MENU_ROW]].filter(row => row.length)),
   });
 }
 
@@ -2696,15 +2910,16 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
       };
     }
   }
-  const clientLine = identifiers.length ? `ID клиента: <code>${identifiers[0]}</code>\n` : '';
   let pickupText = '';
   let lines = [];
   if (pickupResult.error) {
-    pickupText = `Когда забрал/отказался: <i>не удалось получить (${escapeHtml(pickupResult.error.message)})</i>`;
+    // Текст ошибки — в журнал, человеку — что делать. Деньги при этом не списываются (found ниже).
+    console.warn('WB pickup events failed', pickupResult.error.status || '', pickupResult.error.message);
+    pickupText = '<i>Сейчас не получилось загрузить выдачи — WB не ответил. Попробуйте ещё раз через минуту.</i>';
   } else if (!pickupResult.events.length && !identifiers.length) {
     pickupText = '<i>WB не передал ID автора в этом отзыве — определить клиента невозможно.</i>';
   } else if (!pickupResult.events.length) {
-    pickupText = '<i>Выдача/отказ не найдены в текущем окне продаж WB — возможно, уже выпали из списка. Для старых событий нужна накопленная локальная база.</i>';
+    pickupText = '<i>Выдачи этого клиента не нашлись: WB хранит только недавние заказы пункта, а этот уже ушёл из списка.</i>';
   } else {
     // Все события клиента из окна WB: показываются по AUTHOR_HISTORY_PAGE штук, листаются в том же сообщении.
     lines = pickupResult.events.map((item, index) => {
@@ -2719,9 +2934,18 @@ async function buildReviewAuthor(from, connection, reviewOrUserId, userSid) {
     });
   }
   const phone = maskWbPhone(user?.phone ?? user?.mobile);
-  const found = phone !== '—' || Boolean(!pickupResult.error && pickupResult.events.length);
-  const header = `<b>Информация об авторе</b>\n\n${clientLine}Телефон: <code>${escapeHtml(phone)}</code>`;
-  return { found, header, pickupText, lines, clientId: identifiers[0] || null };
+  // Списываем, только если WB что-то отдал; сбой загрузки выдач — показ бесплатный, даже если телефон пришёл.
+  const failed = Boolean(pickupResult.error);
+  const found = !failed && (phone !== '—' || pickupResult.events.length > 0);
+  const name = String(user?.name || '').trim();
+  const header = [
+    '<b>👤 Кто поставил оценку</b>',
+    '',
+    ...(name ? [`Имя: ${escapeHtml(name)}`] : []),
+    ...(identifiers.length ? [`ID клиента: <code>${identifiers[0]}</code>`] : []),
+    ...(phone !== '—' ? [`Телефон: <code>${escapeHtml(phone)}</code>`] : []),
+  ].join('\n');
+  return { found, failed, header, pickupText, lines, clientId: identifiers[0] || null };
 }
 
 // ── История автора: по 5 событий на страницу, «Назад»/«Далее» редактируют то же сообщение ──
@@ -2749,18 +2973,22 @@ function renderAuthorHistory(info, footer, page) {
     body = `<b>Когда забрал / отказался${counter}:</b>\n${slice.join('\n')}`;
   }
   const navigation = [];
-  if (info.clientId && safePage > 0) navigation.push({ text: '⬅️ Назад', callback_data: `rv:hist:${info.clientId}:${safePage - 1}` });
-  if (info.clientId && safePage + 1 < pages) navigation.push({ text: 'Далее ➡️', callback_data: `rv:hist:${info.clientId}:${safePage + 1}` });
+  if (info.clientId && safePage > 0) navigation.push({ text: '⬅️ Предыдущие', callback_data: `rv:hist:${info.clientId}:${safePage - 1}` });
+  if (info.clientId && safePage + 1 < pages) navigation.push({ text: 'Следующие ➡️', callback_data: `rv:hist:${info.clientId}:${safePage + 1}` });
   return {
     text: `${info.header}\n\n${body}\n\n<i>${footer}</i>`,
-    options: navigation.length ? { reply_markup: choiceKeyboard([navigation]) } : {},
+    // «⭐ К отзывам» (rv:back) — новым сообщением: оплаченная карточка остаётся в чате.
+    options: { reply_markup: choiceKeyboard([navigation, AUTHOR_BACK_ROW].filter(row => row.length)) },
   };
 }
 
-async function sendAuthorHistory(from, chatId, info, footer) {
+const AUTHOR_BACK_ROW = [{ text: '⭐ К отзывам', callback_data: 'rv:back' }, ...MENU_ROW];
+
+/** Карточка автора — ответом на сообщение с отзывом (reviewMessageId), чтобы было видно, к какому она отзыву. */
+async function sendAuthorHistory(from, chatId, info, footer, reviewMessageId) {
   rememberAuthorHistory(from.id, info, footer);
   const view = renderAuthorHistory(info, footer, 0);
-  await sendMessage(chatId, view.text, view.options);
+  await sendMessage(chatId, view.text, { ...view.options, ...replyTo(reviewMessageId) });
 }
 
 /** Кнопки «Назад»/«Далее» под историей: берём из кэша, а если он истёк — перечитываем у WB (показ уже оплачен). */
@@ -2775,7 +3003,7 @@ async function turnAuthorHistory(from, chatId, messageId, clientId, page) {
       const revealed = userId
         ? await supabaseFetch(`bot_review_reveals?user_id=eq.${encodeURIComponent(userId)}&point_id=eq.${pointId}&client_id=eq.${clientId}&select=client_id&limit=1`).then(rows => rows.length > 0).catch(() => false)
         : false;
-      if (!revealed) return sendMessage(chatId, 'История этого автора устарела. Откройте отзыв и нажмите «Кто поставил оценку» ещё раз.');
+      if (!revealed) return sendMessage(chatId, 'Список выдач устарел. Откройте отзыв и нажмите «Кто поставил» ещё раз.', { reply_markup: choiceKeyboard([AUTHOR_BACK_ROW]) });
     }
     const info = await buildReviewAuthor(from, connection, clientId);
     entry = { info, footer: reviewFreeFor(from.id) ? unlimitedLine(from.id) : 'Этого автора вы уже смотрели — бесплатно.', savedAt: Date.now() };
@@ -2794,15 +3022,15 @@ function reviewFreeFor(telegramId) {
   return Boolean(unlimitedName(telegramId)) || envIdList('REVIEW_FREE_TELEGRAM_IDS').includes(String(telegramId));
 }
 
-async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
+async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then, reviewMessageId) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   if (reviewFreeFor(from.id)) {
     const info = await buildReviewAuthor(from, connection, reviewOrUserId, userSid);
-    return sendAuthorHistory(from, chatId, info, unlimitedLine(from.id));
+    return sendAuthorHistory(from, chatId, info, unlimitedLine(from.id), reviewMessageId);
   }
-  const userId = await findUser(from.id);
-  if (!userId) return showReviewPaywall(from, chatId);
+  // Новичку аккаунт создаём сразу (бот самостоятельный): дальше общая ветка — запрос к WB, пэйвол с «then».
+  const userId = await ensureUser(from);
   const clientId = authorIdentifiers(reviewOrUserId, userSid)[0] || null;
   const pointId = Number(connection.session.pointId) || 0;
   // Баланс, факт прошлого показа и данные автора узнаём параллельно. Пэйвол показываем только
@@ -2816,19 +3044,19 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then) {
     reviewPrice(from.id),
   ]);
   let footer;
-  if (!clientId || !info.found) footer = 'Данных об авторе нет — деньги не списаны.';
+  if (!clientId || !info.found) footer = info.failed ? 'Деньги не списаны.' : 'Данных об авторе нет — деньги не списаны.';
   else if (revealed) footer = 'Этого автора вы уже смотрели — бесплатно.';
-  else if (balance < price) return showReviewPaywall(from, chatId, 'empty', undefined, then);
+  else if (balance < price) return showReviewPaywall(from, chatId, 'empty', undefined, then, reviewMessageId);
   else {
     // ограничение «Покупки» — с баланса нельзя (ACCOUNT_RESTRICTED покажет processUpdate)
     await controls.assertAllowed(userId, 'purchases');
     // bot_review_spend списывает цену с баланса (25 ₽, со скидкой клуба 20 ₽; миграция 20261027), balance — в копейках.
     const spent = await supabaseFetch('rpc/bot_review_spend', { method: 'POST', body: JSON.stringify({ p_user: userId, p_point: pointId, p_client: clientId, p_kopecks: price * 100 }) });
-    if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then);
+    if (!spent?.ok) return showReviewPaywall(from, chatId, 'empty', undefined, then, reviewMessageId);
     if (!spent.free) notifyAdminSpend({ userId, priceRub: price, title: `Кто поставил оценку${club ? ', скидка клуба' : ''}`, balanceKopecks: spent.balance }).catch(() => {});
     footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(price)}${club ? ' (скидка клуба 20%)' : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
   }
-  await sendAuthorHistory(from, chatId, info, footer);
+  await sendAuthorHistory(from, chatId, info, footer, reviewMessageId);
 }
 
 function reviewTag(review) {
@@ -2836,7 +3064,8 @@ function reviewTag(review) {
   return match ? match[1].toLowerCase() : '';
 }
 
-async function showReviewAuthorByPosition(from, chatId, filterKey, page, index, tag) {
+/** reviewMessageId — сообщение с отзывом, под которым нажали «Кто поставил»: карточка придёт ответом на него. */
+async function showReviewAuthorByPosition(from, chatId, filterKey, page, index, tag, reviewMessageId) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') return showReviewFilters(from, chatId);
   const stars = reviewStars(filterKey);
@@ -2853,7 +3082,7 @@ async function showReviewAuthorByPosition(from, chatId, filterKey, page, index, 
     review = (await wbPvz.loadReviews(connection.session, stars, page, 5)).data[index] || null;
   }
   if (!review) return sendMessage(chatId, 'Этот отзыв больше не найден — список изменился. Откройте отзывы заново, деньги не списаны.', { reply_markup: choiceKeyboard([[{ text: '⭐ К отзывам', callback_data: 'rv:filters' }, ...MENU_ROW]]) });
-  return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${foundPage}:${foundIndex}${tag ? `:${tag}` : ''}`);
+  return revealReviewAuthor(from, chatId, review, undefined, `rv:${filterKey}:${foundPage}:${foundIndex}${tag ? `:${tag}` : ''}`, reviewMessageId);
 }
 
 function noPointsView(phone) {
@@ -2868,28 +3097,50 @@ function noPointsView(phone) {
     ].join('\n'),
     reply_markup: choiceKeyboard([
       [{ text: '🔄 Проверить снова', callback_data: 'rv:points' }],
-      [{ text: '📱 Войти другим номером', callback_data: 'rv:relogin' }],
+      // Без пунктов вход бесполезен — входим другим номером сразу, без вопроса «точно?».
+      [{ text: '📱 Войти другим номером', callback_data: 'rv:relogin:ok' }],
       MENU_ROW,
     ]),
   };
 }
 
-async function beginPointSelection(from, chatId, connection) {
+/**
+ * Выбор пункта. После входа (await_point) — один пункт выбирается сам, несколько — список. «Сменить ПВЗ» из
+ * готового входа (ready) состояние НЕ меняет: пока человек не выбрал новый пункт, работает прежний, и «Оставить
+ * текущий ПВЗ» ничего не ломает. messageId — править этот экран (кнопка), без него — новое сообщение.
+ */
+async function beginPointSelection(from, chatId, connection, messageId) {
+  const manual = connection.state === 'ready';
+  const current = manual ? Number(connection.session?.pointId) || null : null;
   const points = await wbPvz.loadPoints(connection.session);
   if (!points.length) {
     // Обычное состояние, а не сбой: вход прошёл, но WB не отдаёт этому номеру ни одного пункта.
-    await saveWbConnection(from, chatId, 'await_point', connection.session, { lastError: 'В кабинете WB не найдено доступных ПВЗ' });
+    if (!manual) await saveWbConnection(from, chatId, 'await_point', connection.session, { lastError: 'WB не показывает этому номеру ни одного ПВЗ' });
     const view = noPointsView(connection.session?.phone);
-    await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
+    await showScreen(chatId, messageId, view.text, { reply_markup: view.reply_markup });
+    return;
+  }
+  if (points.length === 1 && manual && current === Number(points[0].id)) {
+    // Нажали «Сменить ПВЗ», а пункт один — объясняем, а не показываем тот же экран заново.
+    await showScreen(chatId, messageId, `У этого номера в WB только один пункт — ПВЗ ${escapeHtml(current)}. Чтобы открыть другой, войдите номером, у которого есть к нему доступ.`, { reply_markup: choiceKeyboard([
+      [{ text: '📱 Войти другим номером', callback_data: 'rv:relogin' }],
+      [{ text: '⬅️ Назад', callback_data: 'rv:stay' }, ...MENU_ROW],
+    ]) });
     return;
   }
   if (points.length === 1) {
     const session = await wbPvz.selectPoint(connection.session, points[0].id);
     await saveWbConnection(from, chatId, 'ready', session);
-    return afterWbReady(from, chatId);
+    return afterWbReady(from, chatId, messageId);
   }
-  await saveWbConnection(from, chatId, 'await_point', connection.session);
-  await sendMessage(chatId, '<b>Выберите ПВЗ</b>', { reply_markup: pointKeyboard(points) });
+  // Список пунктов мог обновиться (loadPoints) — сохраняем его, состояние оставляем прежним.
+  await saveWbConnection(from, chatId, manual ? 'ready' : 'await_point', connection.session);
+  const text = [
+    '<b>Выберите ПВЗ</b>',
+    ...(current ? [`Сейчас открыт ПВЗ ${escapeHtml(current)}.`] : []),
+    ...(points.length > 30 ? [`Показаны первые 30 из ${points.length}.`] : []),
+  ].join('\n');
+  await showScreen(chatId, messageId, text, { reply_markup: pointKeyboard(points, current) });
 }
 
 // Ссылки на PDF индивидуального заказа подписаны на час: сообщение со списком устаревает,
@@ -3045,7 +3296,7 @@ async function notifyAccountLinked(telegramId) {
 // «Назад» тогда ведёт в профиль, как раньше). Записывают его экраны с кнопкой пополнения.
 const TOPUP_ORIGINS_MAX = 5000;
 const topupOrigins = new Map();
-const TOPUP_BACK_TITLES = { 'menu:profile': '⬅️ Профиль', 'shop:home': '⬅️ Магазин' };
+const TOPUP_BACK_TITLES = { 'menu:profile': '⬅️ Профиль', 'shop:home': '⬅️ Магазин', 'rv:filters': '⬅️ К отзывам' };
 
 function rememberTopupOrigin(telegramId, messageId, back) {
   if (!messageId) return;
@@ -3796,7 +4047,13 @@ async function afterWalletTopup(order, noticeId = null) {
   const review = /^rv:(all|[1-5]):(\d+):(\d)(?::([0-9a-f]{8}))?$/.exec(then);
   if (review) {
     await settleNotice();
-    await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4]);
+    try {
+      await showReviewAuthorByPosition(from, chatId, review[1], Number(review[2]), Number(review[3]), review[4]);
+    } catch (error) {
+      // Вызов идёт мимо processUpdate (с сайта по RPC) — ошибку WB разбираем здесь: деньги уже на балансе.
+      const retry = `rv:who2:${review[1]}:${review[2]}:${review[3]}${review[4] ? `:${review[4]}` : ''}`;
+      if (!await replyWbFailure(from, chatId, error, { purpose: 'reviews', retry, note: 'Баланс пополнен — деньги на балансе, автор пока не открыт.' })) throw error;
+    }
     return true;
   }
   const qr = /^qr:(\d{1,12})$/.exec(then);
@@ -3823,7 +4080,7 @@ ${topupScreen.creditedLine(topupScreen.topupAmounts(order))}`;
   return false;
 }
 
-/** Вход в WB ждал телефон или SMS-код — отменить (готовое подключение не трогаем). */
+/** Вход в WB ждал телефон или код — отменить (готовый вход и выбор пункта не трогаем). */
 async function cancelWbLogin(from, chatId) {
   const wb = await getWbConnection(from.id);
   if (wb && (wb.state === 'await_phone' || wb.state === 'await_code')) await saveWbConnection(from, chatId, 'idle', wb.session);
@@ -3905,7 +4162,7 @@ async function reviewsIntroText(from) {
     '<b>⭐ Отзывы ПВЗ</b>',
     `Покажу отзывы вашего пункта — смотреть бесплатно. Узнать, кто поставил оценку (ячейка, когда забрал, телефон — WB скрывает часть цифр), — ${wallet.formatRub(price)} с баланса.`,
     ...(club.active ? [clubMenuLine(club.until)] : []),
-    ...(ready ? [] : ['', 'Для этого нужен вход в WB — по номеру и коду из SMS, как в программе WB на пункте.']),
+    ...(ready ? [] : ['', 'Для этого нужен вход в WB — по номеру телефона и коду от WB, как в программе WB на пункте.']),
   ].join('\n');
 }
 
@@ -4062,41 +4319,136 @@ async function handleCallback(callback) {
   if (shopPay) { answerCallbackQuery(callback.id).catch(() => {}); await payShopItem(from, chatId, messageId, shopPay[1], shopPay[2].split(':')); return; }
   if (data.startsWith('shop:')) { answerCallbackQuery(callback.id).catch(() => {}); await dropTopupAmountWait(from.id); await showShop(from, chatId, messageId, data.split(':').slice(1)); return; }
   if (data === 'rv:start' || data === 'rv:filters') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId, messageId); return; }
-  if (data === 'rv:relogin') { answerCallbackQuery(callback.id).catch(() => {}); await deleteWbConnection(from.id); await showReviewFilters(from, chatId, messageId); return; }
-  if (data === 'rv:disconnect') { answerCallbackQuery(callback.id).catch(() => {}); localGoodsSnapshots.delete(Number(from.id)); await clearSession(from.id); await deleteWbConnection(from.id); await sendMessage(chatId, 'Кабинет WB отключён.', { reply_markup: MENU_KEYBOARD }); return; }
-  if (data === 'rv:cancel') { answerCallbackQuery(callback.id).catch(() => {}); const connection = await getWbConnection(from.id); if (connection) await saveWbConnection(from, chatId, 'idle', connection.session); await sendMessage(chatId, 'Подключение WB отменено.', { reply_markup: MENU_KEYBOARD }); return; }
+  // «⭐ К отзывам» под карточкой автора — новым сообщением: оплаченная карточка остаётся в чате.
+  if (data === 'rv:back') { answerCallbackQuery(callback.id).catch(() => {}); await showReviewFilters(from, chatId); return; }
+  // Вернуться туда, откуда открыли выбор пункта или вопрос «войти другим номером»: к поиску или к отзывам.
+  if (data === 'rv:stay') { answerCallbackQuery(callback.id).catch(() => {}); await backToWbScreen(from, chatId, messageId); return; }
+  // «Войти другим номером» стирает действующий вход — сначала вопрос (rv:relogin), стирает rv:relogin:ok.
+  if (data === 'rv:relogin') {
+    answerCallbackQuery(callback.id).catch(() => {});
+    const connection = await getWbConnection(from.id);
+    const point = connection?.session?.pointId ? ` (ПВЗ ${escapeHtml(connection.session.pointId)})` : '';
+    await showScreen(chatId, messageId, `<b>Войти другим номером?</b>\nТекущий вход в WB${point} удалится. Потом отправите новый номер и код от WB.`, { reply_markup: choiceKeyboard([
+      [{ text: '📱 Да, другим номером', callback_data: 'rv:relogin:ok' }, { text: '⬅️ Остаться', callback_data: 'rv:stay' }],
+    ]) });
+    return;
+  }
+  if (data === 'rv:relogin:ok' || data === 'cs:relogin') {
+    answerCallbackQuery(callback.id).catch(() => {});
+    const search = data === 'cs:relogin' || await wbPurpose(from) === 'search';
+    localGoodsSnapshots.delete(Number(from.id));
+    await deleteWbConnection(from.id);
+    if (search) await startClientSearch(from, chatId, messageId); else await showReviewFilters(from, chatId, messageId);
+    return;
+  }
+  // «🚪 Выйти из WB» — с подтверждением. rv:disconnect — та же кнопка в старых сообщениях («Отключить WB»).
+  const logoutAsk = data === 'rv:disconnect' ? 'rv' : /^(rv|cs):logout$/.exec(data)?.[1];
+  if (logoutAsk) {
+    answerCallbackQuery(callback.id).catch(() => {});
+    await showScreen(chatId, messageId, '<b>Выйти из WB?</b>\nОтзывы и поиск клиента перестанут работать, пока вы не войдёте заново — по номеру телефона и коду от WB.', { reply_markup: choiceKeyboard([
+      [{ text: '🚪 Да, выйти', callback_data: `${logoutAsk}:logout:ok` }, { text: '⬅️ Остаться', callback_data: logoutAsk === 'cs' ? 'code:find' : 'rv:filters' }],
+    ]) });
+    return;
+  }
+  const logoutOk = /^(rv|cs):logout:ok$/.exec(data);
+  if (logoutOk) {
+    answerCallbackQuery(callback.id).catch(() => {});
+    localGoodsSnapshots.delete(Number(from.id));
+    await clearSession(from.id);
+    await deleteWbConnection(from.id);
+    const again = logoutOk[1] === 'cs' ? { text: '🔎 Войти снова', callback_data: 'code:find' } : { text: '⭐ Войти снова', callback_data: 'rv:filters' };
+    await showScreen(chatId, messageId, 'Вы вышли из WB. Данные входа удалены из бота.', { reply_markup: choiceKeyboard([[again], MENU_ROW]) });
+    return;
+  }
+  // «Отменить вход» (шаг телефона или кода) и «Оставить текущий ПВЗ» (список пунктов) — одна кнопка rv:cancel:
+  // готовый вход с выбранным пунктом она не трогает, отменяет только незаконченный.
+  if (data === 'rv:cancel') {
+    const connection = await getWbConnection(from.id);
+    const pointId = connection?.session?.pointId;
+    if (connection?.session?.token && pointId && (connection.state === 'ready' || connection.state === 'await_point')) {
+      if (connection.state !== 'ready') await saveWbConnection(from, chatId, 'ready', connection.session);
+      answerCallbackQuery(callback.id, `Пункт не менялся — ПВЗ ${pointId}`).catch(() => {});
+      await backToWbScreen(from, chatId, messageId);
+      return;
+    }
+    answerCallbackQuery(callback.id).catch(() => {});
+    if (connection?.session?.token && connection.state === 'await_point') {
+      await showScreen(chatId, messageId, 'Вход в WB сохранён — пункт выберете, когда снова откроете отзывы или поиск клиента.', { reply_markup: MENU_KEYBOARD });
+      return;
+    }
+    await cancelWbLogin(from, chatId);
+    if (await wbPurpose(from) === 'search') await clearSession(from.id);
+    await showScreen(chatId, messageId, 'Вход в WB отменён.', { reply_markup: MENU_KEYBOARD });
+    return;
+  }
+  // «🔁 Выслать код заново» — новый код на тот же номер (он есть в зашифрованной сессии), не чаще раза в 30 секунд.
+  if (data === 'rv:resend') {
+    const connection = await getWbConnection(from.id);
+    if (connection?.state !== 'await_code' || !connection.session?.phone) {
+      answerCallbackQuery(callback.id, 'Этот вход уже отменён — начните заново').catch(() => {});
+      await backToWbScreen(from, chatId, messageId);
+      return;
+    }
+    const wait = Math.ceil(((wbResendAt.get(Number(from.id)) || 0) + WB_RESEND_COOLDOWN_MS - Date.now()) / 1000);
+    if (wait > 0) { await answerCallbackQuery(callback.id, `Новый код можно запросить через ${wait} сек.`); return; }
+    if (wbResendAt.size > 5000) wbResendAt.clear();
+    wbResendAt.set(Number(from.id), Date.now());
+    answerCallbackQuery(callback.id, 'Запрашиваю новый код…').catch(() => {});
+    await requestWbCode(from, chatId, connection.session, connection.session.phone, { messageId, fresh: true });
+    return;
+  }
+  // «📱 Другой номер» — снова шаг телефона (вход ещё не готов; готовый вход эта кнопка не трогает).
+  if (data === 'rv:phone') {
+    answerCallbackQuery(callback.id).catch(() => {});
+    const connection = await getWbConnection(from.id);
+    if (connection?.session?.token && (connection.state === 'ready' || connection.state === 'await_point')) return backToWbScreen(from, chatId, messageId);
+    await saveWbConnection(from, chatId, 'await_phone', { deviceId: connection?.session?.deviceId || crypto.randomUUID() });
+    await showScreen(chatId, messageId, await wbLoginPromptText(from, await wbPurpose(from)), { reply_markup: WB_LOGIN_KEYBOARD });
+    return;
+  }
   if (data === 'cs:points') {
     // Смена ПВЗ из поиска клиента: после выбора пункта вернуться к поиску, а не к отзывам.
     answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
     if (!connection?.session?.token) return startClientSearch(from, chatId, messageId);
     await saveSession(from, chatId, 'await_wb_for_search', { userId: await ensureUser(from) });
-    await beginPointSelection(from, chatId, connection);
+    await beginPointSelection(from, chatId, connection, messageId);
     return;
   }
   if (data === 'rv:points') {
     answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
-    if (!connection?.session?.token) return showReviewFilters(from, chatId);
-    await beginPointSelection(from, chatId, connection);
+    if (!connection?.session?.token) return showReviewFilters(from, chatId, messageId);
+    await beginPointSelection(from, chatId, connection, messageId);
     return;
   }
   const pointMatch = data.match(/^rv:point:(\d+)$/);
   if (pointMatch) {
-    answerCallbackQuery(callback.id).catch(() => {});
     const connection = await getWbConnection(from.id);
-    if (!connection?.session?.token) return showReviewFilters(from, chatId);
-    const session = await wbPvz.selectPoint(connection.session, Number(pointMatch[1]));
+    if (!connection?.session?.token) { answerCallbackQuery(callback.id).catch(() => {}); return showReviewFilters(from, chatId, messageId); }
+    const pointId = Number(pointMatch[1]);
+    if (connection.state === 'ready' && Number(connection.session.pointId) === pointId) {
+      answerCallbackQuery(callback.id, `ПВЗ ${pointId} уже открыт`).catch(() => {});
+      return backToWbScreen(from, chatId, messageId);
+    }
+    if (!(connection.session.points || []).some(point => Number(point.id) === pointId)) {
+      // Кнопка из старого списка: такого пункта у входа больше нет — показываем список заново.
+      answerCallbackQuery(callback.id, 'Этого ПВЗ больше нет в списке').catch(() => {});
+      return beginPointSelection(from, chatId, connection, messageId);
+    }
+    answerCallbackQuery(callback.id).catch(() => {});
+    const session = await wbPvz.selectPoint(connection.session, pointId);
     await saveWbConnection(from, chatId, 'ready', session);
-    await afterWbReady(from, chatId);
+    await afterWbReady(from, chatId, messageId);
     return;
   }
+  // Загрузка у WB идёт несколько секунд — всплывающая подсказка сразу, чтобы не жали второй раз.
   const filterMatch = data.match(/^rv:filter:(all|[1-5])$/);
-  if (filterMatch) { answerCallbackQuery(callback.id).catch(() => {}); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
+  if (filterMatch) { answerCallbackQuery(callback.id, 'Загружаю отзывы…').catch(() => {}); await sendReviewPage(from, chatId, filterMatch[1], 0); return; }
   const reviewPageMatch = data.match(/^rv:page:(all|[1-5]):(\d+)$/);
-  if (reviewPageMatch) { answerCallbackQuery(callback.id).catch(() => {}); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
+  if (reviewPageMatch) { answerCallbackQuery(callback.id, 'Загружаю отзывы…').catch(() => {}); await sendReviewPage(from, chatId, reviewPageMatch[1], Number(reviewPageMatch[2])); return; }
   const authorPositionMatch = data.match(/^rv:who2:(all|[1-5]):(\d+):(\d+)(?::([0-9a-f]{8}))?$/);
-  if (authorPositionMatch) { answerCallbackQuery(callback.id).catch(() => {}); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4]); return; }
+  if (authorPositionMatch) { answerCallbackQuery(callback.id, 'Ищу клиента в WB…').catch(() => {}); await showReviewAuthorByPosition(from, chatId, authorPositionMatch[1], Number(authorPositionMatch[2]), Number(authorPositionMatch[3]), authorPositionMatch[4], messageId); return; }
   const historyMatch = data.match(/^rv:hist:(\d{1,12}):(\d{1,4})$/);
   if (historyMatch) { answerCallbackQuery(callback.id).catch(() => {}); await turnAuthorHistory(from, chatId, messageId, Number(historyMatch[1]), Number(historyMatch[2])); return; }
   const authorMatch = data.match(/^rv:who:(\d+)(?::(\d+))?$/);
@@ -4291,7 +4643,8 @@ async function handleMessage(message) {
   if (LEGACY_BUTTONS.has(text)) await dropLegacyKeyboard(chatId);
   // /help не сбрасывает начатый ввод: человек открывает справку посреди шага и продолжает его.
   if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(from, chatId);
-  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
+  // /cancel отменяет незаконченный ввод и вход в WB (телефон, код); готовый вход и выбранный пункт остаются.
+  if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); await cancelWbLogin(from, chatId); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
   // Остальные команды (и подписи старой постоянной клавиатуры) — как кнопки меню: незаконченный ввод закрывается.
   const command = commandTarget(text);
   if (command) {
@@ -4335,39 +4688,42 @@ async function handleMessage(message) {
     draft.code = parsed.code; return requestConfirmation(from, chatId, draft);
   }
   const wbConnection = await getWbConnection(from.id);
+  // Вход в WB (срок — 15 минут, см. expirePendingLogin). Сообщение с цифрами (номер, код) удаляем — бот обещал;
+  // вопрос словами не трогаем, а отвечаем, чего ждём.
   if (wbConnection?.state === 'await_phone') {
-    await deleteMessage(chatId, message.message_id);
-    let phone = text.replace(/\D/g, '');
-    if (phone.length === 11 && phone.startsWith('8')) phone = `7${phone.slice(1)}`;
-    if (!/^7\d{10}$/.test(phone)) return sendMessage(chatId, 'Введите номер телефона сотрудника в формате <code>79991234567</code>.', { reply_markup: WB_LOGIN_KEYBOARD });
-    try {
-      const result = await wbPvz.requestCode(wbConnection.session || { deviceId: crypto.randomUUID() }, phone);
-      await saveWbConnection(from, chatId, 'await_code', result.session);
-      await sendMessage(chatId, `Код отправлен. Введите код из сообщения WB в течение ${result.ttl} сек. Сообщение с кодом будет удалено.`, { reply_markup: WB_LOGIN_KEYBOARD });
-    } catch (error) {
-      await saveWbConnection(from, chatId, 'await_phone', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
-      await sendMessage(chatId, `Не удалось отправить код WB: ${escapeHtml(error.message)}
-Отправьте номер ещё раз или отмените вход.`, { reply_markup: WB_LOGIN_KEYBOARD });
+    if (/\d/.test(text)) await deleteMessage(chatId, message.message_id).catch(() => {});
+    const parsed = parseWbPhone(text);
+    if (!parsed.phone) {
+      const keyboard = parsed.foreign
+        ? choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], ...WB_LOGIN_KEYBOARD.inline_keyboard])
+        : WB_LOGIN_KEYBOARD;
+      return sendMessage(chatId, parsed.error, { reply_markup: keyboard });
     }
-    return;
+    return requestWbCode(from, chatId, wbConnection.session || { deviceId: crypto.randomUUID() }, parsed.phone);
   }
   if (wbConnection?.state === 'await_code') {
-    await deleteMessage(chatId, message.message_id);
+    if (/\d/.test(text)) await deleteMessage(chatId, message.message_id).catch(() => {});
     const code = text.replace(/\D/g, '');
-    if (!/^\d{4,6}$/.test(code)) return sendMessage(chatId, 'Введите код WB из 4–6 цифр.', { reply_markup: WB_LOGIN_KEYBOARD });
+    if (!/^\d{4,6}$/.test(code)) return sendMessage(chatId, 'Жду код от WB — это 4–6 цифр. Пришлите только цифры кода.', { reply_markup: WB_CODE_KEYBOARD });
+    let session;
     try {
-      const session = await wbPvz.confirmCode(wbConnection.session, code);
-      await saveWbConnection(from, chatId, 'await_point', session);
-      try {
-        await beginPointSelection(from, chatId, { ...wbConnection, state: 'await_point', session });
-      } catch (error) {
-        await saveWbConnection(from, chatId, 'await_point', session, { lastError: String(error.message).slice(0, 500) });
-        await sendMessage(chatId, `Вход WB выполнен, но ПВЗ пока не подключён: ${escapeHtml(error.message)}. Повторите /reviews позже — новый SMS-код не потребуется.`);
-      }
+      session = await wbPvz.confirmCode(wbConnection.session, code);
     } catch (error) {
-      await saveWbConnection(from, chatId, 'await_code', wbConnection.session, { lastError: String(error.message).slice(0, 500) });
-      await sendMessage(chatId, `Не удалось войти в WB: ${escapeHtml(error.message)}
-Проверьте код и отправьте ещё раз.`, { reply_markup: WB_LOGIN_KEYBOARD });
+      console.warn('WB login code confirm failed', error?.status || '', error?.message);
+      await saveWbConnection(from, chatId, 'await_code', wbConnection.session, { lastError: String(error?.message).slice(0, 500) });
+      return sendMessage(chatId, wbCodeConfirmErrorText(error, wbConnection.session), { reply_markup: WB_CODE_KEYBOARD });
+    }
+    await saveWbConnection(from, chatId, 'await_point', session);
+    try {
+      await beginPointSelection(from, chatId, { ...wbConnection, state: 'await_point', session });
+    } catch (error) {
+      // Вход сохранён (await_point): «Проверить снова» (rv:points) сам вернёт и в поиск клиента, если шли за ним.
+      console.warn('WB points after login failed', error?.status || '', error?.message);
+      await saveWbConnection(from, chatId, 'await_point', session, { lastError: String(error?.message).slice(0, 500) });
+      await sendMessage(chatId, 'Вход в WB выполнен, но список ваших ПВЗ пока не загрузился — WB не ответил. Нажмите «Проверить снова» через минуту: новый код не понадобится.', { reply_markup: choiceKeyboard([
+        [{ text: '🔄 Проверить снова', callback_data: 'rv:points' }],
+        MENU_ROW,
+      ]) });
     }
     return;
   }
@@ -4497,6 +4853,24 @@ async function processUpdate(update) {
       if (cq) answerCallbackQuery(cq.id).catch(() => {});
       if (chatId) await sendMessage(chatId, restrictedText(error.message), { reply_markup: choiceKeyboard([...RESTRICTED_KEYBOARD.inline_keyboard, MENU_ROW]) }).catch(() => {});
       return;
+    }
+    // Ошибка WB (вход устарел, нет доступа, WB не отвечает) посреди отзывов или поиска — понятный ответ с повтором
+    // той же кнопки, а не «сбой на нашей стороне». Не получилось ответить так — общий текст ниже.
+    if (error?.name === 'WbPvzError') {
+      const cq = update.callback_query;
+      const from = cq?.from || update.message?.from;
+      const chatId = update.message?.chat?.id || cq?.message?.chat?.id;
+      const raw = String(cq?.data || '');
+      const data = raw.startsWith(NOTICE_PREFIX) ? raw.slice(NOTICE_PREFIX.length) : raw;
+      try {
+        const purpose = /^(cs:|code:)/.test(data) ? 'search' : await wbPurpose(from);
+        if (from && chatId && await replyWbFailure(from, chatId, error, { purpose, retry: data, money: /^rv:who/.test(data) })) {
+          botHealth.recordUpdate({ label: updateLabel(update), ms: Date.now() - startedAt });
+          return;
+        }
+      } catch (replyError) {
+        console.warn('WB failure reply failed', replyError?.message || replyError);
+      }
     }
     // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
     const incident = crypto.randomBytes(3).toString('hex');

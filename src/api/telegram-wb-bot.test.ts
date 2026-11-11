@@ -211,7 +211,8 @@ describe('Telegram sticker generator bot', () => {
     expect(view.text).toContain('Нет доступных ПВЗ');
     expect(view.text).not.toContain('ошибка');
     const actions = view.reply_markup.inline_keyboard.flat().map(button => button.callback_data);
-    expect(actions).toEqual(expect.arrayContaining(['rv:points', 'rv:relogin']));
+    // Без пунктов вход бесполезен — «Войти другим номером» сразу, без вопроса (rv:relogin:ok).
+    expect(actions).toEqual(expect.arrayContaining(['rv:points', 'rv:relogin:ok']));
   });
 
   it('пишет конец бесплатного периода как «до следующего дня»', () => {

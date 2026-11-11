@@ -27,6 +27,8 @@ function topupBackData(then) {
   if (qr) return `code:ask:${qr[1]}`;
   const approval = /^cqa:([0-9a-f-]{36})$/.exec(then);
   if (approval) return `cq:view:${approval[1]}`;
+  // «Кто поставил оценку»: к экрану отзывов (оценки, баланс), а не в главное меню — отзыв не теряется из виду.
+  if (then.startsWith('rv:')) return 'rv:filters';
   return 'menu:home';
 }
 
