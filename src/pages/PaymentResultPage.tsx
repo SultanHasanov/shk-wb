@@ -67,6 +67,46 @@ function SecretRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Кнопка возврата в Telegram-бот после оплаты из бота. */
+function BackToBotButton({ botUrl, variant }: { botUrl: string; variant?: 'secondary' }) {
+  const t = useT();
+  return (
+    <a
+      href={botUrl}
+      rel="noopener noreferrer"
+      onClick={event => {
+        // Если результат открыт в Mini App, чат уже находится
+        // под этим окном: закрытие надёжнее любых tg:// ссылок.
+        const webApp = window.Telegram?.WebApp;
+        if (webApp?.initData) {
+          event.preventDefault();
+          webApp.close();
+        }
+      }}
+    >
+      <Button variant={variant}>{t('Вернуться в бот', 'Ботқа оралу')}</Button>
+    </a>
+  );
+}
+
+/** Что сказать после оплаты из бота: всё дальнейшее — в Telegram, сайт и аккаунт на сайте не нужны. */
+function telegramSuccessText(productKind: string): Text {
+  if (productKind === 'wallet_topup')
+    return {
+      ru: 'Деньги уже на балансе в боте — вернитесь в Telegram, там придёт сообщение о зачислении.',
+      kk: 'Ақша боттағы баланста — Telegram-ға оралыңыз, есепке алу туралы хабарлама келеді.',
+    };
+  if (productKind === 'individual_stickers')
+    return {
+      ru: 'Заказ оплачен — вернитесь в Telegram: PDF со стикерами будут в боте, в «Мои заказы».',
+      kk: 'Тапсырыс төленді — Telegram-ға оралыңыз: стикерлер PDF-і боттағы «Менің тапсырыстарым» бөлімінде.',
+    };
+  return {
+    ru: 'Вернитесь в Telegram — там придёт сообщение об оплате.',
+    kk: 'Telegram-ға оралыңыз — төлем туралы хабарлама сонда келеді.',
+  };
+}
+
 export const PaymentResultPage = observer(() => {
   const t = useT();
   const locale = useLocale();
@@ -229,6 +269,19 @@ export const PaymentResultPage = observer(() => {
                       )}
                     </p>
                     {Date.now() - statusOpenedAt >= 115_000 && <Button variant="secondary" onClick={() => void order.refetch()}>{t('Проверить оплату', 'Төлемді тексеру')}</Button>}
+                    {fromTelegram && botUrl && (
+                      <>
+                        <p className="muted" style={{ margin: 0 }}>
+                          {t(
+                            'Можно вернуться в бот, не дожидаясь: когда банк подтвердит оплату, там придёт сообщение.',
+                            'Күтпей-ақ ботқа оралуға болады: банк төлемді растағанда, сонда хабарлама келеді.',
+                          )}
+                        </p>
+                        <div className="row">
+                          <BackToBotButton botUrl={botUrl} variant="secondary" />
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -239,23 +292,7 @@ export const PaymentResultPage = observer(() => {
                       {productName} · {formatTotal(data.amount)}
                     </p>
 
-                    {fromTelegram && botUrl && (
-                      <a
-                        href={botUrl}
-                        rel="noopener noreferrer"
-                        onClick={event => {
-                          // Если результат открыт в Mini App, чат уже находится
-                          // под этим окном: закрытие надёжнее любых tg:// ссылок.
-                          const webApp = window.Telegram?.WebApp;
-                          if (webApp?.initData) {
-                            event.preventDefault();
-                            webApp.close();
-                          }
-                        }}
-                      >
-                        <Button>{t('Вернуться в бот', 'Ботқа оралу')}</Button>
-                      </a>
-                    )}
+                    {fromTelegram && botUrl && <BackToBotButton botUrl={botUrl} />}
 
                     {data.accessCode && (
                       <SecretRow label={t('Код доступа к генерации', 'Генерацияға қолжетімділік коды')} value={data.accessCode} />
@@ -265,7 +302,10 @@ export const PaymentResultPage = observer(() => {
                       <SecretRow label={t('Ключ активации', 'Белсендіру кілті')} value={data.licenseKey} />
                     )}
 
-                    {data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? (
+                    {fromTelegram ? (
+                      // Из бота: блоки про кабинет, аккаунт на сайте и «На главную» не нужны — всё дальше в Telegram.
+                      <Alert tone="success">{t(telegramSuccessText(data.productKind).ru, telegramSuccessText(data.productKind).kk)}</Alert>
+                    ) : data.productKind === 'wallet_topup' ? null : data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? (
                       <Alert tone="success">
                         {t(
                           'Тариф уже действует. Войдите в программу тем же логином и паролем, что на сайте, — или нажмите «Обновить» в профиле программы, если уже вошли.',
@@ -301,19 +341,23 @@ export const PaymentResultPage = observer(() => {
                           </Button>
                         </a>
                       )}
-                      <Link to={data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? '/cabinet/subscription' : '/cabinet/keys'}>
-                        <Button variant="secondary">
-                          <KeyRound size={18} />
-                          {data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? t('Подписка', 'Жазылым') : t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
-                        </Button>
-                      </Link>
-                      {/* Из кабинета логично идти сразу генерировать, а не на главную */}
-                      <Link to={inCabinet ? '/cabinet/generator' : lp('/')}>
-                        <Button variant="ghost">
-                          {inCabinet ? t('К генератору', 'Генераторға') : t('На главную', 'Басты бетке')}
-                          <ArrowRight size={16} />
-                        </Button>
-                      </Link>
+                      {!fromTelegram && (
+                        <>
+                          <Link to={data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? '/cabinet/subscription' : '/cabinet/keys'}>
+                            <Button variant="secondary">
+                              <KeyRound size={18} />
+                              {data.productKind === 'app_subscription' || data.productKind === 'app_addon' ? t('Подписка', 'Жазылым') : t('Ключи и доступы', 'Кілттер мен қолжетімділіктер')}
+                            </Button>
+                          </Link>
+                          {/* Из кабинета логично идти сразу генерировать, а не на главную */}
+                          <Link to={inCabinet ? '/cabinet/generator' : lp('/')}>
+                            <Button variant="ghost">
+                              {inCabinet ? t('К генератору', 'Генераторға') : t('На главную', 'Басты бетке')}
+                              <ArrowRight size={16} />
+                            </Button>
+                          </Link>
+                        </>
+                      )}
                     </div>
                   </>
                 )}
@@ -334,9 +378,14 @@ export const PaymentResultPage = observer(() => {
                       )}
                     </p>
                     <div className="row">
-                      <Link to={lp('/')}>
-                        <Button>{t('Попробовать снова', 'Қайта көру')}</Button>
-                      </Link>
+                      {/* Из бота — обратно в бот: оплату там можно начать заново, сайт для этого не нужен */}
+                      {fromTelegram && botUrl ? (
+                        <BackToBotButton botUrl={botUrl} />
+                      ) : (
+                        <Link to={lp('/')}>
+                          <Button>{t('Попробовать снова', 'Қайта көру')}</Button>
+                        </Link>
+                      )}
                       <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
                         <Button variant="secondary">{t('Написать в Telegram', 'Telegram-да жазу')} @{SUPPORT_USERNAME}</Button>
                       </a>
