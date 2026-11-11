@@ -16,6 +16,7 @@ const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend } = require('./_admin-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { accountMergeSummary } = require('./_telegram-account');
+const { NOTICE_PREFIX, keptRows, noticeMarkup } = require('./_bot-notice');
 const userCache = require('./_telegram-user-cache');
 const botHealth = require('./_bot-health');
 const wbPvz = require('./_wb-pvz');
@@ -72,15 +73,24 @@ const SUPPORT_URL = 'https://t.me/roma_denosov';
 const CHANNEL_URL = 'https://t.me/wbtools_ru';
 const VPN_URL = 'https://t.me/wb_wpn_bot';
 
+// Список «/» в Telegram — те же разделы и подписи, что в главном меню. Ставится при старте узла бота
+// (syncBotCommands из selfhost/server.cjs) и локальным скриптом scripts/run-telegram-bot-local.cjs.
 const BOT_COMMANDS = [
   { command: 'menu', description: 'Главное меню' },
-  { command: 'stickers', description: 'Стикеры товаров и QR коробок' },
-  { command: 'code', description: 'Найти код клиента' },
-  { command: 'reviews', description: 'Отзывы ПВЗ и кто поставил оценку' },
-  { command: 'profile', description: 'Профиль, баланс, продление' },
-  { command: 'invite', description: 'Пригласить друга — 10% с его оплат' },
-  { command: 'help', description: 'Как пользоваться ботом' },
+  { command: 'stickers', description: 'Стикеры и QR коробок' },
+  { command: 'code', description: 'Код клиента: QR по ID клиента' },
+  { command: 'reviews', description: 'Отзывы ПВЗ' },
+  { command: 'profile', description: 'Профиль и баланс' },
+  { command: 'balance', description: 'Баланс и пополнение' },
+  { command: 'invite', description: 'Пригласить коллегу — 10% с его оплат вам' },
+  { command: 'help', description: 'Помощь и поддержка' },
+  { command: 'cancel', description: 'Отменить текущее действие' },
 ];
+
+/** Поставить список команд боту. Сбой Telegram не мешает запуску — вызывающий ловит ошибку и не ждёт. */
+function syncBotCommands() {
+  return telegramRequest('setMyCommands', { commands: BOT_COMMANDS });
+}
 
 function publicUrl(path) {
   const fallback = process.env.VERCEL_ENV === 'production' ? 'https://shk-wb.ru' : process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://shk-wb.ru';
@@ -328,16 +338,15 @@ const MENU_KEYBOARD = { inline_keyboard: [MENU_ROW] };
 const WB_LOGIN_KEYBOARD = { inline_keyboard: [[{ text: 'Отменить вход', callback_data: 'rv:cancel' }, ...MENU_ROW]] };
 
 function mainMenuKeyboard() {
-  // По две кнопки в ряд с короткими подписями — меню не растягивается. style (Bot API 9.4) — цвет кнопки.
+  // По две кнопки в ряд с короткими подписями — меню не растягивается.
   return choiceKeyboard([
-    [{ text: '🏷 Стикеры и QR для коробок', callback_data: 'menu:stickers' }],
+    [{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }],
     [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
-    [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 Печать ячеек', callback_data: 'menu:cellprint' }],
+    [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 ПВЗ Принт', callback_data: 'menu:cellprint' }],
     // Аккаунт создаётся сам при первом действии — кнопки «Войти» нет. Сайта в меню тоже нет: бот работает
-    // сам по себе, связку с аккаунтом сайта делает поддержка.
-    [{ text: '👤 Профиль', callback_data: 'menu:profile' }, { text: '🎁 +10% за друга', callback_data: 'menu:ref' }],
-    [{ text: '📣 Канал', url: CHANNEL_URL, style: 'success' }, { text: '🛡 Наш VPN', url: VPN_URL }],
-    [{ text: '🆘 Поддержка', callback_data: 'menu:support' }],
+    // сам по себе, связку с аккаунтом сайта делает поддержка. «Помощь» — справка и поддержка, там же канал и VPN.
+    [{ text: '👤 Профиль и баланс', callback_data: 'menu:profile' }, { text: '🆘 Помощь', callback_data: 'menu:help' }],
+    [{ text: '👥 Пригласить коллегу', callback_data: 'menu:ref' }],
   ]);
 }
 
@@ -362,23 +371,48 @@ function greetingTitle(from) {
   return `<b>👋 Здравствуйте${name ? `, ${escapeHtml(name)}` : ''}!</b>`;
 }
 
-/** greet — после /start: приветствие по имени вместо заголовка «Главное меню». */
-async function showMainMenu(from, chatId, messageId, { greet = false, invited = false, notice = '' } = {}) {
-  // Без ссылок в тексте: канал, VPN и сайт — кнопками ниже.
-  const lines = greet
-    ? [
-      greetingTitle(from),
-      '',
-      'Что умеет бот:',
-      '🏷 Стикеры и QR для коробок — читаются сканером WB',
-      '📷 Пришлите скриншот с номером ШК — сделаю стикер',
-      '🔑 QR-код клиента',
-      '⭐ Кто поставил оценку в отзывах ПВЗ',
-      '',
-      'Всё — в меню ниже.',
-    ]
-    : [notice || '<b>Главное меню</b>'];
-  if (invited) lines.push('', 'Вас пригласил коллега — откройте «👤 Профиль», и приглашение засчитается.');
+// Переход по ссылке-приглашению (captureReferral): что сказать в приветствии.
+const REFERRAL_LINES = {
+  new: 'Вы пришли по приглашению коллеги — добро пожаловать!',
+  already_captured: 'Вы пришли по приглашению коллеги — добро пожаловать!',
+  existing: 'Приглашение засчитывается только новым пользователям, а вы уже пользовались ботом.',
+  unknown: 'Ссылку-приглашение не узнал, но бот работает как обычно.',
+};
+
+/** Строка о скидке клуба для приветствия и меню: на что она и до какого числа. */
+function clubMenuLine(until) {
+  return `🎁 Вам как участнику клуба — скидка ${CLUB_DISCOUNT_PERCENT}% на «Код клиента» и «Кто поставил оценку»${until ? ` до ${dayMonthShort(until)}` : ''}, пока активна подписка на клуб.`;
+}
+
+/** Приветствие после /start: для кого бот, что умеет и сколько стоит. Цены — из констант, со скидкой клуба. */
+async function greetingLines(from) {
+  const club = await clubDiscountInfo(from?.id).catch(() => ({ active: false, until: null }));
+  const withClub = price => (club.active ? applyClubDiscount(price) : price);
+  const custom = wallet.formatRub(GENERATION_PRICES.custom / 100), batch = wallet.formatRub(GENERATION_PRICES.batch / 100);
+  return [
+    greetingTitle(from),
+    ...(club.active ? [clubMenuLine(club.until)] : []),
+    'Я бот для сотрудников ПВЗ Wildberries. Что умею:',
+    '',
+    `🏷 Стикер с ШК товара (номер из 11 цифр) — ${custom}, пачка из ${BATCH_QUANTITY} новых — ${batch}. Можно просто прислать сюда фото или скриншот с номером.`,
+    `📦 QR возвратной коробки — по тем же ценам.`,
+    `🔑 QR-код клиента по его ID — ${wallet.formatRub(withClub(CLIENT_CODE_PRICE))} или 1 код из тарифа «Помощника ПВЗ».`,
+    `⭐ Отзывы вашего ПВЗ — смотреть бесплатно, узнать, кто поставил оценку, — ${wallet.formatRub(withClub(REVIEW_PRICE))}.`,
+    '',
+    `Оплата — с баланса бота, пополнение от ${wallet.formatRub(wallet.MIN_TOPUP)}.`,
+    'Выберите, что нужно, кнопкой ниже.',
+  ];
+}
+
+/**
+ * greet — после /start: приветствие по имени вместо заголовка «Главное меню».
+ * referral — исход перехода по приглашению (REFERRAL_LINES), notice — строка вместо заголовка (или под приветствием).
+ */
+async function showMainMenu(from, chatId, messageId, { greet = false, referral = '', notice = '' } = {}) {
+  // Без ссылок в тексте: канал и VPN — кнопками на экране «Помощь».
+  const lines = greet ? await greetingLines(from) : [notice || '<b>Главное меню</b>'];
+  if (greet && notice) lines.splice(1, 0, notice);
+  if (REFERRAL_LINES[referral]) lines.push('', REFERRAL_LINES[referral]);
   await showScreen(chatId, messageId, lines.join('\n'), { reply_markup: mainMenuKeyboard() });
 }
 
@@ -749,7 +783,7 @@ function clientCodeFreeFor(telegramId) {
 // В боте: человек пришёл по кнопке из группы клуба (/start club_code | club_reviews) → club_ref_at, скидка 30 дней
 // после перехода и только при активной подписке. Только «Код клиента» и «Кто поставил оценку»; ШК и магазин — без скидки.
 // Тот же модуль даёт скидку на тариф «Про» программы при оплате на сайте (api/payments.js).
-const { clubDiscount, clubPrice, markClubRef } = require('./_club');
+const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubDiscountInfo, clubPrice, markClubRef } = require('./_club');
 
 const clientCodePrice = telegramId => clubPrice(telegramId, CLIENT_CODE_PRICE);
 const clientCodeEventKey = (userId, qrText) => `qr:${userId}:${qrText}`;
@@ -1248,7 +1282,7 @@ async function startTopupPayment(from, chatId, amount, then, screenId, missing =
 function profileKeyboard({ orders = false } = {}) {
   const rows = [
     [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '🛒 Купить с баланса', callback_data: 'shop:home' }],
-    [{ text: '👥 Пригласить друга', callback_data: 'menu:ref' }, { text: '🔑 Ввести код доступа', callback_data: 'code:enter' }],
+    [{ text: '👥 Пригласить коллегу', callback_data: 'menu:ref' }, { text: '🔑 Ввести код доступа', callback_data: 'code:enter' }],
   ];
   if (orders) rows.push([{ text: '📦 Мои заказы', callback_data: 'orders:list' }]);
   rows.push(MENU_ROW);
@@ -1638,9 +1672,24 @@ async function acceptWizardPhoto(from, chatId, draft, message, image) {
   return requestConfirmation(from, chatId, draft);
 }
 
+// Когда последний раз ответили «читаю по одному фото»: на серию фото (альбом) — одно предупреждение, а не девять.
+const photoWarnedAt = new Map();
+
+function shouldWarnPhoto(telegramId, now = Date.now()) {
+  const key = Number(telegramId);
+  if (now - (photoWarnedAt.get(key) || 0) < PHOTO_COOLDOWN_MS) return false;
+  if (photoWarnedAt.size > 5000) photoWarnedAt.clear();
+  photoWarnedAt.set(key, now);
+  return true;
+}
+
 /** Фото вне мастера: нашли ШК — предлагаем стикер по нему. */
 async function acceptLoosePhoto(from, chatId, image) {
-  if (photoTooOften(from.id)) return;
+  if (photoTooOften(from.id)) {
+    // Раньше второе фото подряд оставалось без ответа — человек думал, что бот завис или сделает стикеры по всем.
+    if (shouldWarnPhoto(from.id)) await sendMessage(chatId, 'Читаю по одному фото за раз. Дождитесь ответа по первому и пришлите следующее.');
+    return;
+  }
   const status = await sendMessage(chatId, '🔍 Читаю номер ШК с фото…');
   const codes = await shkFromImage(image, 11);
   if (!codes?.length) {
@@ -1735,16 +1784,38 @@ async function showProfile(from, chatId, messageId) {
   await showScreen(chatId, messageId, text, { reply_markup: profileKeyboard({ orders: Array.isArray(orders) && orders.length > 0 }) });
 }
 
-async function showHelp(chatId, messageId) {
-  await showScreen(chatId, messageId, [
-    '<b>❓ Как пользоваться</b>',
-    '🏷 Стикеры и QR — выберите тип и количество, придёт PDF.',
-    '📷 ШК можно не вводить: пришлите скриншот или фото экрана с номером — бот прочитает его сам.',
-    '🔑 Код клиента — отправьте <code>Код ID</code>, придёт QR. ID можно найти в боте по ячейке или телефону (нужен вход в кабинет WB по SMS).',
-    '⭐ Отзывы — войдите в кабинет WB по SMS, затем «Кто поставил оценку».',
-    '💰 Оплата — с баланса: «👤 Профиль» → «Пополнить».',
-    '/cancel — отменить текущее действие.',
-  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '🆘 Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]) });
+/**
+ * «🆘 Помощь» — справка и поддержка на одном экране: как пользоваться (с ценами из констант и скидкой клуба),
+ * что прислать поддержке, Telegram ID для копирования, связка с покупками на сайте; канал и VPN — кнопками.
+ */
+async function helpText(from) {
+  const [{ price: codePrice }, { price: authorPrice }] = await Promise.all([
+    clientCodePrice(from?.id).catch(() => ({ price: CLIENT_CODE_PRICE })),
+    reviewPrice(from?.id).catch(() => ({ price: REVIEW_PRICE })),
+  ]);
+  const custom = wallet.formatRub(GENERATION_PRICES.custom / 100), batch = wallet.formatRub(GENERATION_PRICES.batch / 100);
+  return [
+    '<b>🆘 Помощь и поддержка</b>',
+    '',
+    `🏷 <b>Стикеры.</b> «По номеру» — стикер для вашего ШК (11 цифр с этикетки товара), ${custom}: пришлите номер или фото/скриншот, где он виден. «Пачка ${BATCH_QUANTITY}» — ${BATCH_QUANTITY} новых стикеров одним PDF, ${batch}.`,
+    '📦 <b>QR коробки</b> — те же цены, номер коробки — 10 цифр.',
+    `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке или телефону (нужен вход в WB по SMS).`,
+    `⭐ <b>Отзывы ПВЗ.</b> После входа в WB смотреть бесплатно. «Кто поставил оценку» — ${wallet.formatRub(authorPrice)}, того же клиента повторно — бесплатно.`,
+    `💰 <b>Оплата</b> — с баланса бота: «👤 Профиль и баланс» → «💰 Пополнить баланс», от ${wallet.formatRub(wallet.MIN_TOPUP)}.`,
+    '↩️ Передумали — «☰ Меню» или /cancel.',
+    '',
+    '<b>Нужен человек?</b> Кнопка ниже откроет чат с поддержкой. Пришлите скриншот, код ошибки (если я его показал)'
+      + (from?.id ? ` и ваш ID: <code>${Number(from.id)}</code> (нажмите, чтобы скопировать).` : '.'),
+    'Покупали на сайте shk-wb.ru? Напишите — свяжем сайт с ботом, баланс и покупки станут общими.',
+  ].join('\n');
+}
+
+async function showHelp(from, chatId, messageId) {
+  await showScreen(chatId, messageId, await helpText(from), { reply_markup: choiceKeyboard([
+    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+    [{ text: '📣 Канал', url: CHANNEL_URL }, { text: '🛡 Наш VPN', url: VPN_URL }],
+    MENU_ROW,
+  ]) });
 }
 
 function reviewFilterKeyboard() {
@@ -2658,23 +2729,25 @@ async function referralLinks(code) {
 }
 
 /**
- * /start r_<КОД>: запомнить, кто пригласил. Первый переход побеждает; если кабинет уже есть,
+ * /start r_<КОД>: запомнить, кто пригласил. Первый переход побеждает; если аккаунт уже есть,
  * привязать нельзя (приглашение считается только для новых) — ничего не сохраняем.
+ * → 'new' (переход записан) | 'already_captured' (переход был раньше, аккаунта ещё нет) |
+ *   'existing' (уже пользовался ботом) | 'unknown' (такого кода нет).
  */
 async function captureReferral(from, rawCode) {
   const code = String(rawCode).toUpperCase();
-  if (await findUser(from.id)) return false;
+  if (await findUser(from.id)) return 'existing';
   const [owners, aliases] = await Promise.all([
     supabaseFetch(`referral_accounts?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
     supabaseFetch(`referral_code_aliases?referral_code=eq.${encodeURIComponent(code)}&select=user_id&limit=1`),
   ]);
-  if (!owners.length && !aliases.length) return false;
+  if (!owners.length && !aliases.length) return 'unknown';
   const rows = await supabaseFetch('telegram_referral_captures?on_conflict=telegram_user_id', {
     method: 'POST',
     headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
     body: JSON.stringify({ telegram_user_id: Number(from.id), referral_code: code }),
   });
-  return Array.isArray(rows) && rows.length > 0;
+  return Array.isArray(rows) && rows.length > 0 ? 'new' : 'already_captured';
 }
 
 /**
@@ -2702,7 +2775,7 @@ async function bindTelegramReferral(telegramId, userId) {
   const tg = referrer ? await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(referrer)}&select=telegram_user_id&limit=1`).catch(() => []) : [];
   if (tg[0]?.telegram_user_id) {
     await sendMessage(tg[0].telegram_user_id, `<b>🎉 По вашей ссылке пришёл новый пользователь</b>\n\nС каждой его оплаты вам начисляется ${REFERRAL_PERCENT}% — деньги можно перевести на баланс бота или вывести на карту.`, {
-      reply_markup: choiceKeyboard([[{ text: '👥 Мои приглашения', callback_data: 'menu:ref' }]]),
+      reply_markup: noticeMarkup(choiceKeyboard([[{ text: '👥 Мои приглашения', callback_data: 'menu:ref' }]])),
     }).catch(() => {});
   }
   return true;
@@ -2798,59 +2871,90 @@ async function afterWalletTopup(order, noticeId = null) {
   return false;
 }
 
-/** Экран поддержки: что прислать, Telegram ID (нажатием копируется) и связка с покупками на сайте. */
-function supportText(from) {
-  return [
-    '<b>🆘 Поддержка</b>',
-    'Есть вопрос или что-то не работает — напишите нам, отвечает человек.',
-    '',
-    'Чтобы помочь быстрее, пришлите:',
-    '• скриншот экрана с проблемой;',
-    '• код ошибки, если бот его показал;',
-    ...(from?.id ? [`• ваш ID: <code>${Number(from.id)}</code> (нажмите, чтобы скопировать).`] : []),
-    '',
-    'Покупали на сайте shk-wb.ru? Напишите — свяжем сайт с ботом, баланс и покупки станут общими.',
-  ].join('\n');
-}
-
-async function showSupport(from, chatId, messageId) {
-  const text = supportText(from);
-  await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
-    [{ text: '❓ Как пользоваться ботом', callback_data: 'menu:help' }],
-    MENU_ROW,
-  ]) });
-}
-
 /** Вход в WB ждал телефон или SMS-код — отменить (готовое подключение не трогаем). */
 async function cancelWbLogin(from, chatId) {
   const wb = await getWbConnection(from.id);
   if (wb && (wb.state === 'await_phone' || wb.state === 'await_code')) await saveWbConnection(from, chatId, 'idle', wb.session);
 }
 
-/** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
-async function handleMenu(from, chatId, item, messageId) {
-  // Три независимых запроса — параллельно: черновик мастера, незаконченный вход в WB и связка с аккаунтом
-  // (последняя греет кеш для экрана, который откроется ниже).
+/**
+ * Человек ушёл в другой раздел (кнопкой меню, командой или /start) — незаконченный ввод больше не ждём:
+ * иначе следующее сообщение (цифры, фото) съест старый шаг. Три независимых запроса — параллельно: черновик
+ * мастера, незаконченный вход в WB и связка с аккаунтом (греет кеш для экрана, который откроется ниже).
+ * item — куда ушли: 'stickers' мастер сам перезапишет, 'reviews' продолжает начатый вход в WB.
+ */
+async function resetPending(from, chatId, item) {
   await Promise.all([
-    // Ушли из мастера кнопкой меню — его черновик больше не нужен.
     item !== 'stickers' ? clearSession(from.id).catch(() => {}) : null,
-    // Ушли из незаконченного входа в WB — следующее сообщение больше не считается телефоном или SMS-кодом.
     item !== 'reviews' ? cancelWbLogin(from, chatId).catch(() => {}) : null,
     findUser(from.id).catch(() => null),
   ]);
+}
+
+/** Пункты меню открываются в том же сообщении (messageId), «☰ Меню» возвращает его обратно. */
+async function handleMenu(from, chatId, item, messageId) {
+  await resetPending(from, chatId, item);
   if (item === 'stickers') return startGeneration(from, chatId, messageId);
   if (item === 'code') return showClientCode(chatId, messageId, from);
   if (item === 'reviews') return showReviewFilters(from, chatId, messageId);
   if (item === 'helper') return showHelperInfo(chatId, messageId);
   if (item === 'cellprint') return showCellPrintInfo(chatId, messageId);
   if (item === 'profile') return showProfile(from, chatId, messageId);
-  // menu:login — кнопка «Войти» из старых сообщений. Входить никуда не нужно; связать бота с аккаунтом
-  // сайта может поддержка — показываем её экран.
-  if (item === 'support' || item === 'login') return showSupport(from, chatId, messageId);
+  // «Помощь» — справка и поддержка вместе. menu:support — кнопка из прежних сообщений; menu:login — кнопка «Войти»
+  // из старых сообщений: входить никуда не нужно, связать бота с аккаунтом сайта может поддержка.
+  if (item === 'help' || item === 'support' || item === 'login') return showHelp(from, chatId, messageId);
   if (item === 'ref') return showReferrals(from, chatId, messageId);
-  if (item === 'help') return showHelp(chatId, messageId);
   return showMainMenu(from, chatId, messageId);
+}
+
+// Команды и подписи старой постоянной клавиатуры → раздел (обработка — в handleMessage). /help и /cancel — отдельно.
+const TEXT_COMMANDS = {
+  menu: 'menu', generate: 'stickers', stickers: 'stickers', code: 'code', profile: 'profile', account: 'profile',
+  balance: 'balance', topup: 'balance', invite: 'invite', reviews: 'reviews', orders: 'orders',
+};
+const LEGACY_TARGETS = {
+  '☰ Меню': 'menu', '🌐 Открыть сайт': 'menu', '➕ Создать ШК': 'stickers', '🏷 Стикеры и QR': 'stickers',
+  '🏷 Стикеры для товаров': 'product', '📦 QR для коробок': 'box', '💳 Остаток': 'profile', '👤 Аккаунт': 'profile',
+  '⭐ Отзывы ПВЗ': 'reviews', '📦 Мои индивидуальные заказы': 'orders',
+};
+
+function commandTarget(text) {
+  const command = /^\/([a-z]+)(?:@\w+)?$/i.exec(text);
+  if (command) return TEXT_COMMANDS[command[1].toLowerCase()] || null;
+  return LEGACY_TARGETS[text] || null;
+}
+
+/** Ответ на сообщение, которого бот не ждал: что он умеет без кнопок и где человек. */
+async function unknownInputNotice(from, text) {
+  const free = clientCodeFreeFor(from.id);
+  const { price } = free ? { price: 0 } : await clientCodePrice(from.id).catch(() => ({ price: CLIENT_CODE_PRICE }));
+  return [
+    /^\//.test(text) ? 'Такой команды нет.' : 'Я работаю по кнопкам ниже и не отвечаю на сообщения в свободной форме.',
+    '',
+    'Быстрые способы:',
+    '• пришлите фото или номер ШК (11 цифр) — сделаю стикер;',
+    `• напишите <code>Код 191607973</code> — пришлю QR клиента (${free ? 'бесплатно' : `${wallet.formatRub(price)} или 1 код из тарифа`}).`,
+    '',
+    'Нужен человек — «🆘 Помощь».',
+  ].join('\n');
+}
+
+/** /start club_reviews: сначала польза и цена «Отзывов ПВЗ», потом (если нужно) вход в WB. */
+async function reviewsIntroText(from) {
+  const [club, connection] = await Promise.all([
+    clubDiscountInfo(from.id).catch(() => ({ active: false, until: null })),
+    getWbConnection(from.id).catch(() => null),
+  ]);
+  const price = club.active ? applyClubDiscount(REVIEW_PRICE) : REVIEW_PRICE;
+  const ready = connection?.session?.token && connection.state === 'ready';
+  return [
+    greetingTitle(from),
+    '',
+    '<b>⭐ Отзывы ПВЗ</b>',
+    `Покажу отзывы вашего пункта — смотреть бесплатно. Узнать, кто поставил оценку (ячейка, когда забрал, телефон — WB скрывает часть цифр), — ${wallet.formatRub(price)} с баланса.`,
+    ...(club.active ? [clubMenuLine(club.until)] : []),
+    ...(ready ? [] : ['', 'Для этого нужен вход в WB — по номеру и коду из SMS, как в программе WB на пункте.']),
+  ].join('\n');
 }
 
 // Начисление бонусов: /bonus <@ник | ссылка t.me | Telegram ID> <сумма> [комментарий]. Только эти Telegram ID.
@@ -2946,7 +3050,7 @@ async function finishBonus(from, chatId, messageId, action, nonce) {
   const result = await wallet.grantBonus({ userId: bonus.targetUser, kopecks: bonus.kopecks, eventKey: `admin_bonus:${nonce}`, note: bonus.note, adminTelegramId: from.id });
   if (result.duplicate) return showScreen(chatId, messageId, 'Этот бонус уже начислен, повторно деньги не зачислялись.', { reply_markup: MENU_KEYBOARD });
   console.log(`bot bonus by ${from.id} to ${bonus.telegramId} ${bonus.kopecks} kopecks`);
-  const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: MENU_KEYBOARD })
+  const delivered = await sendMessage(bonus.chatId || bonus.telegramId, bonusNoticeText({ kopecks: bonus.kopecks, note: bonus.note, balanceKopecks: result.balanceKopecks }), { reply_markup: noticeMarkup(MENU_KEYBOARD) })
     .then(() => true)
     .catch(error => { console.warn('Бонус: уведомление не доставлено', error?.message || error); return false; });
   return showScreen(chatId, messageId, [
@@ -2956,13 +3060,27 @@ async function finishBonus(from, chatId, messageId, action, nonce) {
   ].join('\n'), { reply_markup: MENU_KEYBOARD });
 }
 
+const STALE_ACTION_TEXT = 'Это действие уже завершено или отменено. Начните заново кнопкой ниже.';
+const RESULT_GONE_TEXT = 'Этот файл больше не хранится. Создайте стикер заново.';
+const RESULT_GONE_KEYBOARD = choiceKeyboard([[{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }], MENU_ROW]);
+
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
   if (!chatId) return;
   // «Последний визит» — в фоне: ответ человеку его не ждёт.
   touchSubscriber(from, chatId).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
-  const data = String(callback.data || '');
-  const messageId = callback.message?.message_id;
+  let data = String(callback.data || '');
+  let messageId = callback.message?.message_id;
+  // Кнопка под уведомлением (n:<callback>, server/_bot-notice.js): уведомление остаётся в чате — снимаем с него
+  // кнопки-переходы (действия вроде «🚫 Это не я» остаются), а экран открываем новым сообщением.
+  if (data.startsWith(NOTICE_PREFIX)) {
+    data = data.slice(NOTICE_PREFIX.length);
+    if (messageId) {
+      telegramRequest('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keptRows(callback.message?.reply_markup) } })
+        .catch(error => console.warn('Уведомление: кнопки не сняты', error?.message || error));
+    }
+    messageId = undefined;
+  }
   if (data.startsWith('menu:')) { answerCallbackQuery(callback.id).catch(() => {}); await handleMenu(from, chatId, data.slice('menu:'.length), messageId); return; }
   const bonusAction = /^bn:(ok|no):([0-9a-f]{12})$/.exec(data);
   if (bonusAction) {
@@ -3065,7 +3183,7 @@ async function handleCallback(callback) {
   if (formatMatch) {
     await answerCallbackQuery(callback.id, 'Готовлю файлы…');
     const result = await loadGenerationRequest(formatMatch[2], from.id);
-    if (!result) return sendMessage(chatId, 'Результат больше недоступен.');
+    if (!result) return sendMessage(chatId, RESULT_GONE_TEXT, { reply_markup: RESULT_GONE_KEYBOARD });
     try { await deliverGeneration(chatId, formatMatch[2], result, formatMatch[1]); }
     catch (error) {
       console.warn('Telegram sticker delivery failed', error.message);
@@ -3074,17 +3192,20 @@ async function handleCallback(callback) {
     return;
   }
   const pageMatch = data.match(/^gen:page:(old|new):([^:]+:\d+):(\d+)$/);
-  if (pageMatch) { answerCallbackQuery(callback.id).catch(() => {}); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, 'Результат больше недоступен.'); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
+  if (pageMatch) { answerCallbackQuery(callback.id).catch(() => {}); const result = await loadGenerationRequest(pageMatch[2], from.id); if (!result) return sendMessage(chatId, RESULT_GONE_TEXT, { reply_markup: RESULT_GONE_KEYBOARD }); await sendPreview(chatId, pageMatch[2], result, Number(pageMatch[3]), pageMatch[1]); return; }
   const session = await getSession(from.id);
   if (!session) {
-    await answerCallbackQuery(callback.id, 'Сессия истекла');
-    await showScreen(chatId, messageId, 'Сессия истекла — начните заново.', { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    // Кнопка старого шага: действие закончено (создано, отменено, ушли в меню) или ожидание истекло.
+    answerCallbackQuery(callback.id).catch(() => {});
+    await showMainMenu(from, chatId, messageId, { notice: STALE_ACTION_TEXT });
     return;
   }
   const draft = session.draft || {};
   // Кнопки мастера работают только в его текущем сообщении: старые экраны выше в чате не трогают черновик.
+  // Со старого экрана снимаем кнопки, чтобы по нему больше не нажимали.
   if (data.startsWith('gen:') && draft.msgId && messageId !== draft.msgId) {
-    await answerCallbackQuery(callback.id, 'Этот шаг устарел — используйте последнее сообщение');
+    await answerCallbackQuery(callback.id, 'Это старый шаг — продолжайте в последнем сообщении ниже');
+    if (messageId) telegramRequest('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     return;
   }
   if (data === 'gen:back') { answerCallbackQuery(callback.id).catch(() => {}); await wizardBack(from, chatId, session, messageId); return; }
@@ -3124,7 +3245,11 @@ async function handleCallback(callback) {
     return;
   }
   if (data === 'gen:confirm' && session.state === 'confirm') { answerCallbackQuery(callback.id).catch(() => {}); await confirmGeneration(callback, session); return; }
-  await answerCallbackQuery(callback.id, 'Кнопка больше неактуальна');
+  // Двойное нажатие на текущем экране (шаг уже сменился, «Создать» уже выполняется) — экран не трогаем.
+  if (messageId && messageId === draft.msgId) { await answerCallbackQuery(callback.id, 'Уже выполняю — подождите'); return; }
+  // Кнопка из старого сообщения — понятный текст и меню вместо всплывающей надписи.
+  answerCallbackQuery(callback.id).catch(() => {});
+  await showMainMenu(from, chatId, messageId, { notice: STALE_ACTION_TEXT });
 }
 
 async function handleMessage(message) {
@@ -3134,60 +3259,67 @@ async function handleMessage(message) {
   touchSubscriber(from, chatId, text).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
   if (startMatch) {
-    // Сброс черновика и связка с аккаунтом (греет кеш) — параллельно.
-    await Promise.all([clearSession(from.id), findUser(from.id).catch(() => null)]);
+    const clubTarget = /^club(?:_(code|reviews))?$/.exec(startMatch[1] || '');
+    // Незаконченный ввод и вход в WB больше не ждём (кроме перехода прямо к отзывам — там вход продолжается).
+    await resetPending(from, chatId, clubTarget?.[1] === 'reviews' ? 'reviews' : 'start');
     // t.me/<бот>?start=link_<token> — привязать этот Telegram к аккаунту из программы «Помощник ПВЗ».
     const link = LINK_PAYLOAD.exec(startMatch[1] || '');
     if (link) return handleLinkStart(from, chatId, link[1]);
     // t.me/<бот>?start=login_<КОД> — подтвердить вход в программу (кнопка и QR на странице /app-login).
     const login = LOGIN_PAYLOAD.exec(startMatch[1] || '');
     if (login) return handleLoginStart(from, chatId, login[1]);
-    // t.me/<бот>?start=r_<КОД> — переход по приглашению.
-    const referral = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
-    const invited = referral ? await captureReferral(from, referral[1]).catch(() => false) : false;
+    // t.me/<бот>?start=r_<КОД> — переход по приглашению. Новичку аккаунт создаём сразу (строго после записи
+    // перехода — bind_referral ищет переход «до регистрации»): приглашение засчитается без действий человека.
+    const referralMatch = REFERRAL_PAYLOAD.exec(startMatch[1] || '');
+    const referral = referralMatch ? await captureReferral(from, referralMatch[1]).catch(() => '') : '';
+    if (referral === 'new' || referral === 'already_captured') {
+      await ensureUser(from).catch(error => console.warn('Приглашение: аккаунт не создан', error?.message || error));
+    }
     // t.me/<бот>?start=club — кнопка «🛠 Инструменты ПВЗ» из группы «Клуба вопросов» (zara-bot, с 09.11.2026):
-    // запоминаем переход (скидка 20% на 30 дней при активной подписке) и показываем главное меню;
-    // ?start=club_code | club_reviews — прежние кнопки: сразу нужный экран (скидку он покажет сам).
-    const clubTarget = /^club(?:_(code|reviews))?$/.exec(startMatch[1] || '');
+    // запоминаем переход (скидка 20% на 30 дней при активной подписке) и показываем главное меню — приветствие
+    // само называет скидку и срок; ?start=club_code | club_reviews — прежние кнопки: сразу нужный экран.
     if (clubTarget) {
       await markClubRef(from.id).catch(error => console.warn('Скидка клуба: отметка перехода', error?.message || error));
-      if (!clubTarget[1]) {
-        const notice = await clubDiscount(from.id) ? clubLine : '';
-        return showMainMenu(from, chatId, undefined, { greet: true, invited, notice });
+      if (!clubTarget[1]) return showMainMenu(from, chatId, undefined, { greet: true, referral });
+      if (clubTarget[1] === 'code') {
+        // Экран кода клиента пишет про скидку сам.
+        await sendMessage(chatId, greetingTitle(from));
+        return showClientCode(chatId, undefined, from);
       }
-      // Экран кода клиента пишет про скидку сам; у отзывов первым может быть вход в кабинет WB — говорим здесь.
-      const clubText = clubTarget[1] === 'reviews' && await clubDiscount(from.id) ? `\n${clubLine}` : '';
-      await sendMessage(chatId, `${greetingTitle(from)}${clubText}`);
-      return clubTarget[1] === 'code' ? showClientCode(chatId, undefined, from) : showReviewFilters(from, chatId);
+      // Отзывы: первым может быть вход в WB по SMS — сначала польза и цена, потом вход.
+      await sendMessage(chatId, await reviewsIntroText(from));
+      return showReviewFilters(from, chatId);
     }
     // Одно сообщение: приветствие + инлайн-меню. Постоянную клавиатуру не шлём — «☰ Меню» есть на каждом экране.
-    return showMainMenu(from, chatId, undefined, { greet: true, invited });
+    return showMainMenu(from, chatId, undefined, { greet: true, referral });
   }
   if (isBonusAdmin(from.id)) {
     const bonusCommand = parseBonusCommand(text);
     if (bonusCommand) return startBonus(from, chatId, bonusCommand);
   }
   if (LEGACY_BUTTONS.has(text)) await dropLegacyKeyboard(chatId);
-  if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(chatId);
-  if (/^\/menu(?:@\w+)?$/i.test(text) || text === '☰ Меню' || text === '🌐 Открыть сайт') return showMainMenu(from, chatId);
+  // /help не сбрасывает начатый ввод: человек открывает справку посреди шага и продолжает его.
+  if (/^\/help(?:@\w+)?$/i.test(text) || text === '🆘 Помощь') return showHelp(from, chatId);
   if (/^\/cancel(?:@\w+)?$/i.test(text)) { await clearSession(from.id); const wb = await getWbConnection(from.id); if (wb && wb.state !== 'ready') await saveWbConnection(from, chatId, 'idle', wb.session); await sendMessage(chatId, 'Текущее действие отменено.', { reply_markup: MENU_KEYBOARD }); return; }
-  if (/^\/(generate|stickers)(?:@\w+)?$/i.test(text)) return startGeneration(from, chatId);
-  if (/^\/code(?:@\w+)?$/i.test(text)) return showClientCode(chatId, undefined, from);
-  if (/^\/profile(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
-  if (/^\/invite(?:@\w+)?$/i.test(text)) return showReferrals(from, chatId);
-  if (/^\/reviews(?:@\w+)?$/i.test(text)) return showReviewFilters(from, chatId);
-  if (/^\/account(?:@\w+)?$/i.test(text)) return showProfile(from, chatId);
-  if (/^\/orders(?:@\w+)?$/i.test(text) || text === '📦 Мои индивидуальные заказы') return showIndividualOrders(from, chatId);
+  // Остальные команды (и подписи старой постоянной клавиатуры) — как кнопки меню: незаконченный ввод закрывается.
+  const command = commandTarget(text);
+  if (command) {
+    await resetPending(from, chatId, command);
+    if (command === 'menu') return showMainMenu(from, chatId);
+    if (command === 'stickers') return startGeneration(from, chatId);
+    if (command === 'code') return showClientCode(chatId, undefined, from);
+    if (command === 'profile') return showProfile(from, chatId);
+    if (command === 'balance') return showTopup(from, chatId);
+    if (command === 'invite') return showReferrals(from, chatId);
+    if (command === 'reviews') return showReviewFilters(from, chatId);
+    if (command === 'orders') return showIndividualOrders(from, chatId);
+    if (command === 'product') return startForCategory(from, chatId, 'product');
+    if (command === 'box') return startForCategory(from, chatId, 'box');
+  }
   // «Код <SID>» → QR клиента (списывает 50 ₽). Голое «код …» без цифр — показываем инструкцию.
   const codeMatch = /^\s*код\s+(\d{1,12})\s*$/iu.exec(text);
   if (codeMatch) return handleClientCode(from, chatId, codeMatch[1]);
   if (/^\s*код\b/iu.test(text)) return showClientCode(chatId, undefined, from);
-  // Старые кнопки большой клавиатуры ещё висят у людей — принимаем их.
-  if (text === '➕ Создать ШК' || text === '🏷 Стикеры и QR') return startGeneration(from, chatId);
-  if (text === '🏷 Стикеры для товаров') return startForCategory(from, chatId, 'product');
-  if (text === '📦 QR для коробок') return startForCategory(from, chatId, 'box');
-  if (text === '💳 Остаток' || text === '👤 Аккаунт') return showProfile(from, chatId);
-  if (text === '⭐ Отзывы ПВЗ') return showReviewFilters(from, chatId);
   // Сначала — ввод, которого ждёт открытый экран (мастер, сумма, поиск). Иначе незаконченный вход в WB
   // («пришлите телефон») перехватывал бы, например, количество стикеров или ШК из 11 цифр.
   const session = await getSession(from.id);
@@ -3254,7 +3386,7 @@ async function handleMessage(message) {
   if (/^\d{7,12}$/.test(bareNumber) && !['choose_kind', 'choose_mode', 'confirm', 'generating'].includes(session?.state)) {
     return offerForNumber(from, chatId, bareNumber);
   }
-  if (!session) return showMainMenu(from, chatId);
+  if (!session) return showMainMenu(from, chatId, undefined, { notice: await unknownInputNotice(from, text) });
   // Шаг мастера ждёт нажатия кнопки, а пришёл текст — подсказываем в том же экране.
   if (['choose_kind', 'choose_mode', 'confirm'].includes(session.state) && draft.msgId) {
     await deleteMessage(chatId, message.message_id).catch(() => {});
@@ -3262,9 +3394,9 @@ async function handleMessage(message) {
     return renderWizard(from, chatId, session.state, draft);
   }
   if (session.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
-  // Остальное (например, ждём входа через Mini App) — просто меню, без загадочных «завершите действие».
+  // Остальное (например, ждём входа через Mini App) — меню с подсказкой, без загадочных «завершите действие».
   await clearSession(from.id);
-  return showMainMenu(from, chatId);
+  return showMainMenu(from, chatId, undefined, { notice: await unknownInputNotice(from, text) });
 }
 
 function validWebhookSecret(req) {
@@ -3302,6 +3434,19 @@ function alertCallback(callbackId, text) {
   return telegramRequest('answerCallbackQuery', { callback_query_id: callbackId, text: String(text || '').slice(0, 200), show_alert: true }).catch(() => {});
 }
 
+// Под ответом об ограничении — куда писать. Общий текст ограничения (restrictionMessage в _user-controls.js) общий
+// с сайтом и программой, поэтому строку про поддержку добавляет только бот. Кнопка — ссылка: callback-кнопки
+// ограниченному всё равно не ответят.
+const RESTRICTED_SUPPORT_LINE = 'Если считаете, что это ошибка, напишите в поддержку.';
+const RESTRICTED_KEYBOARD = choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]]);
+
+function restrictedText(message) {
+  return `⛔ ${escapeHtml(message)}\n${RESTRICTED_SUPPORT_LINE}`;
+}
+
+// /start, /menu и /help ограниченному — ответ всегда (иначе бот выглядит зависшим); прочее — не чаще раза в час.
+const RESTRICTED_ALWAYS_REPLY = /^\/(?:start|menu|help)(?:@\w+)?(?:\s|$)/i;
+
 /** true — апдейт поглощён ограничением «Бот» (или «Полностью») из админки. */
 async function rejectRestricted(update) {
   const tgId = update.message?.from?.id ?? update.callback_query?.from?.id;
@@ -3311,10 +3456,18 @@ async function rejectRestricted(update) {
   const cq = update.callback_query;
   if (cq) {
     await alertCallback(cq.id, restriction.message);
-  } else if (update.message?.chat?.id && shouldReplyRestricted(tgId)) {
-    await sendMessage(update.message.chat.id, `⛔ ${escapeHtml(restriction.message)}`).catch(() => {});
+  } else if (update.message?.chat?.id && (RESTRICTED_ALWAYS_REPLY.test(String(update.message.text || '').trim()) || shouldReplyRestricted(tgId))) {
+    await sendMessage(update.message.chat.id, restrictedText(restriction.message), { reply_markup: RESTRICTED_KEYBOARD }).catch(() => {});
   }
   return true;
+}
+
+/** Сбой на нашей стороне: что с деньгами и куда писать. incident — короткий код записи в журнале. */
+function failureText(incident) {
+  return [
+    'Не получилось выполнить действие — сбой на нашей стороне.',
+    `Попробуйте ещё раз через минуту. Если деньги списались, а результата нет, или ошибка повторяется — напишите в поддержку и назовите код: <code>${incident}</code>`,
+  ].join('\n');
 }
 
 async function processUpdate(update) {
@@ -3334,9 +3487,10 @@ async function processUpdate(update) {
     if (error?.code === 'ACCOUNT_RESTRICTED') {
       botHealth.recordUpdate({ label: updateLabel(update), ms: Date.now() - startedAt });
       const cq = update.callback_query;
-      if (cq) await alertCallback(cq.id, error.message);
       const chatId = update.message?.chat?.id || cq?.message?.chat?.id;
-      if (chatId) await sendMessage(chatId, `⛔ ${escapeHtml(error.message)}`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
+      // Сообщение с причиной и поддержкой ниже — всплывающее окно с тем же текстом было бы повтором.
+      if (cq) answerCallbackQuery(cq.id).catch(() => {});
+      if (chatId) await sendMessage(chatId, restrictedText(error.message), { reply_markup: choiceKeyboard([...RESTRICTED_KEYBOARD.inline_keyboard, MENU_ROW]) }).catch(() => {});
       return;
     }
     // Короткий код ошибки — в лог и человеку: по нему поддержка найдёт запись в журнале.
@@ -3345,7 +3499,7 @@ async function processUpdate(update) {
     console.error(`Telegram generator bot failed [${incident}] ${updateLabel(update)} ${ms} ms`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
     botHealth.recordUpdate({ label: updateLabel(update), ms, failed: true, incident });
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
-    if (chatId) await sendMessage(chatId, `Произошла внутренняя ошибка. Попробуйте позже.\nКод для поддержки: <code>${incident}</code>`, { reply_markup: MENU_KEYBOARD }).catch(() => {});
+    if (chatId) await sendMessage(chatId, failureText(incident), { reply_markup: supportKeyboard() }).catch(() => {});
   }
 }
 
@@ -3376,4 +3530,4 @@ function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramI
 /** Админка сняла/поставила ограничение или безлимит — сбросить снимок на узле бота (по RPC с сайта). */
 function invalidateUserControls() { controls.invalidate(); return true; }
 
-module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, syncBotCommands, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

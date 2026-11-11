@@ -90,7 +90,7 @@ describe('старая кнопка «Войти» и экран поддерж�
   it('menu:login — экран поддержки с Telegram ID и строкой про связку с сайтом, без входа на сайт', async () => {
     await bot.processUpdate(press('menu:login'));
     const text = texts().join('\n');
-    expect(text).toContain('Поддержка');
+    expect(text).toContain('Помощь и поддержка');
     expect(text).toContain(`<code>${TG}</code>`);
     expect(text).toContain('Покупали на сайте shk-wb.ru? Напишите — свяжем сайт с ботом');
     expect(text).not.toMatch(/[Кк]абинет|У меня уже есть/);

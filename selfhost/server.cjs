@@ -220,5 +220,16 @@ app.listen(port, '127.0.0.1', () => console.log(`shk-wb (${botRole.role()}) list
 if (!isBotNode && process.env.SHK_LOCAL_DEV !== '1') require('../server/_disk-alert').startDiskAlert();
 // Снятие ограничений аккаунтов с истёкшим сроком (раз в 5 мин). Только на сайте: узел бота снимок лишь читает.
 if (!isBotNode && process.env.SHK_LOCAL_DEV !== '1') require('../server/_user-controls').startExpiryWatch();
+// Список команд «/» боевого бота — при каждом старте узла бота, чтобы он не отставал от меню (раньше ставился
+// только локальным скриптом). Не ждём: сбой Telegram не мешает запуску.
+if (isBotNode && process.env.SHK_LOCAL_DEV !== '1') {
+  try {
+    require('../server/_telegram-wb-bot').syncBotCommands()
+      .then(() => console.log('bot commands updated'))
+      .catch((error) => console.warn('bot commands not updated', error?.message || error));
+  } catch (error) {
+    console.warn('bot commands not updated', error?.message || error);
+  }
+}
 // Бот тормозит, релей или вебхук Telegram не работают — сообщение админу в Telegram (через запасной релей, если нужно).
 if (process.env.SHK_LOCAL_DEV !== '1') require('../server/_bot-health').startBotHealth();

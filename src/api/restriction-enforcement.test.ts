@@ -285,7 +285,7 @@ describe('бот при ограничении «Бот»', () => {
       .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
   }
 
-  it('кнопка — всплывающее окно с причиной; сообщения — ответ не чаще раза в час', async () => {
+  it('кнопка — всплывающее окно с причиной; /start — ответ всегда, прочие сообщения — не чаще раза в час', async () => {
     restrict(['bot'], { telegram_user_id: 777002 });
     const fetchMock = mockFetch(url => (url.includes('relay.test') ? { body: { ok: true, result: { message_id: 1 } } } : undefined));
     const bot = require('../../server/_telegram-wb-bot.js') as { processUpdate: (u: unknown) => Promise<void> };
@@ -298,9 +298,17 @@ describe('бот при ограничении «Бот»', () => {
     const message = { from: { id: 777002 }, chat: { id: 777002, type: 'private' }, text: '/start' };
     await bot.processUpdate({ update_id: 2, message });
     await bot.processUpdate({ update_id: 3, message });
-    const sent = telegramCalls(fetchMock, 'sendMessage');
-    expect(sent).toHaveLength(1);
-    expect(sent[0].text).toBe('⛔ Доступ ограничен администратором. До 01.01');
+    // На /start бот отвечает всегда — иначе выглядит зависшим; под ответом — ссылка на поддержку.
+    let sent = telegramCalls(fetchMock, 'sendMessage');
+    expect(sent).toHaveLength(2);
+    expect(sent[0].text).toBe('⛔ Доступ ограничен администратором. До 01.01\nЕсли считаете, что это ошибка, напишите в поддержку.');
+    expect(sent[0].reply_markup.inline_keyboard.flat()).toEqual([{ text: '✉️ Написать в поддержку', url: 'https://t.me/roma_denosov' }]);
+
+    const other = { ...message, text: 'привет' };
+    await bot.processUpdate({ update_id: 4, message: other });
+    await bot.processUpdate({ update_id: 5, message: other });
+    sent = telegramCalls(fetchMock, 'sendMessage');
+    expect(sent).toHaveLength(3);
     // в базу бот за ограниченного не ходил
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('https://db.test'))).toBe(false);
   });

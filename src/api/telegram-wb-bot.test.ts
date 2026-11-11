@@ -127,7 +127,9 @@ describe('Telegram sticker generator bot', () => {
     expect(menu.some(button => button.callback_data === 'menu:login')).toBe(false);
     expect(menu.some(button => button.callback_data === 'menu:profile')).toBe(true);
     expect(menu.some(button => button.callback_data === 'menu:ref')).toBe(true);
-    expect(menu.some(button => button.callback_data === 'menu:support')).toBe(true);
+    // «Помощь» объединяет справку и поддержку; канал и VPN — на её экране, не в меню.
+    expect(menu.some(button => button.callback_data === 'menu:help')).toBe(true);
+    expect(menu.some(button => button.url)).toBe(false);
     // Постоянной клавиатуры больше нет; подписи старых reply-кнопок известны — по ним бот снимает её у человека.
     for (const label of ['☰ Меню', '🏷 Стикеры и QR', '🆘 Помощь', '🌐 Открыть сайт', '📦 QR для коробок']) expect(bot.LEGACY_BUTTONS.has(label)).toBe(true);
     expect(bot.LEGACY_BUTTONS.has('/menu')).toBe(false);

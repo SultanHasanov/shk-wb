@@ -130,8 +130,16 @@ Mini App `/bot-checkout` (он входил в кабинет, слал «Вхо
   Все экраны — ОДНО сообщение, которое редактируется (`showScreen` = editMessageText, при неудаче новое сообщение).
   Мастер стикеров (`wizardView`/`renderWizard`/`wizardBack`, «⬅️ Назад»), ввод пользователя удаляется, ошибка строкой сверху;
   кнопки старых сообщений мастера отвечают «шаг устарел» (`draft.msgId`); идемпотентность генерации — `msgId + draft.nonce`.
-  Витрины `showFindCode`/`showHelperInfo`/`showCellPrintInfo`/`showSupport`, канал https://t.me/wbtools_ru в меню.
-  Команды бота — `BOT_COMMANDS` (setMyCommands в `scripts/run-telegram-bot-local.cjs`; для боевого бота вызвать отдельно).
+  Витрины `showClientCode`/`showHelperInfo`/`showCellPrintInfo`/`showHelp` («🆘 Помощь» — справка и поддержка вместе,
+  там же канал и VPN; `menu:support` и `menu:login` из старых сообщений открывают её же).
+  Команды бота — `BOT_COMMANDS` (те же разделы, что меню, плюс `/balance` и `/cancel`): `syncBotCommands()` ставит их при
+  каждом старте узла бота (`selfhost/server.cjs`, роль `bot`, без ожидания) и локальный `scripts/run-telegram-bot-local.cjs`.
+  Команды и кнопки меню закрывают начатый ввод (`resetPending`), `/help` — нет.
+- **Кнопки под уведомлениями** (оплата прошла, вознаграждение, напоминания, выдачи и сообщения админки, бонус):
+  `callback_data` = `n:<обычный callback>` (`server/_bot-notice.js`). Бот снимает с уведомления кнопки-переходы
+  (действия вроде «🚫 Это не я» остаются) и открывает экран новым сообщением — уведомление не стирается. Такие
+  сообщения шлёт и сайт, поэтому **узел бота выкладывается раньше сайта** (старый бот на кнопку `n:…` ответит
+  «Сессия истекла»). Префикс ставится, только если влезает в 64 байта.
 - **Баланс** (`server/_wallet.js`, миграция `20261023_wallet.sql` ПРИМЕНЕНА): `wallet_accounts`/`wallet_ledger`, всё через
   `wallet_move` с уникальным `event_key`. Пополнение = заказ `wallet_topup` (100/300/500/1000 или своя 25–50000 ₽ — `MIN_TOPUP`, бонус +5% от
   500, +10% от 1000; Mini App `/bot-checkout?kind=topup&amount=N`). Покупка с баланса = обычный заказ `amount=0, gross_amount=0,
