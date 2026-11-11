@@ -23,10 +23,11 @@ function retriesFor(path, options) {
 
 // Любая запись очищает память о ней (server/_app-device-cache.js) — здесь, а не у каждого вызова, чтобы новое
 // место записи нельзя было забыть. keepCache — только для служебных отметок («был в сети», время синхронизации).
-const DEVICE_WRITE = /^(app_devices([?/]|$)|rpc\/app_register_device\b)/;
+// rpc/merge_telegram_account переносит ПК, подписки и услуги к другому аккаунту — сбрасывает обе памяти.
+const DEVICE_WRITE = /^(app_devices([?/]|$)|rpc\/(app_register_device|merge_telegram_account)\b)/;
 const USER_DATA_WRITE = /^(app_points|app_docs)([?/]|$)|^rpc\/(app_register_point|app_doc_put)\b/;
 // user_overrides / app_device_bonuses / rpc/app_user_override — ручные лимиты из админки (они тоже в app_entitlements)
-const PLAN_WRITE = /^(app_subscriptions|app_addons|user_overrides|app_device_bonuses)([?/]|$)|^rpc\/(complete_app_|admin_grant_app_|admin_revoke_app_|app_apply_|app_user_override)/;
+const PLAN_WRITE = /^(app_subscriptions|app_addons|user_overrides|app_device_bonuses)([?/]|$)|^rpc\/(complete_app_|admin_grant_app_|admin_revoke_app_|app_apply_|app_user_override\b|merge_telegram_account\b)/;
 
 function userOfWrite(path, body) {
   const match = /[?&]user_id=eq\.([0-9a-f-]{36})/i.exec(path);

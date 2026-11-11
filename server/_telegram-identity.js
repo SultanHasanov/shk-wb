@@ -105,4 +105,62 @@ function telegramLabel(identity) {
   return identity.username ? `@${identity.username}` : identity.first_name || String(identity.telegram_user_id || '');
 }
 
-module.exports = { ensureTechnicalAccount, findIdentity, identityForUser, saveIdentity, technicalEmail, telegramLabel };
+// RPC с текстом исключения базы в message: вызывающие (api/auth.js, админка, бот) различают исходы
+// по подстрокам TELEGRAM_ACCOUNT_NOT_EMPTY, TARGET_ACCOUNT_HAS_TELEGRAM, MERGE_BUSY… — как раньше,
+// когда api/auth.js ходил в Supabase своим клиентом.
+async function identityRpc(name, body) {
+  try {
+    return await supabaseFetch(`rpc/${name}`, { method: 'POST', body: JSON.stringify(body) });
+  } catch (error) {
+    const details = error.details && typeof error.details === 'object' ? error.details : {};
+    const message = details.message || details.msg || details.error_description;
+    if (!message) throw error;
+    const wrapped = new Error(message);
+    wrapped.status = error.status;
+    wrapped.code = details.code;
+    wrapped.details = error.details;
+    throw wrapped;
+  }
+}
+
+async function deleteSourceAccount(sourceUserId, label) {
+  // Связь уже перенесена транзакцией. Неудачное удаление оставит только недоступную auth-запись
+  // и не откатит рабочий аккаунт пользователя.
+  await authAdmin(`/users/${encodeURIComponent(sourceUserId)}`, { method: 'DELETE' })
+    .catch(error => console.warn(label, error.message));
+  userCache.forgetSiteUser(sourceUserId);
+}
+
+/**
+ * Перепривязать Telegram к аккаунту сайта (rpc relink_telegram_identity). Технический аккаунт бота
+ * удаляется, только если он пуст (иначе TELEGRAM_ACCOUNT_NOT_EMPTY — нужно объединение).
+ * telegram — { id, username?, first_name?, last_name?, photo_url? }. Возвращает ответ RPC.
+ */
+async function relinkIdentity(userId, telegram) {
+  const result = await identityRpc('relink_telegram_identity', { p_telegram_user_id: telegram.id, p_target_user_id: userId });
+  const details = result || {};
+  await saveIdentity(userId, telegram);
+  if (details.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
+    await deleteSourceAccount(details.sourceUserId, 'Unable to delete empty Telegram account');
+  }
+  return details;
+}
+
+/**
+ * Объединить технический аккаунт бота с аккаунтом сайта (rpc merge_telegram_account): баланс, покупки,
+ * подписки и ПК переходят к userId, исходный аккаунт удаляется. Возвращает ответ RPC
+ * (movedWalletKopecks, movedSubscriptions, movedDevices…).
+ */
+async function mergeTelegramAccount(userId, telegram) {
+  const details = await identityRpc('merge_telegram_account', { p_telegram_user_id: telegram.id, p_target_user_id: userId });
+  await saveIdentity(userId, telegram);
+  if (details?.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
+    await deleteSourceAccount(details.sourceUserId, 'Unable to delete merged Telegram account');
+  }
+  return details || {};
+}
+
+module.exports = {
+  ensureTechnicalAccount, findIdentity, identityForUser, mergeTelegramAccount, relinkIdentity, saveIdentity,
+  technicalEmail, telegramLabel,
+};

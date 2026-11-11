@@ -6,6 +6,8 @@ const notifyMiniAppAuthorized = telegramId => callBot('notifyMiniAppAuthorized',
 const bindTelegramReferral = (telegramId, userId) => callBot('bindTelegramReferral', telegramId, userId);
 const { accountHasValuableData, accountMergePreview } = require('../server/_telegram-account');
 const { forgetTelegramUser } = require('../server/_telegram-user-cache');
+// Перепривязка и объединение Telegram-аккаунта — общие с админкой и ботом (server/_telegram-identity.js).
+const { mergeTelegramAccount, relinkIdentity } = require('../server/_telegram-identity');
 const { referralCookie } = require('../server/_user-auth');
 const { handleOAuth } = require('../server/_oauth-login');
 const { MAIN, siteForRequest } = require('../server/_sites');
@@ -99,35 +101,6 @@ async function saveIdentity(userId, telegram) {
   // Бот держит связку telegram → user_id в памяти; после привязки он должен увидеть её сразу.
   forgetTelegramUser(telegram.id);
   return rows;
-}
-
-async function relinkIdentity(userId, telegram) {
-  const result = await request('/rest/v1/rpc/relink_telegram_identity', {
-    method: 'POST',
-    body: JSON.stringify({ p_telegram_user_id: telegram.id, p_target_user_id: userId }),
-  });
-  const details = result || {};
-  await saveIdentity(userId, telegram);
-  if (details.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
-    // Связь уже перенесена транзакцией. Неудачное удаление оставит только
-    // недоступную пустую auth-запись и не откатит рабочий кабинет пользователя.
-    await request(`/auth/v1/admin/users/${details.sourceUserId}`, { method: 'DELETE' })
-      .catch(error => console.warn('Unable to delete empty Telegram account', error.message));
-  }
-  return details;
-}
-
-async function mergeTelegramAccount(userId, telegram) {
-  const details = await request('/rest/v1/rpc/merge_telegram_account', {
-    method: 'POST',
-    body: JSON.stringify({ p_telegram_user_id: telegram.id, p_target_user_id: userId }),
-  });
-  await saveIdentity(userId, telegram);
-  if (details?.deleteSource && details.sourceUserId && details.sourceUserId !== userId) {
-    await request(`/auth/v1/admin/users/${details.sourceUserId}`, { method: 'DELETE' })
-      .catch(error => console.warn('Unable to delete merged Telegram account', error.message));
-  }
-  return details || {};
 }
 
 function maskedEmail(email) {

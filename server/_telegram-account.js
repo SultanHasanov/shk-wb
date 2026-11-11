@@ -12,7 +12,36 @@ function hasValuableAccountRows(rows) {
   );
 }
 
+// Полная сводка аккаунта из базы (rpc account_merge_summary, миграция 20261120_account_merge_full.sql):
+// кошелёк, подписки, ПК, пункты, ключи, коды, заказы, отзывы… — тот же расчёт, что у relink_telegram_identity.
+// null — функции в базе ещё нет (миграцию применяют отдельно от выкладки кода); тогда вызывающий
+// считает по-старому. Любая другая ошибка пробрасывается: «не смогли проверить» ≠ «аккаунт пустой».
+async function accountMergeSummary(userId) {
+  try {
+    const summary = await supabaseFetch('rpc/account_merge_summary', {
+      method: 'POST', body: JSON.stringify({ p_user: userId }),
+    });
+    return typeof summary === 'string' ? JSON.parse(summary) : summary;
+  } catch (error) {
+    if (isMissingFunction(error)) return null;
+    throw error;
+  }
+}
+
+// PostgREST отвечает 404 с кодом PGRST202, когда функции нет (или у неё другая сигнатура).
+function isMissingFunction(error) {
+  const code = error?.details?.code;
+  return code === 'PGRST202' || code === '42883' || (error?.status === 404 && !code);
+}
+
 async function accountHasValuableData(userId) {
+  const summary = await accountMergeSummary(userId);
+  if (summary && typeof summary.empty === 'boolean') return !summary.empty;
+  // Запасной путь до применения миграции: прежний (неполный) набор таблиц.
+  return legacyAccountHasValuableData(userId);
+}
+
+async function legacyAccountHasValuableData(userId) {
   const q = encodeURIComponent(userId);
   const [orders, stickers, licenses, cellLicenses, history, requests, ledger, withdrawals, invited, referrals] = await Promise.all([
     supabaseFetch(`payment_orders?user_id=eq.${q}&status=in.(waiting_for_capture,succeeded)&select=id&limit=1`),
@@ -78,4 +107,6 @@ async function isTechnicalTelegramUser(userId) {
   return value;
 }
 
-module.exports = { accountHasValuableData, accountMergePreview, hasValuableAccountRows, isTechnicalTelegramUser };
+module.exports = {
+  accountHasValuableData, accountMergePreview, accountMergeSummary, hasValuableAccountRows, isTechnicalTelegramUser,
+};
