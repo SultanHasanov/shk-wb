@@ -13,7 +13,8 @@ const grants=require('./_admin-grants');
 // пока не придёт сообщение с remove_keyboard (семикнопочная ушла 20.10.2026, двухкнопочная — 26.10.2026).
 const LEGACY_KEYBOARD_BEFORE='2026-10-27T00:00:00Z';
 // Кнопка под рассылкой без ссылки — открыть главное меню бота (callback menu:home обрабатывает _telegram-wb-bot.js).
-const MENU_BUTTON={text:'☰ Открыть меню',callback_data:'menu:home'};
+// n:<callback> — меню откроется новым сообщением, а рассылка останется в чате (server/_bot-notice.js).
+const MENU_BUTTON={text:'☰ Открыть меню',callback_data:require('./_bot-notice').noticeData('menu:home')};
 /**
  * У сообщения один reply_markup, поэтому снятие старой клавиатуры и инлайн-кнопка в одном сообщении невозможны.
  * При removeKeyboard сначала уходит служебное сообщение с remove_keyboard и тут же удаляется (клавиатура остаётся

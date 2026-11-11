@@ -192,7 +192,8 @@ async function notifyTelegram(userId, text, keyboard) {
     const telegramId = rows?.[0]?.telegram_user_id;
     if (!telegramId) return;
     // Через _telegram-api — с VPS сообщение уходит релеем, как напоминания из api/cabinet.js.
-    await require('./_telegram-api').sendMessage(telegramId, text, keyboard ? { reply_markup: keyboard } : {});
+    // Кнопки — n:<callback> (server/_bot-notice.js): бот откроет раздел новым сообщением, а это останется в чате.
+    await require('./_telegram-api').sendMessage(telegramId, text, keyboard ? { reply_markup: require('./_bot-notice').noticeMarkup(keyboard) } : {});
   } catch (error) {
     console.warn('admin telegram notification failed', error.message);
   }

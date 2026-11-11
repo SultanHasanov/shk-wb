@@ -3,6 +3,7 @@ const { sendApiError, supabaseFetch } = require('../server/_supabase');
 
 const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
 const { sendMessage } = require('../server/_telegram-api');
+const { noticeMarkup } = require('../server/_bot-notice');
 const { forgetSiteUser } = require('../server/_telegram-user-cache');
 const { callBot } = require('../server/_bot-rpc');
 const { identitiesForUser, unlinkIdentity } = require('../server/_oauth-login');
@@ -763,10 +764,10 @@ async function notifyFreePeriodEnd() {
       // Кнопки обрабатывает узел бота: сообщение и бот выкладываются парой.
       const telegramBody = `С ${day} разделы программы работают по тарифу. Выберите тариф здесь, в боте, — оплаченный срок начнётся после бесплатного периода. Архив клиентов на компьютере сохранится.`;
       await sendMessage(tg[0].telegram_user_id, `<b>${title}</b>\n\n${telegramBody}`, {
-        reply_markup: { inline_keyboard: [
+        reply_markup: noticeMarkup({ inline_keyboard: [
           [{ text: '🛒 Выбрать тариф', callback_data: 'shop:helper' }],
           [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }, { text: '☰ Меню', callback_data: 'menu:home' }],
-        ] },
+        ] }),
       }).catch(() => {});
     }
   }
@@ -824,7 +825,7 @@ async function notifyTelegramExpiry2d() {
     const wallet = await supabaseFetch(`wallet_accounts?user_id=eq.${encodeURIComponent(item.userId)}&select=balance_kopecks&limit=1`).catch(() => []);
     const balance = Number(wallet[0]?.balance_kopecks || 0) / 100;
     await sendMessage(telegramId, `<b>${item.title}</b>\n\n${item.body}\n\n💰 На балансе: ${balance.toLocaleString('ru-RU')} ₽`, {
-      reply_markup: { inline_keyboard: [[item.button], [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] },
+      reply_markup: noticeMarkup({ inline_keyboard: [[item.button], [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] }),
     }).then(() => { sent++; }).catch(() => {});
   }
   return sent;

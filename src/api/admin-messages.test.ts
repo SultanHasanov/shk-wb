@@ -290,7 +290,8 @@ describe('deliver', () => {
       expect(results.find(r => r.channel === 'telegram')).toMatchObject({ status: 'sent' });
       const send = calls.find(c => c.url.includes('api.telegram.org'))!;
       expect(send.body.text).toBe('<b>🎁 Поддержка начислила вам 100 ₽</b>\n\nПричина: тест');
-      expect(send.body.reply_markup).toEqual({ inline_keyboard: keyboard });
+      // Кнопки бота под уведомлением — n:<callback>: раздел откроется новым сообщением, уведомление останется.
+      expect(send.body.reply_markup).toEqual({ inline_keyboard: [[{ text: '👤 Профиль', callback_data: 'n:menu:profile' }]] });
       expect(JSON.stringify(send.body)).not.toContain('/cabinet');
       const cabinet = calls.find(c => c.url.startsWith('user_notifications') && c.method === 'POST');
       if (cabinet) expect(JSON.stringify(cabinet.body)).toContain('Для кабинета');

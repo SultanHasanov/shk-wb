@@ -203,7 +203,8 @@ async function notifyNewDeviceTelegram(userId, name, deviceId, when) {
   const pc = String(name || 'Компьютер').slice(0, 80).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const rows = [];
   if (/^[0-9a-f-]{36}$/i.test(String(deviceId || ''))) rows.push([{ text: '🚫 Это не я', callback_data: deviceNotMeData(deviceId) }]);
-  rows.push([{ text: '☰ Меню', callback_data: 'menu:home' }]);
+  // n:<callback> — меню откроется новым сообщением; уведомление и кнопка «Это не я» останутся (server/_bot-notice.js).
+  rows.push([{ text: '☰ Меню', callback_data: require('./_bot-notice').noticeData('menu:home') }]);
   await sendMessage(Number(identity.telegram_user_id), [
     '🖥 <b>Новый вход в «Помощник ПВЗ»</b>',
     `Компьютер «${pc}» вошёл в ваш профиль ${when} (МСК).`,

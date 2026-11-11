@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { createNotification, sendEmail } = require('./_notifications');
 const { sendMessage } = require('./_telegram-api');
+// Кнопки под уведомлениями — n:<callback>: бот откроет экран новым сообщением, уведомление останется (server/_bot-notice.js).
+const { noticeMarkup } = require('./_bot-notice');
 const { notifyAdminOrder } = require('./_admin-alerts');
 const { ADDONS } = require('./_app-plans');
 const { shopCredentials } = require('./_sites');
@@ -103,7 +105,7 @@ async function notifyReferralReward(order){
   const telegramId=identities[0]?.telegram_user_id;
   if(!telegramId)return;
   const rub=(Number(reward.amount_kopecks)/100).toLocaleString('ru-RU');
-  await sendMessage(telegramId,`<b>💸 +${rub} ₽</b> — ваш коллега сделал оплату.`,{reply_markup:{inline_keyboard:[[{text:'👥 Мои приглашения',callback_data:'menu:ref'}]]}});
+  await sendMessage(telegramId,`<b>💸 +${rub} ₽</b> — ваш коллега сделал оплату.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'👥 Мои приглашения',callback_data:'menu:ref'}]]})});
 }
 async function notifyCompleted(order){
   // Покупку с баланса делает бот и сам показывает результат — письма и сообщения не нужны.
@@ -130,7 +132,7 @@ async function notifyCompleted(order){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
     // Ссылки на PDF подписаны на час — в сообщение их не кладём: кнопка «Мои заказы» строит свежие.
-    if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nPDF со стикерами — по кнопке ниже.',{reply_markup:{inline_keyboard:[[{text:'📄 Скачать стикеры',callback_data:'orders:list'}],[{text:'☰ Меню',callback_data:'menu:home'}]]}}).catch(()=>{});
+    if(telegramId)await sendMessage(telegramId,'<b>Индивидуальный заказ оплачен ✅</b>\n\nPDF со стикерами — по кнопке ниже.',{reply_markup:noticeMarkup({inline_keyboard:[[{text:'📄 Скачать стикеры',callback_data:'orders:list'}],[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
   }else if(order.product_kind==='wallet_topup'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
@@ -144,17 +146,17 @@ async function notifyCompleted(order){
       const notice=await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}. Оплачиваю покупку…`).catch(()=>null);
       // Через RPC на узел бота (или локально, если узла нет); модуль подключается лениво — прямой require дал бы цикл.
       const started=await require('./_bot-rpc').callBot('afterWalletTopup',order,notice?.message_id||null).catch(error=>{console.error('Auto purchase after top-up failed',error.message);return false;});
-      if(!started)await sendMessage(telegramId,'Не получилось провести покупку автоматически — откройте её снова, оплата пройдёт с баланса.',{reply_markup:{inline_keyboard:[[{text:'☰ Меню',callback_data:'menu:home'}]]}}).catch(()=>{});
+      if(!started)await sendMessage(telegramId,'Не получилось провести покупку автоматически — откройте её снова, оплата пройдёт с баланса.',{reply_markup:noticeMarkup({inline_keyboard:[[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
       return;
     }
-    await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}${balanceLine}`,{reply_markup:{inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'}]]}}).catch(()=>{});
+    await sendMessage(telegramId,`<b>Баланс пополнен ✅</b> +${credited.toLocaleString('ru-RU')} ₽${bonusText}${balanceLine}`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'}]]})}).catch(()=>{});
   }else if(order.product_kind==='stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
     if(telegramId){
       const quantity=Number(order.range_quantity||0)+Number(order.custom_quantity||0);
       const codeLine=order.access_code?`\nКод доступа: <code>${order.access_code}</code>\n`:'';
-      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно продолжить генерацию.`,{reply_markup:{inline_keyboard:[[{text:'➕ Создать ШК',callback_data:'gen:start'}]]}}).catch(()=>{});
+      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно продолжить генерацию.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'➕ Создать ШК',callback_data:'gen:start'}]]})}).catch(()=>{});
     }
   }
 }

@@ -94,7 +94,8 @@ function telegramText(subject, body) {
  * у того, кто работает только в боте, входа на сайт нет); без него — кнопка «Открыть» по ссылке.
  */
 function telegramOptions(link, keyboard = null) {
-  if (Array.isArray(keyboard) && keyboard.length) return { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
+  // Кнопки бота — n:<callback> (server/_bot-notice.js): раздел откроется новым сообщением, это останется в чате.
+  if (Array.isArray(keyboard) && keyboard.length) return { parse_mode: 'HTML', reply_markup: { inline_keyboard: require('./_bot-notice').noticeRows(keyboard) } };
   const url = absoluteLink(link);
   return { parse_mode: 'HTML', ...(url ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть', url }]] } } : {}) };
 }

@@ -353,7 +353,7 @@ describe('выдачи из админки доходят до бота', () => 
     expect(message.chat_id).toBe(77);
     expect(message.text).toContain('«Склад &lt;1&gt;» — 4 стикеров, 300 ₽');
     expect(message.text).not.toMatch(/кабинет/i);
-    expect(message.reply_markup).toEqual({ inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'orders:list' }]] });
+    expect(message.reply_markup).toEqual({ inline_keyboard: [[{ text: '📦 Открыть заказ', callback_data: 'n:orders:list' }]] });
   });
 
   it('заказ целиком зачтён стикерами — «доплата не нужна», а не «оплатите 0 ₽»', async () => {
@@ -378,7 +378,7 @@ describe('выдачи из админки доходят до бота', () => 
     expect(res.statusCode).toBe(201);
     const [message] = telegramSends(fetchMock);
     expect(message.text).toContain('Вам выдана подписка «Помощник ПВЗ»');
-    expect(message.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['menu:helper', 'menu:home']);
+    expect(message.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['n:menu:helper', 'n:menu:home']);
 
     fetchMock = stubBackend(path => (path === 'auth:undefined' ? { ok: true, result: { message_id: 5 } } : String(path).startsWith('auth:') ? { id: USER, email: 'u@x.ru' } : []));
     const quiet = mockRes();
