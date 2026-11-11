@@ -15,8 +15,15 @@ const CLUB_REF_MS = 30 * 24 * 60 * 60 * 1000;
 const CLUB_CACHE_MS = 10 * 60 * 1000;
 const clubCache = new Map(); // telegramId → { at, active }
 
+// Ключи кеша — как в clubDiscount: `ref:<id>` (с переходом из группы) и `any:<id>` (без него).
+function forgetClub(telegramId) {
+  clubCache.delete(`ref:${telegramId}`);
+  clubCache.delete(`any:${telegramId}`);
+}
+
 async function markClubRef(telegramId) {
-  clubCache.delete(String(telegramId));
+  // Новая отметка перехода — прежний ответ «скидки нет» из кеша больше не верен.
+  forgetClub(telegramId);
   // chat_id лички = id человека; запись обычно уже есть (touchSubscriber), upsert — на случай локального запуска
   await supabaseFetch('telegram_bot_subscribers?on_conflict=telegram_user_id', {
     method: 'POST',
@@ -35,28 +42,35 @@ async function clubActive(telegramId) {
 }
 
 /**
- * Положена ли скидка клуба человеку из Telegram. requireRef (по умолчанию) — нужен переход из группы
- * за последние 30 дней (как в боте). Ошибка проверки — без скидки (и без кэша, чтобы повторить при следующем действии).
+ * Скидка клуба для Telegram: { active, until }. requireRef (по умолчанию) — нужен переход из группы за последние
+ * 30 дней (как в боте), until — когда скидка закончится (переход + 30 дней); без requireRef until = null.
+ * Ошибка проверки — без скидки (и без кэша, чтобы повторить при следующем действии).
  */
-async function clubDiscount(telegramId, { requireRef = true } = {}) {
-  if (!process.env.ZARA_CLUB_CHECK_URL || !process.env.CLUB_CHECK_SECRET || !telegramId) return false;
+async function clubDiscountInfo(telegramId, { requireRef = true } = {}) {
+  if (!process.env.ZARA_CLUB_CHECK_URL || !process.env.CLUB_CHECK_SECRET || !telegramId) return { active: false, until: null };
   const key = `${requireRef ? 'ref' : 'any'}:${telegramId}`;
   const cached = clubCache.get(key);
-  if (cached && Date.now() - cached.at < CLUB_CACHE_MS) return cached.active;
+  if (cached && Date.now() - cached.at < CLUB_CACHE_MS) return { active: cached.active, until: cached.until };
   try {
-    let eligible = true;
+    let eligible = true, until = null;
     if (requireRef) {
       const rows = await supabaseFetch(`telegram_bot_subscribers?telegram_user_id=eq.${encodeURIComponent(String(telegramId))}&select=club_ref_at&limit=1`);
       const refAt = Date.parse(rows[0]?.club_ref_at || '');
       eligible = Boolean(refAt) && Date.now() - refAt < CLUB_REF_MS;
+      if (eligible) until = new Date(refAt + CLUB_REF_MS).toISOString();
     }
     const active = eligible ? await clubActive(telegramId) : false;
-    clubCache.set(key, { at: Date.now(), active });
-    return active;
+    clubCache.set(key, { at: Date.now(), active, until: active ? until : null });
+    return { active, until: active ? until : null };
   } catch (error) {
     console.warn('Скидка клуба: проверка не удалась', error?.message || error);
-    return false;
+    return { active: false, until: null };
   }
+}
+
+/** Положена ли скидка клуба человеку из Telegram (см. clubDiscountInfo). */
+async function clubDiscount(telegramId, options) {
+  return (await clubDiscountInfo(telegramId, options)).active;
 }
 
 /** Скидка клуба для аккаунта сайта: по привязанному Telegram (user_telegram_identities). Нет привязки → false. */
@@ -83,4 +97,4 @@ async function clubPrice(telegramId, basePrice) {
   return { price: club ? applyClubDiscount(basePrice) : basePrice, club };
 }
 
-module.exports = { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubDiscount, clubPrice, clubUserDiscount, markClubRef };
+module.exports = { CLUB_DISCOUNT_PERCENT, CLUB_REF_MS, applyClubDiscount, clubDiscount, clubDiscountInfo, clubPrice, clubUserDiscount, markClubRef };
