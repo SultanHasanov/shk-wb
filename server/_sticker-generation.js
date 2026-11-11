@@ -21,6 +21,21 @@ function mapDatabaseError(error, boxMode) {
   return error;
 }
 
+// Ссылки на стикер по номеру живут час: столько же принимают api/stickers/image.js и pdf.js (до +3700 с).
+const CUSTOM_LINK_TTL_S = 3600;
+
+/**
+ * Подписанные ссылки на стикер по номеру (картинка и PDF). Формат подписи — «[префикс:]номер:срок», HMAC
+ * STICKER_CLIENT_SECRET; его же проверяют api/stickers/image.js и pdf.js. Бот зовёт её и при повторной
+ * выдаче (смена вида, «прислать ещё раз»): сохранённые ссылки к тому времени уже просрочены.
+ */
+function customStickerLinks(code, { boxMode = false, prefix = 'TRBX', now = Date.now() } = {}) {
+  const expires = Math.floor(now / 1000) + CUSTOM_LINK_TTL_S, signedValue = `${boxMode ? `${prefix}:${code}` : code}:${expires}`;
+  const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
+  const signedQuery = `code=${encodeURIComponent(code)}&token=${encodeURIComponent(token)}&expires=${expires}${boxMode ? `&variant=box&prefix=${encodeURIComponent(prefix)}` : ''}`;
+  return { imageUrl: `/api/stickers/image?${signedQuery}`, pdfUrl: `/api/stickers/pdf?${signedQuery}` };
+}
+
 async function getAccessStatus(accessCode) {
   const rows = await supabaseFetch(`sticker_access_codes?code=eq.${encodeURIComponent(accessCode)}&active=eq.true&select=generation_limit,generation_used&limit=1`);
   if (!rows.length) return null;
@@ -87,14 +102,11 @@ async function generateStickers(options) {
         ? { p_charge: options.chargeId, p_user: options.userId, p_requester_hash: options.requesterHash, p_category: category, p_prefix: prefix || 'TRBX' }
         : { p_requester_hash: options.requesterHash, p_access_code: options.accessCode || null }),
     });
-    const expires = Math.floor(Date.now() / 1000) + 3600, signedValue = `${boxMode ? `${prefix}:${code}` : code}:${expires}`;
-    const token = crypto.createHmac('sha256', process.env.STICKER_CLIENT_SECRET).update(signedValue).digest('base64url');
     const access = options.accessCode ? await getAccessStatus(options.accessCode) : null;
-    const signedQuery = `code=${encodeURIComponent(code)}&token=${encodeURIComponent(token)}&expires=${expires}${boxMode ? `&variant=box&prefix=${encodeURIComponent(prefix)}` : ''}`;
-    const result = { code, quantity: 1, prefix: boxMode ? prefix : null, variant: category, access, imageUrl: `/api/stickers/image?${signedQuery}`, pdfUrl: `/api/stickers/pdf?${signedQuery}` };
+    const result = { code, quantity: 1, prefix: boxMode ? prefix : null, variant: category, access, ...customStickerLinks(code, { boxMode, prefix }) };
     await recordGeneration({ ...options, clientEntryId: options.clientEntryId || `server:${crypto.randomUUID()}`, mode, category, prefix, quantity: 1, code, access }).catch(() => {});
     return result;
   } catch (error) { throw mapDatabaseError(error, boxMode); }
 }
 
-module.exports = { assertAccessOwner, generateStickers, getAccessStatus, normalizePrefix, selectAccessCode };
+module.exports = { assertAccessOwner, customStickerLinks, generateStickers, getAccessStatus, normalizePrefix, selectAccessCode };
