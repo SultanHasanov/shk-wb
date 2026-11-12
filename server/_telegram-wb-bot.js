@@ -14,6 +14,7 @@ const { authUser, ensureTechnicalAccount, findIdentity, identityForUser, relinkI
 const { PLAN_ORDER, PLANS, SALE_PLANS, TERMS, isSalePlan, orderSnapshot, planPrice } = require('./_app-plans');
 const wallet = require('./_wallet');
 const { notifyAdminNewUser, notifyAdminSpend, sendToAdmins } = require('./_admin-alerts');
+const { errorText, reportUserError } = require('./_error-alerts');
 const { appFreeMode, appFreeUntil } = require('./_app-free');
 const { accountMergeSummary } = require('./_telegram-account');
 const { NOTICE_PREFIX, keptRows, noticeMarkup } = require('./_bot-notice');
@@ -1052,6 +1053,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
       await sendPhoto(chatId, clientQrUrl(freeQr), { caption: clientQrCaption(sid, cell, unlimitedLine(from.id)), reply_markup: CLIENT_QR_KEYBOARD });
     } catch (error) {
       console.warn('Client QR photo failed (free)', error.message);
+      reportUserError({ where: 'Бот: QR кода клиента не отправился (безлимит)', message: errorText(error), from });
       const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` });
       await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
       return 'not_sent';
@@ -1079,6 +1081,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
       await sendPhoto(chatId, clientQrUrl(charged.qrText || qrText), { caption: clientQrCaption(sid, cell, spentText), reply_markup: CLIENT_QR_KEYBOARD });
     } catch (error) {
       console.warn('Client QR photo failed (code)', error.message);
+      reportUserError({ where: 'Бот: QR кода клиента не отправился (код списан)', message: errorText(error), from });
       // Код уже списан: повтор по тому же id списания отправит этот же QR и второй раз не спишет.
       const resend = !free && clientQrResendData(sid, chargeId);
       const view = free
@@ -1110,6 +1113,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
   } catch (error) {
     // Фото не ушло — возвращаем деньги, чтобы не списать за несделанное. Что сказать — по исходу возврата.
     console.warn('Client QR photo failed (wallet)', error.message);
+    reportUserError({ where: 'Бот: QR кода клиента не отправился', message: errorText(error), from, extra: [duplicate ? 'Повтор, не списано' : `Списано ${price} ₽, пробую вернуть`] });
     if (duplicate) {
       const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` });
       await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
@@ -2177,7 +2181,8 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
     const error = failure;
     await supabaseFetch(`telegram_generation_requests?request_id=eq.${encodeURIComponent(requestId)}`, { method: 'PATCH', body: JSON.stringify({ status: 'failed', error: String(error.message || '').slice(0, 500), completed_at: new Date().toISOString() }) }).catch(() => {});
     const incident = crypto.randomBytes(3).toString('hex');
-    console.error(`Telegram sticker generation failed [${incident}]`, error.code || '', error.message);
+    console.error(`Telegram sticker generation failed [${incident}]`, error.code || '', error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    reportUserError({ where: `Бот: создание стикера (${draft.mode === 'range' ? `пачка ${BATCH_QUANTITY}` : 'по номеру'}, ${draft.category === 'box' ? 'коробка' : 'товар'})`, message: errorText(error), incident, from, extra: [refunded ? 'Оплата возвращена' : '⚠️ Возврат не прошёл'] });
     // «Повторить» — снова подтверждение с тем же черновиком. Новый nonce: этот requestId уже занят записью failed,
     // и повтор в том же сообщении получил бы «Этот запрос уже обработан».
     for (const key of ['chargeId', 'billingRequestKey', 'error']) delete draft[key];
@@ -3950,6 +3955,7 @@ async function subscriptionDoneText(userId, planId) {
 async function showShopFailure(from, chatId, screenId, userId, parts, item, error) {
   const incident = crypto.randomBytes(3).toString('hex');
   console.error(`Wallet purchase failed [${incident}]`, item.productKind, error.walletOutcome || 'unknown', error.orderId || '', error.message);
+  reportUserError({ where: `Бот: покупка с баланса (${item.productKind})`, message: errorText(error), incident, from, extra: [`Деньги: ${error.walletOutcome || 'unknown'}`, error.orderId ? `Заказ ${error.orderId}` : null] });
   const balance = await walletRub(userId).catch(() => null);
   const balanceLine = balance != null ? `💰 На балансе: ${wallet.formatRub(balance)}` : '';
   const support = [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }];
@@ -5037,6 +5043,7 @@ async function processUpdate(update) {
     const ms = Date.now() - startedAt;
     console.error(`Telegram generator bot failed [${incident}] ${updateLabel(update)} ${ms} ms`, error.message, error.details ? JSON.stringify(error.details).slice(0, 500) : '');
     botHealth.recordUpdate({ label: updateLabel(update), ms, failed: true, incident });
+    reportUserError({ where: `Бот: ${updateLabel(update)}`, message: errorText(error), incident, from: update.callback_query?.from || update.message?.from });
     const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
     if (chatId) await sendMessage(chatId, failureText(incident), { reply_markup: supportKeyboard() }).catch(() => {});
   }

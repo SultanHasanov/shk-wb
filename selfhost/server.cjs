@@ -182,9 +182,28 @@ app.use((error, req, res, next) => {
 app.use(async (req, res, next) => {
   const handler = apiHandler(req.resolvedPath, req.query);
   if (!handler) return next();
+  // Любой ответ 5xx сайту или программе — сообщение админу в бот (server/_error-alerts.js): текст ошибки
+  // из исключения или из тела ответа, адрес, версия программы.
+  let alertBody = null, alertError = null;
+  const json = res.json.bind(res);
+  res.json = body => { alertBody = body; return json(body); };
+  res.on('finish', () => {
+    if (res.statusCode < 500) return;
+    const bodyText = alertBody && typeof alertBody === 'object' ? [alertBody.code, alertBody.error, typeof alertBody.details === 'string' ? alertBody.details : alertBody.details && JSON.stringify(alertBody.details)].filter(Boolean).join(' · ') : '';
+    const errorAlerts = require('../server/_error-alerts');
+    errorAlerts.reportUserError({
+      where: `API ${req.method} ${req.resolvedPath}${req.query?.action ? `?action=${req.query.action}` : ''} → ${res.statusCode}`,
+      message: alertError ? errorAlerts.errorText(alertError) : (bodyText || 'без текста ошибки'),
+      extra: [
+        req.headers['x-app-version'] ? `Программа ${req.headers['x-app-version']}` : null,
+        `IP ${req.ip} · ${String(req.headers['user-agent'] || '').slice(0, 120)}`,
+      ],
+    });
+  });
   try {
     await handler(req, res);
   } catch (error) {
+    alertError = error;
     console.error(`[api] ${req.method} ${req.resolvedPath}`, error);
     if (!res.headersSent) res.status(500).json({ error: 'Internal Server Error' });
   }
