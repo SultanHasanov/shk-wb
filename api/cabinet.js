@@ -1112,6 +1112,13 @@ module.exports = async function handler(req, res) {
               'Код или ключ не найден или уже используется другим аккаунтом. Если это ваш ключ — напишите в поддержку.',
             code: 'ASSET_UNAVAILABLE',
           });
+        // Гостевой заказ ещё не оплачен (или брошен на ЮKassa): CabinetShell шлёт его
+        // токен при каждом заходе в кабинет. Это не сбой базы — отдаём 404, токен
+        // остаётся в браузере и привяжется, когда оплата подтвердится.
+        if (parsed.data.kind === 'order' && info.includes('Order not found'))
+          return res
+            .status(404)
+            .json({ error: 'Заказ ещё не оплачен или не найден', code: 'ORDER_NOT_PAID' });
         throw error;
       }
       return res.status(201).json(result);

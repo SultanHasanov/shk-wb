@@ -87,6 +87,13 @@ describe('анти-перебор при добавлении ключа (claim)
     await handler(claimReq({ kind: 'order', value: 'tok-missing' }), res);
     expect(res.statusCode).toBe(404);
     expect(res.body.code).toBe('ASSET_NOT_FOUND');
+
+    // Неоплаченный/брошенный гостевой заказ — 404, а не 502 «Database request failed».
+    mock(true, { message: 'Order not found' }, []);
+    res = response();
+    await handler(claimReq({ kind: 'order', value: 'tok-unpaid' }), res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.code).toBe('ORDER_NOT_PAID');
   });
 
   it('превышение лимита → 429 TOO_MANY_ATTEMPTS, запрос к claim не идёт', async () => {
