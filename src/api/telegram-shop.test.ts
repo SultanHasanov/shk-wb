@@ -182,7 +182,7 @@ describe('ошибка покупки — по исходу денег, без �
     await bot.processUpdate(press('shop:pay:333333:wbpk:10'));
     const text = String(lastScreen().body.text);
     expect(text).toContain('деньги за неё пока не вернулись на баланс');
-    expect(text).toContain('вернём 90 ₽ вручную');
+    expect(text).toContain('вернём 400 ₽ вручную');
     expect(datas().some(data => String(data).startsWith('shop:wbpk'))).toBe(false);
   });
 
@@ -286,7 +286,7 @@ describe('пакет кодов клиента', () => {
     expect(text).toContain('В вашем пакете осталось: 3');
     expect(text).not.toMatch(/подбор|Ваш ключ/);
     // Цены не менялись.
-    expect(buttons().find(button => button.callback_data === 'shop:wbpk:10')?.text).toBe('10 шт. — 90 ₽');
+    expect(buttons().find(button => button.callback_data === 'shop:wbpk:10')?.text).toBe('10 шт. — 400 ₽');
   });
 
   it('после покупки — где коды сработают', async () => {

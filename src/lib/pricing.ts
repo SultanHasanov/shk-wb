@@ -144,11 +144,11 @@ export function getCellPrintSavingPercent(days: number, devices: number): number
    /api/payments/download-program, платными остались только итерации. */
 
 export const LICENSE_PRICES: Readonly<Record<number, number>> = Object.freeze({
-  1: 25,
-  3: 40,
-  5: 50,
-  10: 90,
-  20: 150,
+  1: 50,
+  3: 140,
+  5: 220,
+  10: 400,
+  20: 700,
 });
 
 export const POPULAR_LICENSE_PACK = 5;

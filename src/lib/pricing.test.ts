@@ -148,8 +148,8 @@ describe('итерации «Подбора кодов»', () => {
   });
 
   it('считает цену итерации', () => {
-    expect(getLicensePack(20)).toEqual({ quantity: 20, total: 150, perUnit: 7.5 });
-    expect(formatPerUnit(getLicensePack(20).perUnit)).toBe('7,50 ₽');
+    expect(getLicensePack(20)).toEqual({ quantity: 20, total: 700, perUnit: 35 });
+    expect(formatPerUnit(getLicensePack(20).perUnit)).toBe('35,00 ₽');
   });
 });
 
