@@ -113,6 +113,36 @@ describe('анти-перебор при добавлении ключа (claim)
   });
 });
 
+describe('cabinet connection failures', () => {
+  beforeEach(() => {
+    process.env.SUPABASE_URL = 'https://db.test';
+    process.env.SUPABASE_PUBLISHABLE_KEY = 'pub';
+    process.env.SUPABASE_SECRET_KEY = 'secret';
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('catches an asynchronous bootstrap timeout and returns a retryable response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/auth/v1/user')) return new Response('{"id":"u1"}');
+      if (url.includes('user_profiles?on_conflict')) throw new DOMException('timeout', 'TimeoutError');
+      return new Response('null');
+    }));
+    const res = response();
+    await handler({ ...claimReq({}), method: 'GET', query: { action: 'bootstrap' } }, res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('DATABASE_UNAVAILABLE');
+    expect(res.headers['Retry-After']).toBe('3');
+  });
+
+  it('also handles a connection error during authentication', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    const res = response();
+    await handler({ ...claimReq({}), method: 'GET', query: { action: 'bootstrap' } }, res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('DATABASE_UNAVAILABLE');
+  });
+});
+
 describe('ограничение аккаунта в кабинете', () => {
   const controls = require('../../server/_user-controls.js') as { __setSnapshotForTests: (json: unknown) => void };
   const restricted = (scopes: string[]) => ({

@@ -426,6 +426,14 @@ export const CabinetShell = observer(() => {
         </header>
 
         <main id="content">
+          {cabinet.isError && (
+            <div className={s.loadError} role="alert">
+              <span>{t('Не удалось загрузить данные кабинета. Повторите попытку.', 'Кабинет деректерін жүктеу мүмкін болмады. Қайталап көріңіз.')}</span>
+              <Button variant="ghost" disabled={cabinet.isFetching} onClick={() => void cabinet.refetch()}>
+                {t('Повторить', 'Қайталау')}
+              </Button>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

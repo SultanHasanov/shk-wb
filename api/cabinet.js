@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { sendApiError, supabaseFetch } = require('../server/_supabase');
+const { isNetworkError } = require('../server/_fetch-retry');
 
 const { appFreeMode, expireAppFreeMode, freeModeState } = require('../server/_app-free');
 const { sendMessage } = require('../server/_telegram-api');
@@ -1064,11 +1065,11 @@ module.exports = async function handler(req, res) {
   // для него действует ограничение «Программа», а не «Сайт».
   const programHistory = action(req) === 'history'
     && Boolean(String(req.headers?.['x-app-name'] || req.headers?.['x-app-version'] || '').trim());
-  const user = await requireUser(req, res, { scope: programHistory ? 'app' : 'site' });
-  if (!user) return;
   try {
+    const user = await requireUser(req, res, { scope: programHistory ? 'app' : 'site' });
+    if (!user) return;
     const a = action(req);
-    if (a === 'bootstrap') return bootstrap(req, res, user);
+    if (a === 'bootstrap') return await bootstrap(req, res, user);
     if (a === 'assets' && req.method === 'GET')
       return res.json({ items: await getAssets(user.id) });
     if (a === 'claim' && req.method === 'POST') {
@@ -1215,6 +1216,14 @@ module.exports = async function handler(req, res) {
           error: 'Недостаточно средств на реферальном балансе',
           code: 'INSUFFICIENT_BALANCE',
         });
+    if (isNetworkError(error)) {
+      console.warn('cabinet: database connection failed', error.message);
+      res.setHeader('Retry-After', '3');
+      return res.status(503).json({
+        error: 'Не удалось связаться с сервером. Повторите попытку через несколько секунд.',
+        code: 'DATABASE_UNAVAILABLE',
+      });
+    }
     return sendApiError(res, error);
   }
 };

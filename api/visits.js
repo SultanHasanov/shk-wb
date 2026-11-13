@@ -1,5 +1,11 @@
 const { sendApiError, supabaseFetch } = require('../server/_supabase');
 const handleMessages = require('../server/_messages-handler');
+const { isNetworkError } = require('../server/_fetch-retry');
+
+const STATS_TTL_MS = 30_000;
+const STATS_STALE_MS = 5 * 60_000;
+let cachedStats = null;
+let statsRequest = null;
 
 async function currentTotal() {
   const rows = await supabaseFetch('site_stats?select=total_visits&id=eq.1&limit=1');
@@ -7,6 +13,27 @@ async function currentTotal() {
 }
 
 async function stickerStats() {
+  const age = cachedStats ? Date.now() - cachedStats.at : Infinity;
+  if (age < STATS_TTL_MS) return cachedStats.value;
+  if (!statsRequest) {
+    statsRequest = loadStickerStats()
+      .then(value => {
+        cachedStats = { value, at: Date.now() };
+        return value;
+      })
+      .catch(error => {
+        if (isNetworkError(error) && cachedStats && Date.now() - cachedStats.at < STATS_STALE_MS) {
+          console.warn('sticker stats: serving cached counts after network error', error.message);
+          return cachedStats.value;
+        }
+        throw error;
+      })
+      .finally(() => { statsRequest = null; });
+  }
+  return statsRequest;
+}
+
+async function loadStickerStats() {
   const rows = await supabaseFetch('rpc/get_sticker_generation_stats', {
     method: 'POST',
     body: '{}',
