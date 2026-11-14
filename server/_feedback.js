@@ -21,6 +21,8 @@ const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const PHOTO_SIDE = 1600;
 const PENDING_TTL_MS = 24 * 3600 * 1000;
 const VIEW_URL_TTL_S = 6 * 3600;
+// Ссылки на фото в письме живут дольше: письмо открывают и через неделю.
+const MAIL_URL_TTL_S = 30 * 86400;
 const PUBLIC_CACHE_MS = 60 * 1000;
 const SLUG_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const SLUG_RE = /^[A-Z0-9]{8}$/;
@@ -117,8 +119,8 @@ async function removePhotos(ids) {
   for (const id of ids || []) if (PHOTO_ID_RE.test(String(id))) await fs.promises.unlink(storedPath(id)).catch(() => {});
 }
 
-function photoViewUrl(id) {
-  const expires = Math.floor(Date.now() / 1000) + VIEW_URL_TTL_S;
+function photoViewUrl(id, ttl = VIEW_URL_TTL_S) {
+  const expires = Math.floor(Date.now() / 1000) + ttl;
   return `/api/feedback/photo/${id}?expires=${expires}&token=${q(sign(`fb-view:${id}:${expires}`))}`;
 }
 
@@ -323,11 +325,11 @@ async function notifyTelegram(board, entry, photoBuffers) {
   return 'sent';
 }
 
-function emailHtml(board, entry, photoCount) {
+function emailHtml(board, entry, photoUrls) {
   const accent = '#cb11ab';
   const stars = `<span style="color:#e8a100">${'★'.repeat(entry.rating)}</span><span style="color:#dcd7e4">${'★'.repeat(5 - entry.rating)}</span>`;
   const where = [board.place, board.address].filter(Boolean).join(' · ');
-  const photos = Array.from({ length: photoCount }, (_, i) => `<img src="cid:photo${i}" alt="Фото ${i + 1}" width="160" style="border-radius:10px;margin:0 8px 8px 0;max-width:160px">`).join('');
+  const photos = photoUrls.map((url, i) => `<a href="${escapeHtml(url)}"><img src="${escapeHtml(url)}" alt="Фото ${i + 1}" width="160" style="border-radius:10px;margin:0 8px 8px 0;max-width:160px;border:0"></a>`).join('');
   return `<!doctype html><html lang="ru"><body style="margin:0;background:#f6f5f9;font-family:Arial,Helvetica,sans-serif;color:#1d1a29">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f5f9;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #ebe8f0">
@@ -343,17 +345,23 @@ ${photos ? `<div style="margin-top:16px">${photos}</div>` : ''}
 </td></tr></table></td></tr></table></body></html>`;
 }
 
-async function notifyEmail(board, entry, photoBuffers) {
+/**
+ * Письмо владельцу. Фото — ссылками на наш сервер, НЕ вложениями: с VPS в РФ загрузка в api.resend.com
+ * замирает на 128 КБ (15.11.2026: письмо с одним фото 110 КБ упало «fetch failed», текстовые уходят).
+ * Почтовик сам подтягивает картинки с shk-wb.ru — входящие соединения к VPS не режутся.
+ */
+async function notifyEmail(board, entry, photoIds) {
   const { getAuthUser } = require('./_user-auth');
   const { sendEmail } = require('./_notifications');
   const user = await getAuthUser(board.user_id);
   const email = String(user?.email || '');
   if (!email || /@users[.]invalid$/i.test(email) || !user?.email_confirmed_at) return 'no_email';
+  const urls = photoIds.map(id => publicUrl(photoViewUrl(id, MAIL_URL_TTL_S)));
   const subject = `Новый отзыв ${starsText(entry.rating)} — ${boardName(board)}`.slice(0, 200);
   const text = [
     `${KIND_TITLES[entry.kind]} · оценка ${entry.rating} из 5`,
     entry.comment || 'Без комментария — только оценка',
-    photoBuffers.length ? `Фото: ${photoBuffers.length}` : '',
+    urls.length ? `Фото:\n${urls.join('\n')}` : '',
     `Все отзывы: ${publicUrl('/cabinet/feedback')}`,
   ].filter(Boolean).join('\n\n');
   const result = await sendEmail({
@@ -361,11 +369,23 @@ async function notifyEmail(board, entry, photoBuffers) {
     to: email,
     subject,
     text,
-    html: emailHtml(board, entry, photoBuffers.length),
-    attachments: photoBuffers.map((buffer, i) => ({ filename: `photo-${i + 1}.jpg`, content: buffer.toString('base64'), content_id: `photo${i}` })),
+    html: emailHtml(board, entry, urls),
     dedupeKey: `email:feedback:${entry.id}`,
   });
   return result.status;
+}
+
+/** Повторить письмо по отзыву, если прошлая попытка упала (разово с сервера). */
+async function retryEmail(entryId) {
+  if (!UUID_RE.test(String(entryId || ''))) throw new Error('bad entry id');
+  const entry = (await supabaseFetch(`feedback_entries?id=eq.${q(entryId)}&select=${ENTRY_SELECT}&limit=1`))[0];
+  if (!entry) throw new Error('entry not found');
+  const board = (await supabaseFetch(`feedback_boards?id=eq.${q(entry.board_id)}&select=${BOARD_SELECT}&limit=1`))[0];
+  if (!board) throw new Error('board not found');
+  // Строка доставки держит dedupe_key — неудачную убираем, удачную не трогаем (письмо не задвоится).
+  await supabaseFetch(`notification_deliveries?dedupe_key=eq.${q(`email:feedback:${entry.id}`)}&status=eq.failed`, { method: 'DELETE' });
+  const ids = (Array.isArray(entry.photos) ? entry.photos : []).filter(id => PHOTO_ID_RE.test(String(id)));
+  return notifyEmail(board, entry, ids);
 }
 
 /** Все три канала; сбой одного не мешает остальным и не ломает приём отзыва. */
@@ -399,7 +419,8 @@ async function notifyOwner(board, entry) {
     });
   }
   if (board.notify_email) {
-    result.email = await notifyEmail(board, entry, buffers).catch(error => {
+    const ids = (entry.photos || []).filter(id => PHOTO_ID_RE.test(String(id)));
+    result.email = await notifyEmail(board, entry, ids).catch(error => {
       console.warn('feedback: email failed', error.message);
       return 'failed';
     });
@@ -495,7 +516,7 @@ async function handlePhoto(req, res) {
   const id = String(req.query.id || '');
   const expires = Number(req.query.expires || 0);
   const now = Math.floor(Date.now() / 1000);
-  if (!PHOTO_ID_RE.test(id) || !Number.isInteger(expires) || expires < now || expires > now + VIEW_URL_TTL_S + 60) return res.status(403).end();
+  if (!PHOTO_ID_RE.test(id) || !Number.isInteger(expires) || expires < now || expires > now + MAIL_URL_TTL_S + 60) return res.status(403).end();
   if (!safeEqual(String(req.query.token || ''), sign(`fb-view:${id}:${expires}`))) return res.status(403).end();
   const buffer = await fs.promises.readFile(storedPath(id)).catch(() => null);
   if (!buffer) return res.status(404).end();
@@ -687,6 +708,7 @@ module.exports = {
   newSlug,
   notifyOwner,
   photoDir,
+  retryEmail,
   unreadCount,
   _test: { forgetAll: () => publicCache.clear(), sign },
 };

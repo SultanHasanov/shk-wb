@@ -204,8 +204,17 @@ describe('QR-отзывы: публичная страница', () => {
     expect(album.url).toBe('https://relay.test/api/sendMediaGroup');
     expect(album.body).toBeInstanceOf(FormData);
     expect(JSON.parse(String((album.body as FormData).get('media')))[0].caption).toContain('Повесьте крючок');
+    // Фото в письме — ссылками на наш сервер, не вложением: с VPS загрузка в Resend замирает на 128 КБ.
     const mail = calls.find(c => c.url.includes('api.resend.com'))!;
-    expect(mail.body.attachments).toHaveLength(1);
+    expect(mail.body.attachments).toBeUndefined();
+    expect(mail.body.html).toContain(`https://shk-wb.ru/api/feedback/photo/${id}?expires=`);
+    expect(JSON.stringify(mail.body).length).toBeLessThan(64 * 1024);
+    // Ссылка из письма открывает фото (подпись на 30 дней принимается).
+    const link = new URL(mail.body.html.match(/src="([^"]+)"/)[1].replace(/&amp;/g, '&'));
+    const view = response();
+    await handler(req('feedback-photo', { query: { id, expires: link.searchParams.get('expires')!, token: link.searchParams.get('token')! } }), view);
+    expect(view.statusCode).toBe(200);
+    expect(view.headers['Content-Type']).toBe('image/jpeg');
   });
 
   it('чужой токен фото — 400 PHOTO_INVALID', async () => {
