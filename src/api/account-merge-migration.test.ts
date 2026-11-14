@@ -36,6 +36,18 @@ const summary = fn('account_merge_summary');
 const merge = fn('merge_telegram_account');
 const relink = fn('relink_telegram_identity');
 
+/** Миграции после 20261120, которые оборачивают merge_telegram_account / account_merge_summary (прежние — *_core). */
+const WRAPPERS = ['20261122_feedback_boards.sql'].map((file) => {
+  const text = readFileSync(resolve(migrationsDir, file), 'utf8');
+  const list = functionsOf(stripComments(text));
+  const pick = (name: string) => {
+    const found = list.find((f) => f.name === name);
+    if (!found) throw new Error(`${file}: function ${name} not found`);
+    return found;
+  };
+  return { file, raw: text, merge: pick('merge_telegram_account'), summary: pick('account_merge_summary') };
+});
+
 describe('20261120_account_merge_full: общие правила', () => {
   it('одна транзакция', () => {
     expect(sql.trim().startsWith('begin;')).toBe(true);
@@ -209,9 +221,22 @@ describe('merge_telegram_account', () => {
       }
     }
     expect(cascade.size).toBeGreaterThan(30);
+    // Поздние миграции оборачивают функцию (прежняя версия — merge_telegram_account_core) и переносят своё.
+    const moved = [merge.body, ...WRAPPERS.map((w) => w.merge.body)].join('\n');
     for (const table of cascade) {
       if (LEFT_ON_PURPOSE[table]) continue;
-      expect(merge.body, `public.${table} не переносится при слиянии`).toContain(`public.${table}`);
+      expect(moved, `public.${table} не переносится при слиянии`).toContain(`public.${table}`);
+    }
+  });
+
+  it('обёртки поздних миграций вызывают прежнюю функцию и не теряют её проверки', () => {
+    for (const w of WRAPPERS) {
+      expect(w.merge.types, w.file).toBe('bigint,uuid');
+      expect(w.merge.body, w.file).toContain('public.merge_telegram_account_core(p_telegram_user_id, p_target_user_id)');
+      expect(w.summary.body, w.file).toContain('public.account_merge_summary_core(p_user)');
+      // QR с отзывами — значимые данные: аккаунт с ними не «пустой», перепривязка его не удалит
+      expect(w.summary.body, w.file).toMatch(/'empty', coalesce\(\(core->>'empty'\)::boolean, false\) and boards_n = 0/);
+      expect(w.raw, w.file).toContain('revoke all on function public.merge_telegram_account_core(bigint, uuid) from public, anon, authenticated;');
     }
   });
 

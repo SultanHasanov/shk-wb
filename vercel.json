@@ -35,6 +35,13 @@
     { "source": "/api/cabinet/telegram", "destination": "/api/cabinet?action=telegram" },
     { "source": "/api/cabinet/oauth", "destination": "/api/cabinet?action=oauth" },
     { "source": "/api/cabinet/account", "destination": "/api/cabinet?action=account" },
+    { "source": "/api/cabinet/feedback/boards", "destination": "/api/cabinet?action=feedback-boards" },
+    { "source": "/api/cabinet/feedback/boards/:id", "destination": "/api/cabinet?action=feedback-board&id=:id" },
+    { "source": "/api/cabinet/feedback/entries", "destination": "/api/cabinet?action=feedback-entries" },
+    { "source": "/api/feedback/public/:slug", "destination": "/api/cabinet?action=feedback-public&slug=:slug" },
+    { "source": "/api/feedback/public/:slug/photo", "destination": "/api/cabinet?action=feedback-upload&slug=:slug" },
+    { "source": "/api/feedback/public/:slug/submit", "destination": "/api/cabinet?action=feedback-submit&slug=:slug" },
+    { "source": "/api/feedback/photo/:id", "destination": "/api/cabinet?action=feedback-photo&id=:id" },
     { "source": "/api/trial", "destination": "/api/app?action=trial" },
     { "source": "/api/app/devices/:id", "destination": "/api/app?action=device&id=:id" },
     { "source": "/api/app/login/start", "destination": "/api/app?action=login-start" },
@@ -99,6 +106,7 @@
     ,{ "source": "/forgot-password", "destination": "/" }
     ,{ "source": "/reset-password", "destination": "/" }
     ,{ "source": "/r/:code", "destination": "/" }
+    ,{ "source": "/o/:slug", "destination": "/" }
     ,{ "source": "/cabinet/:path*", "destination": "/" }
     ,{ "source": "/cabinet", "destination": "/" }
     ,{ "source": "/panel/:path*", "destination": "/" }
@@ -135,7 +143,7 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
-      "source": "/:section(cabinet|app-login|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r)/:path*",
+      "source": "/:section(cabinet|app-login|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r|o)/:path*",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]

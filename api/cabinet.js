@@ -22,6 +22,7 @@ const partners = require('../server/_partners');
 const { walletSummary } = require('../server/_wallet');
 const { CELL_PRINT_PRICES } = require('../server/_payments');
 const { isSalePlan, planPrice, PLAN_ORDER, PLANS, SALE_PLANS } = require('../server/_app-plans');
+const feedback = require('../server/_feedback');
 
 /**
  * Что станет с тарифом не из продажи при покупке нового — как решит SQL (app_apply_subscription,
@@ -326,7 +327,7 @@ async function getOrders(userId, count = 25, cursor = '') {
 async function bootstrap(req, res, user) {
   await ensureAccount(user);
   await maybeBindReferral(req, user);
-  const [profile, assets, orders, notifications, unread, referral, partner, wallet, discounts] = await Promise.all([
+  const [profile, assets, orders, notifications, unread, referral, partner, wallet, discounts, feedbackUnread] = await Promise.all([
     getProfile(user),
     getAssets(user.id),
     getOrders(user.id, 5),
@@ -339,6 +340,8 @@ async function bootstrap(req, res, user) {
     partners.getPartnerByUser(user.id).catch(() => null),
     walletSummary(user.id),
     supabaseFetch(`sticker_generation_discounts?user_id=eq.${q(user.id)}&eligible=eq.true&consumed_at=is.null&select=user_id&limit=1`).catch(() => []),
+    // До миграции 20261122_feedback_boards таблицы нет — кабинет не должен падать.
+    feedback.unreadCount(user.id).catch(() => 0),
   ]);
   const stickerAssets = assets.filter(x => x.type === 'sticker');
   const remaining = stickerAssets.reduce(
@@ -361,6 +364,7 @@ async function bootstrap(req, res, user) {
     orders,
     notifications: notifications.map(mapNotification),
     unreadNotifications: unread.length,
+    feedbackUnread,
     referral,
     partner: partner ? { name: partner.name, active: partner.active } : null,
     wallet: { ...wallet, discountAvailable: discounts.length > 0 },
@@ -1060,6 +1064,8 @@ async function handlePartner(req, res, user) {
 
 module.exports = async function handler(req, res) {
   if (action(req) === 'cron') return cronNotifications(req, res);
+  // Страница отзыва по QR (/o/<slug>) — без входа: клиент пункта анонимен (server/_feedback.js).
+  if (feedback.isPublicAction(action(req))) return feedback.handlePublic(req, res, action(req));
   // Ограничение «Сайт и кабинет» (или «Полностью») — 403 ACCOUNT_RESTRICTED, не 401.
   // Историю генераций читает и раздел «Стикеры» Помощника ПВЗ (X-App-Name / X-App-Version из stickers.rs):
   // для него действует ограничение «Программа», а не «Сайт».
@@ -1194,6 +1200,7 @@ module.exports = async function handler(req, res) {
       });
       return res.status(201).json({ id });
     }
+    if (a.startsWith('feedback-')) return await feedback.handleOwner(req, res, user, a);
     if (a === 'account') return deleteAccount(req, res, user);
     if (a === 'partner') return handlePartner(req, res, user);
     return res.status(404).json({ error: 'Метод кабинета не найден', code: 'NOT_FOUND' });

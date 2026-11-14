@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, CircleAlert, CircleCheck, Info, MessageSquare, RefreshCw } from 'lucide-react';
+import { Bell, CircleAlert, CircleCheck, Info, MessageSquare, RefreshCw, Star } from 'lucide-react';
 import { Button, Card, EmptyState } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
 import { type Notification, type NotificationKind, useCabinetMutation, useNotifications } from '../../api/cabinet';
@@ -17,6 +17,7 @@ const look: Record<NotificationKind, { tone: string; Icon: typeof Info }> = {
   product_news: { tone: c.toneInfo, Icon: RefreshCw },
   system: { tone: c.toneInfo, Icon: Info },
   pc_reply: { tone: c.toneOk, Icon: MessageSquare },
+  feedback: { tone: c.toneInfo, Icon: Star },
 };
 
 // День события для группировки: Сегодня / Вчера / дата. Тексты самих уведомлений

@@ -38,6 +38,7 @@
 | `servers\shk-serverconf.tgz` | с VPS: `/etc/nginx/sites-available` (все сайты, в т. ч. `pvzprint`, которого нет в репозитории), `/etc/cron.d`, `/etc/postgresql/16/main/conf.d`, юнит `shk-wb.service`, `/etc/letsencrypt` |
 | `servers\shk-botconf.tgz` | с узла бота: `/etc/caddy` (релей и VPN), юниты `shk-wb`, `tg-watchdog`, `caddy.service.d` |
 | `servers\shk-appupdates.tgz` | текущие установщики: `latest.json` обеих программ, файл и `.sig` из них, `/dl/` текущих версий |
+| `servers\shk-feedback-photos.tgz` | фото из анонимных отзывов клиентов по QR (`/srv/shk-wb/feedback-photos`, без `pending/`). Тексты отзывов — в `supabase.dump` (`feedback_entries`). Вернуть: `tar -xzf shk-feedback-photos.tgz -C /srv/shk-wb && chown -R shkwb:shkwb /srv/shk-wb/feedback-photos` |
 | `repo.bundle` | весь git со всеми ветками, включая неотправленные коммиты |
 | `_local-only\pvz-tauri`, `_local-only\cell-print-tauri` | исходники программ; `pvz-tauri\keys\updater.key` — ключ подписи обновлений (общий для обеих программ), `lease-private.pem` — ключ аренды |
 

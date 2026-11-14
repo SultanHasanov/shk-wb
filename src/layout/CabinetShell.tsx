@@ -11,6 +11,7 @@ import {
   Home,
   KeyRound,
   MessageSquare,
+  MessageSquareText,
   Laptop,
   LogOut,
   Menu,
@@ -58,6 +59,8 @@ const cabinetNavGroups = (t: T): { title: string | null; items: NavItem[] }[] =>
         { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
         { to: '/cabinet/pc-messages', label: t('Сообщения на ПК', 'ДК-ға хабарламалар'), Icon: MessageSquare, end: false },
       ] : []),
+      // QR для анонимных отзывов клиентов — бесплатно всем, без программы.
+      { to: '/cabinet/feedback', label: t('Отзывы клиентов', 'Клиент пікірлері'), Icon: MessageSquareText, end: false },
       { to: '/cabinet/keys', label: t('Ключи и доступы', 'Кілттер мен қолжетімділік'), Icon: KeyRound, end: false },
     ],
   },
@@ -89,6 +92,7 @@ const titlesFor = (t: T): Record<string, string> => ({
   '/cabinet/subscription': t('Тарифы «Помощник ПВЗ»', '«ПВЗ көмекшісі» тарифтері'),
   '/cabinet/access': t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'),
   '/cabinet/pc-messages': t('Сообщения на ПК', 'ДК-ға хабарламалар'),
+  '/cabinet/feedback': t('Отзывы клиентов', 'Клиент пікірлері'),
   '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
   '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),
@@ -331,6 +335,14 @@ export const CabinetShell = observer(() => {
                     {(cabinet.data?.unreadNotifications ?? 0) > 99
                       ? '99+'
                       : cabinet.data?.unreadNotifications}
+                  </span>
+                )}
+                {to === '/cabinet/feedback' && Boolean(cabinet.data?.feedbackUnread) && (
+                  <span
+                    className={s.notificationBadge}
+                    aria-label={t(`Новых отзывов: ${cabinet.data?.feedbackUnread}`, `Жаңа пікірлер: ${cabinet.data?.feedbackUnread}`)}
+                  >
+                    {(cabinet.data?.feedbackUnread ?? 0) > 99 ? '99+' : cabinet.data?.feedbackUnread}
                   </span>
                 )}
               </span>

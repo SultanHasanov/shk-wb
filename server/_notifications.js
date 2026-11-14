@@ -16,9 +16,15 @@ function emailConfigured() {
   return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL);
 }
 
-/** Само письмо через Resend, без строки доставки (её ведут вызывающие). Возвращает id письма у Resend. */
-async function resendSend({ to, subject, text }) {
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.RESEND_FROM_EMAIL,to:[to],subject,text})});
+/**
+ * Само письмо через Resend, без строки доставки (её ведут вызывающие). Возвращает id письма у Resend.
+ * html и attachments ([{ filename, content: base64, content_id? }]) — по желанию: без них письмо текстовое, как раньше.
+ */
+async function resendSend({ to, subject, text, html, attachments }) {
+  const payload={from:process.env.RESEND_FROM_EMAIL,to:[to],subject,text};
+  if(html)payload.html=html;
+  if(Array.isArray(attachments)&&attachments.length)payload.attachments=attachments;
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const result=await response.json().catch(()=>({}));
   if(!response.ok) throw new Error(result.message||'Resend request failed');
   return result.id||null;
@@ -34,7 +40,7 @@ function emailResult(status, { providerId = null, deliveryId = null, error = nul
  * Без Resend строку пишем только при recordUnconfigured (админка показывает «почта не настроена»),
  * старые вызовы (createNotification, оплаты, рассылки) её не пишут — как раньше.
  */
-async function sendEmail({ userId, notificationId, to, subject, text, dedupeKey, source = 'system', adminActionId = null, recordUnconfigured = false }) {
+async function sendEmail({ userId, notificationId, to, subject, text, html, attachments, dedupeKey, source = 'system', adminActionId = null, recordUnconfigured = false }) {
   const configured = emailConfigured();
   const base = {
     user_id: userId || null,
@@ -71,7 +77,7 @@ async function sendEmail({ userId, notificationId, to, subject, text, dedupeKey,
     throw error;
   }
   try {
-    const providerId=await resendSend({ to, subject, text });
+    const providerId=await resendSend({ to, subject, text, html, attachments });
     await supabaseFetch(`notification_deliveries?id=eq.${delivery.id}`,{method:'PATCH',body:JSON.stringify({status:'sent',provider_id:providerId,sent_at:new Date().toISOString()})});
     return emailResult('sent', { providerId, deliveryId: delivery.id });
   } catch(error) {

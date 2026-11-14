@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { currentLocale, intlLocale } from '../i18n';
 
-export type NotificationKind = 'order' | 'key_expiry' | 'low_balance' | 'product_news' | 'system' | 'pc_reply';
+export type NotificationKind = 'order' | 'key_expiry' | 'low_balance' | 'product_news' | 'system' | 'pc_reply' | 'feedback';
 export type UserPreferences = {
   thermalPrintSettings: Record<string, unknown>;
   notifyOrderStatus: boolean;
@@ -164,6 +164,8 @@ export type CabinetBootstrap = {
   orders: Order[];
   notifications: Notification[];
   unreadNotifications: number;
+  /** Новые отзывы клиентов по QR (раздел «Отзывы клиентов»). */
+  feedbackUnread?: number;
   referral: ReferralSummary;
   /** Есть, если аккаунт назначен партнёром (см. раздел «Партнёр»). */
   partner?: { name: string; active: boolean } | null;

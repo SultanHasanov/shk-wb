@@ -31,6 +31,8 @@ import { useKeyboardOpen } from '../lib/useKeyboardOpen';
 // нужен лендинг, а не десять страниц личного кабинета во входном бандле.
 const AdminRoutes = lazy(() => import('./AdminRoutes'));
 const CabinetRoutes = lazy(() => import('./CabinetRoutes'));
+// Страница отзыва по QR с карточки пункта (/o/<slug>): своя вёрстка под телефон, без шапки сайта.
+const FeedbackFormPage = lazy(() => import('../pages/FeedbackFormPage').then(m => ({ default: m.FeedbackFormPage })));
 
 /** Публичные маршруты: монтируются дважды — на русском (/) и казахском (/kz). */
 const publicRoutes = (
@@ -91,6 +93,15 @@ export function App() {
         <Route path="login" element={<LegacyAuthRedirect mode="login" />} />
         <Route path="register" element={<LegacyAuthRedirect mode="register" />} />
         <Route path="forgot-password" element={<LegacyAuthRedirect mode="forgot" />} />
+
+        <Route
+          path="o/:slug"
+          element={
+            <Suspense fallback={null}>
+              <FeedbackFormPage />
+            </Suspense>
+          }
+        />
 
         {/* Служебные страницы — центрированная карточка без хрома */}
         <Route element={<AuthShell />}>

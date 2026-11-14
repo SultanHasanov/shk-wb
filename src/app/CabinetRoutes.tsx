@@ -17,6 +17,7 @@ import {
   SubscriptionPage,
   AccessPage,
   PcMessagesPage,
+  FeedbackPage,
 } from '../pages/cabinet';
 
 /**
@@ -36,6 +37,7 @@ export default function CabinetRoutes() {
           <Route path="subscription" element={<SubscriptionPage />} />
           <Route path="access" element={<AccessPage />} />
           <Route path="pc-messages" element={<PcMessagesPage />} />
+          <Route path="feedback" element={<FeedbackPage />} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="packages" element={<PackagesPage />} />
           <Route path="history" element={<HistoryPage />} />

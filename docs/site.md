@@ -181,3 +181,36 @@ OAuth 2.0 по той же схеме, что вход через Telegram: `ser
 с сохранением query и `state.from`; `useAuthParam` в `PublicShell` открывает модалку и чистит адрес. Сервер возвращает ошибку
 OAuth на `/?auth=login&oauth=error&reason=…`, бот открывает Mini App «Создать кабинет через Telegram» на `/?auth=login`.
 `RequireAuth` без сессии уводит на `/` и открывает модалку с `from`. `/reset-password` остаётся страницей (ссылка из письма).
+
+## QR-отзывы клиентов (2026-11-15, НЕ ВЫЛОЖЕНО — ветка feature/feedback-qr)
+
+Кабинет → «Отзывы клиентов» (`/cabinet/feedback`), бесплатно всем. Владелец создаёт до 10 QR, печатает
+карточку (A5 — 2 на листе A4, A6 и наклейка 10×10 — по 4), клиент без входа открывает `/o/<slug>`:
+оценка, тип (жалоба/предложение/благодарность), комментарий до 1000 знаков, до 3 фото. Отзыв приходит
+в кабинет (уведомление `feedback`), в Telegram (альбомом через релей) и на почту (HTML + фото вложением).
+
+- **Код:** `server/_feedback.js` (всё), ветки в `api/cabinet.js` (публичные — до `requireUser`),
+  `src/pages/cabinet/FeedbackPage.tsx`, `src/pages/FeedbackFormPage.tsx`, карточка и QR —
+  `src/lib/feedback-card.ts` (свой SVG из матрицы `qrcode`, коррекция H), черновик — `src/lib/feedback-draft.ts`.
+- **Анонимность:** в отзыве нет IP/User-Agent/контактов; страница клиента шлёт запросы без токена входа;
+  фото перекодируются `sharp` без EXIF (геометка и модель телефона не сохраняются).
+- **База:** миграция `20261122_feedback_boards.sql` (таблицы, kind `feedback`, обёртки над
+  `merge_telegram_account` / `account_merge_summary` — прежние остались как `*_core`: QR переезжают при
+  слиянии Telegram-аккаунта, аккаунт с QR не считается пустым). Проверена на PGlite.
+- **Фото:** `/srv/shk-wb/feedback-photos` (`FEEDBACK_PHOTO_DIR`), `pending/` — загруженные, но не отправленные
+  (удаляются через сутки по ходу загрузок). Владельцу — подписанные ссылки `/api/feedback/photo/<id>` на 6 ч
+  (`FEEDBACK_SECRET`, пусто — `STICKER_CLIENT_SECRET`). В еженедельном бэкапе — `shk-feedback-photos.tgz`.
+- **Лимиты:** просмотр 120/10 мин с IP (карточка кэшируется в памяти на 60 с — Egress), фото 20/ч с IP,
+  отзыв 5/ч на пару IP+QR и 300/сутки на QR, ловушка `website`.
+- **Telegram:** сайт шлёт сам, новых `callback_data` нет (под текстом — «Главное меню» = `n:menu:home`) —
+  узел бота выкладывать НЕ нужно. Фото — свой multipart через `TELEGRAM_API_BASE` (`telegramUpload` в
+  `_telegram-api.js` ходит мимо релея, его не трогали). Не привязан Telegram — конструктор предлагает
+  привязать виджетом прямо в окне, без ухода со страницы.
+
+**Выкладка (по порядку):**
+1. `npx supabase db query --linked -f supabase/migrations/20261122_feedback_boards.sql`
+2. На VPS: `mkdir -p /srv/shk-wb/feedback-photos/pending && chown -R shkwb:shkwb /srv/shk-wb/feedback-photos`
+3. Влить ветку в `main`, сверить `ls -l /srv/shk-wb/current`, выложить сайт `deploy.sh` (код выхода — у самого скрипта).
+4. Проверка: `curl -s -o /dev/null -w "%{http_code}" https://shk-wb.ru/o/TEST2345` → 200 (оболочка SPA),
+   `https://shk-wb.ru/api/feedback/public/TEST2345` → 404 JSON `NOT_FOUND` (не голый `404: NOT_FOUND`);
+   создать QR, отправить отзыв с фото с телефона, проверить кабинет, Telegram и почту.
