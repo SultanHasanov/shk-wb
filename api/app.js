@@ -425,6 +425,9 @@ module.exports = async function handler(req, res) {
       const product =
         b.kind === 'addon' ? { productKind: 'app_addon', appAddon: String(b.addon || ''), appAddonMonths: Number(b.months || 0) }
         : b.kind === 'wallet' ? { productKind: 'wallet_topup', walletAmount: Number(b.amount || 0) }
+        // докупка кодов клиента к тарифу: 5 или 10 по цене подписчика (server/_app-plans.js CODE_TOPUPS);
+        // цену и наличие тарифа проверяет api/payments.js, отсюда идёт только признак
+        : b.kind === 'codes' ? { productKind: 'program_license', licenseIterations: Number(b.count || 0), appCodeTopup: true }
         : b.kind === 'cell_print' ? {
           productKind: 'cell_print_license',
           durationDays: Number(b.days || 0),

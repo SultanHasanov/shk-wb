@@ -630,6 +630,31 @@ async function accountSummary(user, currentHash) {
   };
 }
 
+/** Сколько программа работает без связи в бесплатный период без даты окончания. */
+const FREE_OFFLINE_DAYS = 30;
+
+/**
+ * До какого момента (unix, с) права из аренды действуют БЕЗ связи с сервером; null — бессрочно.
+ * Программа 1.13+ открывает разделы офлайн до этой даты, после — программа открывается, разделы закрыты.
+ * Отключение админом доходит при первом выходе ПК в сеть (пустые права в свежей аренде).
+ *  - безлимит: до unlimited_until или бессрочно;
+ *  - бесплатный период: до его конца; даты нет — на FREE_OFFLINE_DAYS вперёд (период могут выключить);
+ *  - тариф: до конца оплаченного; если дальше в очереди ДРУГОЙ тариф — до конца текущего отрезка
+ *    (после него набор разделов меняется, его пришлёт новая аренда);
+ *  - без тарифа (пакеты кодов): null — закрывать офлайн нечего, коды всё равно выдаёт сервер.
+ */
+function rightsUntil({ ent, free, unlimited, plan, freeUntil, now = Date.now() }) {
+  const secs = iso => {
+    const t = Date.parse(iso || '');
+    return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+  };
+  if (unlimited) return secs(ent?.unlimited_until);
+  if (free) return secs(freeUntil) ?? Math.floor(now / 1000) + FREE_OFFLINE_DAYS * 86400;
+  if (!plan) return null;
+  const switching = ent?.next_plan && ent.next_plan !== plan;
+  return secs(switching ? ent.ends_at : ent?.paid_until || ent?.ends_at) ?? secs(ent?.ends_at);
+}
+
 /**
  * Права для подписанной аренды (POST /api/app/lease). Программа открывает разделы
  * только по ним, а не по кэшу account.json, — поэтому правка файлов ничего не даёт.
@@ -672,15 +697,16 @@ async function leaseRights(req) {
     };
   }
   await rememberDevicePoint(device, req.headers['x-point-wb']);
-  const { free, unlimited, plan, addons, features } = await entitlementsFor(userId);
+  const { ent, free, unlimited, plan, addons, features } = await entitlementsFor(userId);
   const all = free || unlimited;
+  const until = rightsUntil({ ent, free: free && !unlimited, unlimited, plan, freeUntil: free && !unlimited ? await appFreeUntil().catch(() => null) : null });
   const archiveUntil = all ? null : (features.includes('archive') ? addons.archive?.ends_at || null : null);
   // закрытое владельцем на этом ПК: разделы вычитаются из тарифа, весь список — программе
   const denied = permissions.cleanDenied(device.denied);
   const open = features.filter(f => !denied.includes(f));
   const granted = viaKey ? open.filter(f => f === 'mirror') : open;
   // роль ПК — подписана вместе с правами: компьютер сотрудника не покажет чужие ПК и не загрузит их базы
-  return { user: userId, plan: all ? 'pro' : plan, features: granted, archive_until: viaKey ? null : archiveUntil, free: all, denied, role: permissions.roleOf(device), via: viaKey ? 'key' : 'session' };
+  return { user: userId, plan: all ? 'pro' : plan, features: granted, archive_until: viaKey ? null : archiveUntil, free: all, denied, role: permissions.roleOf(device), via: viaKey ? 'key' : 'session', until };
 }
 
 // Пункт, чья база WB стоит на ПК (программа шлёт в /lease), — для группировки ПК в кабинете.
@@ -1077,7 +1103,7 @@ module.exports = {
   resendSignup,
   sendPasswordReset,
   startSignup,
-  leaseRights,
+  leaseRights, rightsUntil,
   accountSummary,
   appError,
   approveBrowserLogin,

@@ -743,3 +743,57 @@ SHA-256 установщика 9d6ab10c4571a806826b9b40276d7f69d774f6ef0ca2b1702
 Менялась только программа, сайт не выкладывался. Установщик `/dl/pvz-helper-1.12.1-setup.exe`, sha256 `3d75315c…2de6f8`,
 `latest.json`: `auto:true`, бэкап `latest.json.bak-1794160186`. Проверено: `cargo check --lib`, `tsc -b`, сборка, `/api/app/update` → 1.12.1,
 `/dl/…` → 200. Живой экран программы не проверялся.
+
+## 1.13.0 (2026-11-14, код написан, НЕ выложено и НЕ закоммичено): офлайн до конца тарифа, локальный поиск, операции по дням, МП коробки, докупка кодов
+План: `~/.claude/plans/snazzy-fluttering-meteor.md`.
+- **Офлайн.** Сервер кладёт в подписанные права `until` (unix, `rightsUntil` в `server/_app-account.js`: конец оплаченного
+  тарифа / бесплатного периода / безлимита; при смене тарифа в очереди — конец текущего отрезка). Программа (`lease.rs`):
+  `ensure()` больше не даёт `LEASE_EXPIRED`, программа открывается всегда; разделы открыты, пока `rights_validity` = Valid
+  (до `until` по часам сервера, `skew`), иначе `features = []` и `rights.state` = expired | clock | nocontact. Старый сервер
+  без `until` — права живут, пока жива аренда. `lease::tick()` раз в 10 мин пишет `max_seen` (перевод часов назад на
+  долгом офлайне). `OfflineGate` не показывается; причины — в `TopNotices` и `PlanLocked` (в т.ч. ограничение админа).
+  Отладка: `PVZ_LEASE_ENFORCE=1`, `PVZ_LEASE_NOW=<unix>`, `PVZ_PREVIEW=0` (только debug).
+- **«Товар по ШК»** — сначала база пункта (`goods_local.rs`, команда `goods_local_by_shk`), потом сохранённые ответы WB;
+  в кабинет WB — по кнопке, с входом по SMS. **«Клиенты»** — режим «ШК товара» (`search_client_shk`).
+- **«Операции по дням»** (`ops.rs`, `Operations.tsx`, фича `ops`, только Про): клиенты, выдано, оборот выдачи, отказы,
+  возвраты, переупаковки, возвратные коробки, приёмка, пакеты, выдачи по часам. Итоги копятся в `ops_days.json`
+  (большее не затирается меньшим). Проверка на своей базе: `PVZ_OPS_DB=<sqlite> cargo test --lib ops::tests::real_db -- --nocapture`.
+- **«МП коробки»** (`mp_boxes.rs`, `MpBoxes.tsx`, вкладка в «Коробках»): `marketplace_box_goods` + `marketplace_supply_goods`.
+  Эти таблицы и `delivery_orders` добавлены в `mirror::TABLES`. На живых данных НЕ проверено (на ПК разработки таблиц нет).
+- **Докупка кодов к тарифу**: `CODE_TOPUPS = {5: 200, 10: 380}` в `server/_app-plans.js` (`/api/app/plans → codeTopups`),
+  `/api/app/pay` `kind: 'codes'` → `program_license` по цене подписчика (проверка тарифа в `api/payments.js`, QR СБП разрешён);
+  купленное — ключ с владельцем → `packs_left`. Программа: `CodeTopupDialog.tsx` (при `LIMIT_EXCEEDED`, в шапке при ≤2, в профиле).
+- **Порядок выпуска:** сайт из `main` первым (иначе: `ops` под замком у всех, докупка «скоро будет», офлайн по старому
+  правилу 24 ч) → `curl /api/app/plans` (есть `codeTopups`, у pro есть `ops`) → пробная оплата пакета → программа 1.13.0.
+- `tauri dev` с `CARGO_TARGET_DIR` внутри `src-tauri` зацикливается на пересборке — запускать через
+  `npx tauri build --debug --no-bundle` и exe из `target-local/debug`.
+- **Дополнение 14.11 (тоже 1.13.0, не выпущено):** раздел «Клиенты» убран, его поиск (телефон, ШК товара) и кнопка «Досье» —
+  в «Коде клиента» (`CodeClient.tsx`; поиск из шапки ведёт туда же). Новый раздел «Контроль пункта» (`control.rs`, `Control.tsx`,
+  фича `cells`): залежавшиеся (≥7 дней или срок вышел — `cells_with_expiration_dates` хранит срок только у просроченных ячеек),
+  розыск и излишки (`goods_under_search`, `surplus_goods`, `surpluses`, `pending_goods`), «Ожидается» (товары в пути + прогноз
+  приёмки на завтра по таким же дням недели; точной даты прибытия в базе нет). В `mirror::TABLES` добавлены `goods_under_search`,
+  `pending_goods`, `surpluses`. Рейтинг клиента НЕ делаем: `buyers_scores` в живой базе WB пустая (проверено 14.11.2026 на
+  `%APPDATA%\com.example\wb_point_desktop\wb_point_db.sqlite` домашнего ПК). Там же пусты `delivery_orders`, `goods_under_search`,
+  `marketplace_*`, `goods_boxes`, `employee_events` — на ПК, где не ведут выдачу, WB эти журналы не заполняет; проверять на ПК пункта.
+
+## 1.14.0 (2026-11-14, релизный установщик собран, НЕ выложено; серверные правки 1.13 НЕ закоммичены): инвентаризация с голосом WB
+План: `~/.claude/plans/snazzy-fluttering-meteor.md`. Идёт поверх невыпущенной 1.13.0 — выпускаются одной версией 1.14.0.
+- **Раздел «Инвентаризация»** (`src/screens/Scanner.tsx`, ключ вкладки `scanner`, право `cells` — Стандарт и Про, тарифы
+  на сервере не менялись). Вкладки «Проверка ячеек» и «Найти ячейку».
+  - «Проверка ячеек» (`src-tauri/src/inventory.rs`): снимок товаров `GOODS_READY` с ячейкой (весь пункт или диапазон) →
+    сканы. Одно поле: до 4 цифр — номер проверяемой ячейки, длиннее — ШК. Оценка `judge`: ok / misplaced / extra / repeat.
+    Сессия пишется после каждого скана в `wb_pvz_tools/inventory/<пункт>/current.json`, завершённые — `<id>.json`
+    (последние 30). При завершении `resolve_missing` перечитывает базу: выданное и отказанное за время проверки
+    в «не найдено» не попадает. Отчёт — печать (`window.print`, `@media print` в `scanner.css`) и CSV (`;` + BOM).
+    Команды `inventory_state/start/scan/undo/cancel/finish/history/report`.
+  - «Найти ячейку»: `inventory::quick` (команда `scan_lookup`) — код → ячейка крупно, клиент, статус.
+- **Голос — только записи самой программы WB** (решение владельца: голоса Windows Irina/Pavel убраны).
+  `src-tauri/src/wb_voice.rs` читает `...\WB_PVZ\data\flutter_assets\assets\sounds\woman\cells\<N>.mp3` (1–1500) и фразы
+  (`good_was_delivered`, `decline` …) из установленной WB по белому списку имён; в установщик эти файлы НЕ кладём.
+  Фронт: `playWbClips` в `src/lib/voice.ts` (blob-аудио, `media-src blob:` в CSP уже был). Нет WB или ячейка > 1500 —
+  сигнал `alert_sound_play`. Настройки — `config.json → scanner` (`voice`, `rate`, `beep`).
+- **Мини-игра «Перерыв» была сделана и убрана** по решению владельца (14.11): кода, пункта меню и ключа доступа `game` нет.
+- Тесты: `cargo test --lib` (42: `inventory::` 5, `wb_voice::` 2), `npx vitest run src/api/app-access.test.ts`.
+- Проверено в окне отладочной сборки: все четыре оценки скана, продолжение после перезагрузки окна, отчёт, история,
+  загрузка и проигрывание записи WB. НЕ проверено: настоящий сканер штрихкодов, печать отчёта на бумаге,
+  релизная сборка на компьютере пункта.

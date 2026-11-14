@@ -303,7 +303,7 @@ describe('оплата из программы по QR-коду СБП', () => {
   it('QR берётся из confirmation_data ЮKassa и только для покупок программы', () => {
     expect(payments).toContain("payment_method_data: { type: 'sbp' }, confirmation: { type: 'qr' }");
     expect(payments).toContain('qr: payment.confirmation?.confirmation_data');
-    expect(payments).toContain("const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license'];");
+    expect(payments).toContain("const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license', 'program_license'];");
   });
 });
 

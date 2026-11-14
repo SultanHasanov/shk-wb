@@ -15,7 +15,7 @@ const {
   yookassa,
 } = require('../server/_payments');
 const { MAX_TOPUP, MIN_TOPUP, topupBonus, validTopup } = require('../server/_wallet');
-const { ADDONS, addonSnapshot, isSalePlan, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
+const { ADDONS, addonSnapshot, codeTopupPrice, isSalePlan, orderSnapshot, PLAN_ORDER, PLANS } = require('../server/_app-plans');
 const { CLUB_DISCOUNT_PERCENT, applyClubDiscount, clubUserDiscount } = require('../server/_club');
 const { isAccessCode } = require('../server/_access-code');
 const { enforceRateLimit } = require('../server/_rate-limit');
@@ -214,9 +214,23 @@ module.exports = async function handler(req, res) {
       // платёж без перехода на сайт, оплата с телефона по QR.
       const sbpQr = req.body?.paymentMethod === 'sbp_qr';
       // QR из программы: подписка, услуга, пополнение баланса (стикеры) и лицензия «Печати ячеек»
-      const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license'];
+      const SBP_QR_KINDS = ['app_subscription', 'app_addon', 'wallet_topup', 'cell_print_license', 'program_license'];
       if (sbpQr && !SBP_QR_KINDS.includes(productKind))
         return res.status(400).json({ error: 'Оплата по QR недоступна для этой покупки' });
+      // Докупка кодов клиента к тарифу из программы (api/app.js pay kind=codes): 5/10 по цене подписчика.
+      // Признак из запроса — только просьба: цена действует, если у аккаунта есть оплаченный тариф.
+      let codeTopupTotal = null;
+      if (productKind === 'program_license' && req.body?.appCodeTopup === true) {
+        if (!user) return res.status(401).json({ error: 'Войдите в аккаунт, чтобы докупить коды' });
+        const price = codeTopupPrice(licenseIterations);
+        if (price == null) return res.status(400).json({ error: 'Выберите пакет: 5 или 10 кодов' });
+        const subs = await supabaseFetch(
+          `app_subscriptions?user_id=eq.${encodeURIComponent(user.id)}&canceled=eq.false&ends_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&limit=1`,
+        );
+        if (!subs.length)
+          return res.status(400).json({ error: 'Коды докупаются к действующему тарифу. Сначала оформите тариф.', code: 'PLAN_REQUIRED' });
+        codeTopupTotal = price;
+      }
       const appAddon = String(req.body?.appAddon || '');
       const appAddonMonths = Number(req.body?.appAddonMonths || 0);
       const addonSnap = productKind === 'app_addon' ? addonSnapshot(appAddon, appAddonMonths) : null;
@@ -350,8 +364,8 @@ module.exports = async function handler(req, res) {
             }
           : productKind === 'program_license'
           ? {
-              license: { iterations: licenseIterations, total: LICENSE_PRICES[licenseIterations] },
-              total: LICENSE_PRICES[licenseIterations],
+              license: { iterations: licenseIterations, total: codeTopupTotal ?? LICENSE_PRICES[licenseIterations], ...(codeTopupTotal != null ? { topup: true } : {}) },
+              total: codeTopupTotal ?? LICENSE_PRICES[licenseIterations],
             }
           : cellKinds.includes(productKind)
             ? {

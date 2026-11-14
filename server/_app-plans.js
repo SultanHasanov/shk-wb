@@ -18,7 +18,7 @@ const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'sear
 // С 02.11.2026 «Про» включает «Загрузку с другого ПК» для своих пунктов (PLANS.pro.mirror):
 // владелец с 4 ПК ждал, что домашний компьютер увидит пункт. На «Стандарте» услуга по-прежнему пакетом.
 const PRO_FEATURES = Object.freeze([
-  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video', 'mirror',
+  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video', 'mirror', 'ops',
 ]);
 // Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
 // узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
@@ -65,6 +65,15 @@ const PLANS = Object.freeze({
   }),
 });
 
+// Докупка кодов клиента к действующему тарифу из программы: количество → цена, ₽.
+// Дешевле обычного пакета (server/_payments.js LICENSE_PRICES: 5 за 220, 10 за 400) — только подписчикам.
+// Купленное ложится пакетом на аккаунт (license_keys → packs_left) и тратится после месячной квоты
+// тарифа; в конце месяца не сгорает.
+const CODE_TOPUPS = Object.freeze({ 5: 200, 10: 380 });
+function codeTopupPrice(count) {
+  return Object.prototype.hasOwnProperty.call(CODE_TOPUPS, count) ? CODE_TOPUPS[count] : null;
+}
+
 // Скидка за срок, в процентах.
 const TERMS = Object.freeze({ 1: 0, 3: 22, 6: 28, 12: 35 });
 
@@ -85,6 +94,7 @@ const FEATURE_TITLES = Object.freeze({
   stickers: 'Печать стикеров товаров и коробок',
   staff: 'Сотрудники: график, зарплата, аванс, удержания WB',
   video: 'Видео по ШК: архив камер Ivideon на момент приёмки',
+  ops: 'Операции по дням: клиенты, выдачи, отказы, возвраты и оборот выдачи',
   mirror: 'Загрузка с другого ПК: данные пункта на домашнем компьютере',
   archive: 'Архив клиентов в облаке: на любом ПК и по всем пунктам',
 });
@@ -264,6 +274,8 @@ function publicPlans() {
     order: SALE_PLANS,
     terms: Object.keys(TERMS).map(months => ({ months: Number(months), discountPercent: TERMS[months] })),
     features: FEATURE_TITLES,
+    // докупка кодов клиента к тарифу: [{ count, price }]
+    codeTopups: Object.keys(CODE_TOPUPS).map(count => ({ count: Number(count), price: CODE_TOPUPS[count] })),
     plans: SALE_PLANS.map(id => {
       const p = PLANS[id];
       return {
@@ -294,7 +306,7 @@ function publicPlans() {
 }
 
 module.exports = {
-  ADDONS, FEATURE_TITLES, PLAN_ORDER, PLANS, SALE_PLANS, TERMS,
-  accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isSalePlan, isTerm, mirrorLimit,
+  ADDONS, CODE_TOPUPS, FEATURE_TITLES, PLAN_ORDER, PLANS, SALE_PLANS, TERMS,
+  codeTopupPrice, accountLimits, addonAllowed, addonPrice, addonSnapshot, effectiveFeatures, isAddon, isPlan, isSalePlan, isTerm, mirrorLimit,
   orderSnapshot, planPrice, planRank, publicPlans,
 };

@@ -14,6 +14,7 @@ export const permissionSections = (t: T): PermissionItem[] => [
   { key: 'boxes', title: t('Коробки', 'Қораптар'), hint: t('Коробки возвратов и история товара', 'Қайтару қораптары және тауар тарихы') },
   { key: 'goods', title: t('Товар по ШК', 'ШК бойынша тауар'), hint: t('Поиск товара по ШК через WB', 'WB арқылы ШК бойынша тауар іздеу') },
   { key: 'video', title: t('Видео по ШК', 'ШК бойынша бейне'), hint: t('Архив камер на момент приёмки', 'Қабылдау сәтіндегі камера мұрағаты') },
+  { key: 'ops', title: t('Операции по дням', 'Күндер бойынша операциялар'), hint: t('Клиенты, выдачи, отказы и оборот выдачи по дням', 'Күндер бойынша клиенттер, берулер, бас тартулар және беру айналымы') },
   { key: 'search', title: t('Клиенты', 'Клиенттер'), hint: t('Поиск клиента по телефону', 'Клиентті телефон бойынша іздеу') },
   { key: 'dossier', title: t('Досье клиента', 'Клиент досьесі'), hint: t('Вся история покупок клиента', 'Клиенттің барлық сатып алу тарихы') },
   { key: 'reviews', title: t('Отзывы', 'Пікірлер'), hint: t('Оценки пункта от клиентов', 'Клиенттердің пунктке берген бағалары') },
@@ -53,7 +54,7 @@ export const permissionPresets = (t: T): PermissionPreset[] => [
     title: t('Только выдача', 'Тек беру'),
     hint: t('Ячейки, код клиента, примерка и заметки', 'Ұяшықтар, клиент коды, өлшеу және жазбалар'),
     denied: [
-      'expensive', 'way', 'boxes', 'goods', 'video', 'search', 'dossier', 'reviews', 'staff', 'stickers', 'cellprint',
+      'expensive', 'way', 'boxes', 'goods', 'video', 'ops', 'search', 'dossier', 'reviews', 'staff', 'stickers', 'cellprint',
       'telegram', 'settings', 'act.payroll', 'act.staff_edit', 'act.stickers_generate', 'act.video_settings',
       'act.load_pc', 'act.archive_view', 'act.pay', 'act.account',
     ],
