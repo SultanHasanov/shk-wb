@@ -495,7 +495,7 @@ function nextClientCharge(from, userId) {
 const REPEAT_PAID_LINE = 'Каждое получение QR — отдельное списание, даже для того же клиента.';
 
 /**
- * Экран «Код клиента». Главный путь — поиск по ячейке или телефону; ID можно прислать и сразу цифрами.
+ * Экран «Код клиента». Главный путь — поиск по ячейке, телефону или ШК товара; ID можно прислать и сразу цифрами.
  * notice — строка сверху (например, «не понял номер» после «код» без цифр).
  */
 async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
@@ -508,7 +508,7 @@ async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
     '<b>🔑 Код клиента</b>',
     ...pending.lines,
     'Пришлю QR клиента на сегодня — когда клиент не может сам показать свой QR из приложения WB.',
-    'Найдите клиента по ячейке или телефону — или пришлите его ID цифрами, например <code>191607973</code>.',
+    'Найдите клиента по ячейке, телефону или ШК товара — или пришлите его ID цифрами, например <code>191607973</code>.',
     '',
     ...clubStatusLines(club),
     `<b>Что спишется:</b> ${approvals.chargeLine(charge)}`,
@@ -517,7 +517,7 @@ async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
   const short = charge.kind === 'wallet' && charge.balance != null && charge.balance < charge.price;
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     ...pending.rows,
-    [{ text: '🔎 Найти клиента по ячейке или телефону', callback_data: 'code:find' }],
+    [{ text: '🔎 Найти клиента по ячейке, телефону или ШК', callback_data: 'code:find' }],
     [{ text: '🖥 Найти ID клиента в Помощнике ПВЗ', callback_data: 'code:app' }],
     ...(short ? [[{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] : []),
     MENU_ROW,
@@ -1002,9 +1002,9 @@ async function handleCodeCommand(from, chatId, digits) {
     return showClientCode(chatId, undefined, from, { notice: 'Не понял номер клиента. Пришлите ID цифрами, например <code>191607973</code>, или найдите клиента по ячейке.' });
   }
   const lines = digits.length < 7
-    ? [`Похоже, это не ID клиента: в нём 7–12 цифр, а вы прислали «${escapeHtml(digits)}».`, 'Если это номер ячейки или цифры телефона — найдите клиента поиском. Ничего не списано.']
+    ? [`Похоже, это не ID клиента: в нём 7–12 цифр, а вы прислали «${escapeHtml(digits)}».`, 'Если это номер ячейки, цифры телефона или ШК товара — найдите клиента поиском. Ничего не списано.']
     : [`В ID клиента 7–12 цифр, а вы прислали ${digits.length}. Проверьте номер. Ничего не списано.`];
-  return sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: '🔎 Найти клиента по ячейке или телефону', callback_data: 'code:find' }], MENU_ROW]) });
+  return sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard([[{ text: '🔎 Найти клиента по ячейке, телефону или ШК', callback_data: 'code:find' }], MENU_ROW]) });
 }
 
 /** Подпись под QR клиента: кто это, сколько действует и что списано. */
@@ -1151,10 +1151,24 @@ function goodPhone(item) { return String(item?.buyer?.mobile ?? item?.buyer?.pho
 function goodCell(item) { return String(item?.cell ?? item?.cell_address ?? '').trim(); }
 // Имя — только покупателя: item.name у товара бывает названием товара, а не клиента.
 function goodName(item) { return String(item?.buyer?.name ?? '').trim(); }
+// ШК товара: в базе программы это scanned_code / shk_code / sticker_code, в других запросах WB — shk / shk_id;
+// точное имя в goods/list не зафиксировано, поэтому берём любое поле верхнего уровня с shk / scanned / sticker
+// в названии. barcode не берём — это штрихкод товара (EAN), он одинаков у всех, кто заказал то же.
+const GOOD_SHK_FIELD = /shk|scanned|sticker/i;
+function goodShks(item) {
+  const out = new Set();
+  if (!item || typeof item !== 'object') return out;
+  for (const [field, raw] of Object.entries(item)) {
+    if (!GOOD_SHK_FIELD.test(field) || (typeof raw !== 'string' && typeof raw !== 'number')) continue;
+    const value = String(raw).trim();
+    if (/^\d{8,14}$/.test(value)) out.add(value);
+  }
+  return out;
+}
 
 /**
- * Совпадения по запросу: цифры могут быть номером ячейки, хвостом телефона или самим ID клиента (его копируют из
- * программы) — ищем всеми способами.
+ * Совпадения по запросу: цифры могут быть номером ячейки, хвостом телефона, ШК товара или самим ID клиента (его
+ * копируют из программы) — ищем всеми способами.
  */
 function findClientsByQuery(goods, digits) {
   const out = new Map();
@@ -1166,8 +1180,10 @@ function findClientsByQuery(goods, digits) {
     const cellMatch = cell && cell.replace(/\D/g, '') === digits;
     const phoneMatch = digits.length >= 3 && phoneDigits.length >= digits.length && phoneDigits.endsWith(digits);
     const sidMatch = sid === digits;
-    if (!cellMatch && !phoneMatch && !sidMatch) continue;
-    const entry = out.get(sid) || { sid, phone: '', cells: new Set(), name: '' };
+    const shkMatch = digits.length >= 8 && goodShks(item).has(digits);
+    if (!cellMatch && !phoneMatch && !sidMatch && !shkMatch) continue;
+    const entry = out.get(sid) || { sid, phone: '', cells: new Set(), name: '', shks: new Set() };
+    if (shkMatch) entry.shks.add(digits);
     if (cell) entry.cells.add(cell);
     if (!entry.phone && goodPhone(item)) entry.phone = goodPhone(item);
     if (!entry.name && goodName(item)) entry.name = goodName(item);
@@ -1199,8 +1215,8 @@ async function promptClientQuery(from, chatId, messageId) {
   await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
   await showScreen(chatId, messageId, [
     `<b>🔎 Поиск клиента (ПВЗ ${(await getWbConnection(from.id))?.session?.pointId || ''})</b>`,
-    'Отправьте <b>номер ячейки</b> или <b>последние 4 цифры телефона</b> клиента.',
-    'Например: <code>245</code> или <code>8898</code>.',
+    'Отправьте <b>номер ячейки</b>, <b>последние 4 цифры телефона</b> клиента или <b>ШК товара</b> — цифрами или фото этикетки.',
+    'Например: <code>245</code>, <code>8898</code> или <code>23456789012</code>.',
     '',
     'Ищу среди заказов, которые сейчас лежат в пункте.',
   ].join('\n'), { reply_markup: choiceKeyboard([
@@ -1261,14 +1277,35 @@ function clientMatchButton(match) {
   return { text: parts.join(' · ').slice(0, 60), callback_data: `code:qr:${match.sid}${cell ? `:${cell}` : ''}` };
 }
 
-async function runClientSearch(from, chatId, query) {
+/** Совпадения сразу по нескольким номерам (ШК с одного фото) — один клиент одной строкой. */
+function mergeClientMatches(lists) {
+  const out = new Map();
+  for (const match of lists.flat()) {
+    const entry = out.get(match.sid);
+    if (!entry) { out.set(match.sid, { ...match, cells: new Set(match.cells), shks: new Set(match.shks) }); continue; }
+    match.cells.forEach(cell => entry.cells.add(cell));
+    match.shks.forEach(shk => entry.shks.add(shk));
+    if (!entry.phone) entry.phone = match.phone;
+    if (!entry.name) entry.name = match.name;
+  }
+  return [...out.values()];
+}
+
+const SEARCH_AGAIN_LINE = 'Можно сразу отправить следующую ячейку, последние 4 цифры телефона, ШК товара или фото этикетки.';
+
+/**
+ * Поиск клиента по присланному тексту (query) или по ШК, распознанным на фото (photoCodes — тогда query не нужен).
+ * statusId — сообщение «Читаю ШК с фото…», которое заменяется ответом.
+ */
+async function runClientSearch(from, chatId, query, { photoCodes = null, statusId = null } = {}) {
   const connection = await getWbConnection(from.id);
   if (!connection?.session?.token || connection.state !== 'ready') { await clearSession(from.id); return startClientSearch(from, chatId); }
   // Поиск остаётся открытым: каждый запрос продлевает ожидание, следующий номер можно прислать и через час.
   await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
+  const reply = (text, extra) => (statusId ? showScreen(chatId, statusId, text, extra) : sendMessage(chatId, text, extra));
   const point = connection.session?.pointId ? ` на ПВЗ ${escapeHtml(connection.session.pointId)}` : '';
-  let digits = String(query || '').replace(/\D/g, '');
-  if (!digits) return sendMessage(chatId, 'Отправьте номер ячейки или последние 4 цифры телефона клиента — цифрами.', { reply_markup: choiceKeyboard([MENU_ROW]) });
+  let digits = photoCodes ? '' : String(query || '').replace(/\D/g, '');
+  if (!photoCodes && !digits) return sendMessage(chatId, 'Отправьте номер ячейки, последние 4 цифры телефона или ШК товара — цифрами. Или фото этикетки с ШК.', { reply_markup: choiceKeyboard([MENU_ROW]) });
   let goods;
   try {
     goods = await loadGoodsSnapshot(from.id, connection);
@@ -1276,20 +1313,35 @@ async function runClientSearch(from, chatId, query) {
     if (await replyWbFailure(from, chatId, error, { purpose: 'search' })) return;
     throw error;
   }
-  let matches = findClientsByQuery(goods, digits);
   const lines = [];
-  if (!matches.length && phoneLike(digits)) {
-    digits = digits.slice(-4);
-    lines.push(`Ищу по последним 4 цифрам телефона: ${digits}.`);
+  let matches;
+  if (photoCodes) {
+    // С фото берём только совпадения по ШК: ячейка или хвост телефона из случайных цифр снимка — ложный клиент.
+    matches = mergeClientMatches(photoCodes.map(code => findClientsByQuery(goods, code).filter(match => match.shks.has(code))));
+    if (!matches.length) {
+      const list = photoCodes.map(code => `<code>${escapeHtml(code)}</code>`).join(', ');
+      return reply([
+        `На фото ШК ${list}, но такого товара сейчас нет среди лежащих${point}: он уже выдан, возвращён или ещё в пути.`,
+        'Найдите клиента по ячейке или последним 4 цифрам телефона.',
+      ].join('\n'), { reply_markup: choiceKeyboard([[{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }], MENU_ROW]) });
+    }
+  } else {
     matches = findClientsByQuery(goods, digits);
+    if (!matches.length && phoneLike(digits)) {
+      digits = digits.slice(-4);
+      lines.push(`Ищу по последним 4 цифрам телефона: ${digits}.`);
+      matches = findClientsByQuery(goods, digits);
+    }
   }
   if (!matches.length) {
     // 7–12 цифр не телефон — может быть ID клиента не из этого пункта: QR через подтверждение с ценой.
     const maybeId = !lines.length && /^\d{7,12}$/.test(digits);
+    const maybeShk = !lines.length && digits.length === 11;
     return sendMessage(chatId, [
       ...lines,
       `По «${escapeHtml(digits)}» никого не нашёл${point}.`,
-      'Проверьте номер и отправьте ещё раз — ячейку или последние 4 цифры телефона. Ищу только среди заказов, которые сейчас лежат в пункте.',
+      ...(maybeShk ? ['Если это ШК товара — такого товара сейчас нет в пункте: он уже выдан, возвращён или ещё в пути.'] : []),
+      'Проверьте номер и отправьте ещё раз — ячейку, последние 4 цифры телефона или ШК. Ищу только среди заказов, которые сейчас лежат в пункте.',
     ].join('\n'), { reply_markup: choiceKeyboard([
       ...(maybeId ? [[{ text: '🔑 Это ID клиента — получить QR', callback_data: `code:ask:${digits}` }]] : []),
       [{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }],
@@ -1310,13 +1362,14 @@ async function runClientSearch(from, chatId, query) {
     if (match.name) parts.push(escapeHtml(match.name));
     if (cells) parts.push(`яч. ${escapeHtml(cells)}`);
     if (match.phone) parts.push(maskWbPhone(match.phone));
+    if (match.shks?.size) parts.push(`ШК ${[...match.shks].map(shk => `<code>${escapeHtml(shk)}</code>`).join(', ')}`);
     lines.push(`${index + 1}. ${parts.join(' · ') || 'клиент'}`);
     rows.push([clientMatchButton(match)]);
   });
   if (matches.length > 10) lines.push('', `…и ещё ${matches.length - 10}. Уточните запрос.`);
   rows.push([{ text: 'Сменить ПВЗ', callback_data: 'cs:points' }, ...MENU_ROW]);
-  lines.push('', 'Можно сразу отправить следующую ячейку или последние 4 цифры телефона.');
-  await sendMessage(chatId, lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
+  lines.push('', SEARCH_AGAIN_LINE);
+  await reply(lines.join('\n'), { reply_markup: choiceKeyboard(rows) });
 }
 
 async function showHelperInfo(chatId, messageId) {
@@ -2228,7 +2281,7 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
   if (Math.random() < 1 / 3) {
     const charge = await nextClientCharge(from, draft.userId || await findUser(from.id).catch(() => null)).catch(() => null);
     const cost = charge ? ` — ${approvals.chargeLabel(charge)}` : '';
-    await sendMessage(chatId, `💡 Клиент пришёл без своего QR? Найду его по ячейке или телефону и пришлю QR сюда${cost}.`, { reply_markup: choiceKeyboard([[{ text: `🔑 Код клиента${cost}`, callback_data: 'menu:code' }]]) }).catch(() => {});
+    await sendMessage(chatId, `💡 Клиент пришёл без своего QR? Найду его по ячейке, телефону или ШК товара и пришлю QR сюда${cost}.`, { reply_markup: choiceKeyboard([[{ text: `🔑 Код клиента${cost}`, callback_data: 'menu:code' }]]) }).catch(() => {});
   }
 }
 
@@ -2341,11 +2394,30 @@ async function acceptLoosePhoto(from, chatId, image) {
   await showScreen(chatId, status?.message_id, text, { reply_markup: choiceKeyboard(rows) });
 }
 
+/** Фото в открытом поиске клиента: ШК с этикетки или экрана → клиент, которому лежит этот товар. */
+async function acceptSearchPhoto(from, chatId, image) {
+  if (photoTooOften(from.id)) {
+    if (shouldWarnPhoto(from.id)) await sendMessage(chatId, 'Читаю по одному фото за раз. Дождитесь ответа по первому и пришлите следующее.');
+    return;
+  }
+  const status = await sendMessage(chatId, '🔍 Читаю ШК с фото…');
+  const codes = await shkFromImage(image, 11);
+  if (!codes?.length) {
+    const text = codes
+      ? 'Не нашёл на фото ШК из 11 цифр. Пришлите более чёткий снимок, где номер виден целиком, — или отправьте ячейку, последние 4 цифры телефона или ШК цифрами.'
+      : 'Не получилось прочитать фото. Пришлите другой снимок — или ячейку, последние 4 цифры телефона или ШК цифрами.';
+    await saveSession(from, chatId, 'await_client_query', { userId: await findUser(from.id) });
+    return showScreen(chatId, status?.message_id, text, { reply_markup: choiceKeyboard([MENU_ROW]) });
+  }
+  return runClientSearch(from, chatId, '', { photoCodes: codes, statusId: status?.message_id || null });
+}
+
 /** Куда направить фото с учётом того, какой ввод сейчас ждёт бот. */
 async function handlePhoto(from, chatId, message, image, session) {
   if (session?.state === 'await_code') return acceptWizardPhoto(from, chatId, session.draft || {}, message, image);
   if (session?.state === 'generating') return sendMessage(chatId, '⏳ Создаю стикеры — подождите немного.');
-  const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения', await_client_query: 'номер ячейки или телефон' }[session?.state];
+  if (session?.state === 'await_client_query') return acceptSearchPhoto(from, chatId, image);
+  const waiting = { await_access_code: 'код доступа', await_topup_amount: 'сумму пополнения' }[session?.state];
   const wb = waiting ? null : await getWbConnection(from.id);
   const wbWaiting = wb?.state === 'await_phone' ? 'номер телефона для входа в WB' : wb?.state === 'await_code' ? 'код от WB' : null;
   if (waiting || wbWaiting) return sendMessage(chatId, `Сейчас жду ${waiting || wbWaiting} цифрами — фото здесь не подойдёт. /cancel — отменить.`);
@@ -2468,7 +2540,7 @@ async function pressClientQr(from, chatId, messageId, callbackId, sid, cell) {
     answerCallbackQuery(callbackId, 'Готовлю QR…').catch(() => {});
   });
   if (outcome === 'duplicate') {
-    await answerCallbackQuery(callbackId, await duplicateQrNotice(requestId, from, 'Этот QR уже выдан по этой кнопке — он ниже в чате. Нужен ещё раз — отправьте ячейку или телефон снова (спишется ещё раз).'), { alert: true });
+    await answerCallbackQuery(callbackId, await duplicateQrNotice(requestId, from, 'Этот QR уже выдан по этой кнопке — он ниже в чате. Нужен ещё раз — отправьте ячейку, телефон или ШК снова (спишется ещё раз).'), { alert: true });
   }
 }
 
@@ -2552,7 +2624,7 @@ async function helpText(from) {
     '',
     `🏷 <b>Стикеры.</b> «По номеру» — стикер для вашего ШК (11 цифр с этикетки товара), ${custom}: пришлите номер или фото/скриншот, где он виден. «Пачка ${BATCH_QUANTITY}» — ${BATCH_QUANTITY} новых стикеров одним PDF, ${batch}.`,
     '📦 <b>QR коробки</b> — те же цены, номер коробки — 10 цифр.',
-    `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке или телефону (нужен вход в WB по номеру телефона).`,
+    `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке, телефону или ШК товара (нужен вход в WB по номеру телефона).`,
     `⭐ <b>Отзывы ПВЗ.</b> После входа в WB смотреть бесплатно. «Кто поставил оценку» — ${wallet.formatRub(authorPrice)}, того же клиента повторно — бесплатно.`,
     `💰 <b>Оплата</b> — с баланса бота: «👤 Профиль и баланс» → «💰 Пополнить баланс», от ${wallet.formatRub(wallet.MIN_TOPUP)}.`,
     '↩️ Передумали — «☰ Меню» или /cancel.',
@@ -2607,7 +2679,7 @@ async function wbLoginPromptText(from, purpose, notice = '') {
     ...(notice ? [notice, ''] : []),
     search ? '<b>🔎 Поиск клиента — вход в WB</b>' : '<b>⭐ Отзывы ПВЗ — вход в WB</b>',
     search
-      ? 'Чтобы найти клиента по ячейке или телефону, мне нужен вход в WB: оттуда я беру заказы вашего пункта.'
+      ? 'Чтобы найти клиента по ячейке, телефону или ШК, мне нужен вход в WB: оттуда я беру заказы вашего пункта.'
       : 'Чтобы показать отзывы вашего пункта, мне нужен вход в WB.',
     '',
     'Отправьте номер телефона, с которым вы входите в программу WB на пункте, например <code>79991234567</code>. WB пришлёт на него код — его тоже отправьте сюда.',

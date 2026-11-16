@@ -11,6 +11,7 @@ const bot = require('../../server/_telegram-wb-bot.js') as {
   findClientsByQuery: (goods: unknown[], digits: string) => Array<{ sid: string; name: string; cells: Set<string> }>;
 };
 const approvals = require('../../server/_code-approvals.js') as Record<string, any>;
+const shkVision = require('../../server/_shk-vision.js') as Record<string, any>;
 const topupScreen = require('../../server/_topup-screen.js') as { topupBackData: (then: string) => string };
 const wbPvz = require('../../server/_wb-pvz.js') as Record<string, any>;
 const userCache = require('../../server/_telegram-user-cache.js') as { clearTelegramUserCache: () => void };
@@ -25,7 +26,7 @@ let tgSeq = 726000000;
 let TG = 0;
 let from = { id: 0, first_name: 'Аня', username: 'pvz_anna' };
 let updateId = 9000;
-const message = (text: string) => ({ update_id: ++updateId, message: { message_id: updateId, text, from, chat: { id: TG, type: 'private' } } });
+const message = (text: string, extra: Record<string, unknown> = {}) => ({ update_id: ++updateId, message: { message_id: updateId, text, from, chat: { id: TG, type: 'private' }, ...extra } });
 const press = (data: string, messageId = 50) => ({
   update_id: ++updateId,
   callback_query: { id: `cb${updateId}`, from, data, message: { message_id: messageId, chat: { id: TG, type: 'private' } } },
@@ -76,6 +77,7 @@ beforeEach(() => {
     if (!address.startsWith('https://db.test')) {
       const method = address.split('/').pop() || '';
       sent.push({ method, body: body || {} });
+      if (method === 'getFile') return json({ ok: true, result: { file_path: 'photos/label.jpg', file_size: 100 } });
       if (method === 'sendPhoto' && world.photoFails) return json({ ok: false, description: 'Bad Request: wrong file identifier' }, 400);
       return json({ ok: true, result: { message_id: 88 } });
     }
@@ -286,7 +288,8 @@ describe('QR не отправился', () => {
 describe('поиск клиента', () => {
   const goods = [
     { buyer_sid: 191607973, cell: '245', buyer: { mobile: '79120008898', name: 'Иван' }, name: 'Футболка' },
-    { buyer_sid: 555000111, cell: '17', buyer: { mobile: '79990001234' }, name: 'Кружка' },
+    { buyer_sid: 555000111, cell: '17', buyer: { mobile: '79990001234' }, name: 'Кружка', scanned_code: '23456789012' },
+    { buyer_sid: 555000111, cell: '17', buyer: { mobile: '79990001234' }, name: 'Чехол', shk_id: 34567890123 },
   ];
   beforeEach(() => {
     world.wb = { state: 'ready', session: { token: 't', desktopToken: 'd', pointId: 12345 } };
@@ -316,6 +319,40 @@ describe('поиск клиента', () => {
     await bot.processUpdate(message('+7 912 345-88-98'));
     expect(lastScreen().body.text).toContain('Ищу по последним 4 цифрам телефона: 8898.');
     expect(buttons()[0].callback_data).toBe('code:qr:191607973:245');
+  });
+
+  it('по ШК товара: клиент, которому он лежит, с ячейкой и ШК в строке', async () => {
+    await bot.processUpdate(message('23456789012'));
+    expect(String(lastScreen().body.text)).toContain('яч. 17 · +7 999 ***-12-34 · ШК <code>23456789012</code>');
+    expect(buttons()[0].callback_data).toBe('code:qr:555000111:17');
+    await bot.processUpdate(message('34567890123'));
+    expect(buttons()[0].callback_data).toBe('code:qr:555000111:17');
+    expect(charged()).toBe(0);
+  });
+
+  it('ШК нет в пункте — так и говорим', async () => {
+    await bot.processUpdate(message('29999999999'));
+    expect(String(lastScreen().body.text)).toContain('Если это ШК товара — такого товара сейчас нет в пункте');
+  });
+
+  it('фото этикетки: ШК распознан → клиент; только по ШК, не по случайным цифрам', async () => {
+    vi.spyOn(shkVision, 'recognizeShk').mockResolvedValue(['23456789012', '19160797312']);
+    await bot.processUpdate(message('', { photo: [{ file_id: 'label1', file_size: 100 }] }));
+    expect(sent.find(call => call.method === 'sendMessage')!.body.text).toBe('🔍 Читаю ШК с фото…');
+    expect(lastScreen().method).toBe('editMessageText');
+    expect(String(lastScreen().body.text)).toContain('ШК <code>23456789012</code>');
+    expect(buttons().filter(b => String(b.callback_data).startsWith('code:qr:')).map(b => b.callback_data)).toEqual(['code:qr:555000111:17']);
+    expect(world.session!.state).toBe('await_client_query');
+  });
+
+  it('фото: ШК не из пункта и нечитаемое фото — понятный ответ, поиск открыт', async () => {
+    vi.spyOn(shkVision, 'recognizeShk').mockResolvedValueOnce(['29999999999']).mockResolvedValueOnce([]);
+    await bot.processUpdate(message('', { photo: [{ file_id: 'label2', file_size: 100 }] }));
+    expect(String(lastScreen().body.text)).toContain('такого товара сейчас нет среди лежащих на ПВЗ 12345');
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    await bot.processUpdate(message('', { photo: [{ file_id: 'label3', file_size: 100 }] }));
+    expect(String(lastScreen().body.text)).toContain('Не нашёл на фото ШК из 11 цифр');
+    expect(world.session!.state).toBe('await_client_query');
   });
 
   it('не нашёл — коротко, без рекламы программы', async () => {
