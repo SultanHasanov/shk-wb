@@ -212,6 +212,8 @@ describe('merge_telegram_account', () => {
       app_login_requests: 'одноразовый запрос входа программы, живёт 10 минут',
       app_signup_requests: 'одноразовый запрос регистрации из программы',
       app_docs_history: 'старые версии документов зашифрованы ключом исходного user_id',
+      // слияние отказывает (MERGE_CLOUD_DATA), пока у исходного есть пункты; без пункта ссылка всё равно не открывается
+      staff_share_links: 'ссылка на график пункта: пункты и график при слиянии не переносятся',
     };
     const cascade = new Set<string>();
     for (const name of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'))) {

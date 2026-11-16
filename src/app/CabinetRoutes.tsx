@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { CabinetShell } from '../layout/CabinetShell';
 import { RequireAuth } from '../layout/RequireAuth';
@@ -20,6 +21,9 @@ import {
   FeedbackPage,
 } from '../pages/cabinet';
 
+// «Сотрудники» — большой раздел (табель, зарплата, выгрузка в Excel): отдельный чанк, остальной кабинет его не грузит.
+const StaffPage = lazy(() => import('../pages/cabinet/staff/StaffPage').then(m => ({ default: m.StaffPage })));
+
 /**
  * Ветка кабинета целиком: грузится ленивым чанком из App — по образцу
  * AdminRoutes. Десять страниц кабинета лежали во входном бандле и приезжали к
@@ -38,6 +42,7 @@ export default function CabinetRoutes() {
           <Route path="access" element={<AccessPage />} />
           <Route path="pc-messages" element={<PcMessagesPage />} />
           <Route path="feedback" element={<FeedbackPage />} />
+          <Route path="staff" element={<Suspense fallback={null}><StaffPage /></Suspense>} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="packages" element={<PackagesPage />} />
           <Route path="history" element={<HistoryPage />} />

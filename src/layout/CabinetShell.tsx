@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { observer } from 'mobx-react-lite';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -56,6 +57,8 @@ const cabinetNavGroups = (t: T): { title: string | null; items: NavItem[] }[] =>
     items: [
       ...(APP_SUBSCRIPTIONS_LIVE ? [
         { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
+        // график и зарплата пунктов — те же документы, что в «Помощнике ПВЗ» (server/_staff.js)
+        { to: '/cabinet/staff', label: t('Сотрудники', 'Қызметкерлер'), Icon: CalendarDays, end: false },
         { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },
         { to: '/cabinet/pc-messages', label: t('Сообщения на ПК', 'ДК-ға хабарламалар'), Icon: MessageSquare, end: false },
       ] : []),
@@ -93,6 +96,7 @@ const titlesFor = (t: T): Record<string, string> => ({
   '/cabinet/access': t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'),
   '/cabinet/pc-messages': t('Сообщения на ПК', 'ДК-ға хабарламалар'),
   '/cabinet/feedback': t('Отзывы клиентов', 'Клиент пікірлері'),
+  '/cabinet/staff': t('Сотрудники', 'Қызметкерлер'),
   '/cabinet/keys': t('Ключи и устройства', 'Кілттер мен құрылғылар'),
   '/cabinet/packages': t('Баланс и пакеты', 'Баланс және пакеттер'),
   '/cabinet/history': t('История генераций', 'Генерациялар тарихы'),

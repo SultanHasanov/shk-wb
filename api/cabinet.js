@@ -23,6 +23,7 @@ const { walletSummary } = require('../server/_wallet');
 const { CELL_PRINT_PRICES } = require('../server/_payments');
 const { isSalePlan, planPrice, PLAN_ORDER, PLANS, SALE_PLANS } = require('../server/_app-plans');
 const feedback = require('../server/_feedback');
+const staff = require('../server/_staff');
 
 /**
  * Что станет с тарифом не из продажи при покупке нового — как решит SQL (app_apply_subscription,
@@ -1066,6 +1067,8 @@ module.exports = async function handler(req, res) {
   if (action(req) === 'cron') return cronNotifications(req, res);
   // Страница отзыва по QR (/o/<slug>) — без входа: клиент пункта анонимен (server/_feedback.js).
   if (feedback.isPublicAction(action(req))) return feedback.handlePublic(req, res, action(req));
+  // График пункта по ссылке для сотрудников (/grafik/<token>) — без входа, только смены и часы (server/_staff.js).
+  if (staff.isPublicAction(action(req))) return staff.handlePublic(req, res);
   // Ограничение «Сайт и кабинет» (или «Полностью») — 403 ACCOUNT_RESTRICTED, не 401.
   // Историю генераций читает и раздел «Стикеры» Помощника ПВЗ (X-App-Name / X-App-Version из stickers.rs):
   // для него действует ограничение «Программа», а не «Сайт».
@@ -1201,6 +1204,7 @@ module.exports = async function handler(req, res) {
       return res.status(201).json({ id });
     }
     if (a.startsWith('feedback-')) return await feedback.handleOwner(req, res, user, a);
+    if (staff.isOwnerAction(a)) return await staff.handleOwner(req, res, user, a);
     if (a === 'account') return deleteAccount(req, res, user);
     if (a === 'partner') return handlePartner(req, res, user);
     return res.status(404).json({ error: 'Метод кабинета не найден', code: 'NOT_FOUND' });

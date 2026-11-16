@@ -8,6 +8,8 @@ export class ApiError extends Error {
      * исчерпанную квоту от настоящей ошибки можно было только по русскому тексту.
      */
     public code?: string,
+    /** Всё тело ответа с ошибкой — например, текущая версия документа в 409 (раздел «Сотрудники»). */
+    public details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -32,7 +34,7 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new ApiError(body.error || 'Не удалось выполнить запрос', response.status, body.code);
+    throw new ApiError(body.error || 'Не удалось выполнить запрос', response.status, body.code, body);
   return body as T;
 }
 

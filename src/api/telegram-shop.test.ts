@@ -92,7 +92,7 @@ describe('подписка «Помощника ПВЗ»', () => {
   it('экран тарифов: что входит в каждый — компьютеры, пункты, коды и стикеры «Про»', async () => {
     await bot.processUpdate(press('shop:helper'));
     const text = String(lastScreen().body.text);
-    expect(text).toContain('<b>Стандарт — 239 ₽/мес</b>: ячейки, товары, поиск клиента и заметки. 2 компьютера, 1 пункт.');
+    expect(text).toContain('<b>Стандарт — 239 ₽/мес</b>: ячейки, товары, поиск клиента, заметки, график и зарплата сотрудников. 2 компьютера, 1 пункт.');
     expect(text).toContain('4 компьютера, 2 пункта; 10 кодов клиента и 50 стикеров в месяц');
     expect(datas().slice(-2)).toEqual(['shop:home', 'menu:home']);
   });

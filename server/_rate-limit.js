@@ -6,7 +6,8 @@ const fallback = new Map();
 // Потолки на постоянный фоновый трафик программы (inbox, синхронизация) считаются в памяти: это пятая часть всех
 // запросов к Supabase, а сервер — один процесс. Рестарт обнуляет счётчик, для потолка в сотни запросов это не важно.
 // Лимиты входа, регистрации и оплат остаются в базе: их обнулять рестартом нельзя.
-const MEMORY_SCOPES = new Set(['app-relay', 'app-user']);
+// «Сотрудники» на сайте опрашивают график раз в ~45 с, пока страница открыта (server/_staff.js).
+const MEMORY_SCOPES = new Set(['app-relay', 'app-user', 'staff-owner', 'staff-public']);
 
 function clientAddress(req) {
   return String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')

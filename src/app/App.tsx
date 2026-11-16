@@ -33,6 +33,8 @@ const AdminRoutes = lazy(() => import('./AdminRoutes'));
 const CabinetRoutes = lazy(() => import('./CabinetRoutes'));
 // Страница отзыва по QR с карточки пункта (/o/<slug>): своя вёрстка под телефон, без шапки сайта.
 const FeedbackFormPage = lazy(() => import('../pages/FeedbackFormPage').then(m => ({ default: m.FeedbackFormPage })));
+// График пункта по ссылке для сотрудников (/grafik/<token>): без входа и без шапки сайта.
+const StaffPublicPage = lazy(() => import('../pages/StaffPublicPage').then(m => ({ default: m.StaffPublicPage })));
 
 /** Публичные маршруты: монтируются дважды — на русском (/) и казахском (/kz). */
 const publicRoutes = (
@@ -99,6 +101,15 @@ export function App() {
           element={
             <Suspense fallback={null}>
               <FeedbackFormPage />
+            </Suspense>
+          }
+        />
+
+        <Route
+          path="grafik/:token"
+          element={
+            <Suspense fallback={null}>
+              <StaffPublicPage />
             </Suspense>
           }
         />

@@ -14,11 +14,12 @@ const SALE_PLANS = Object.freeze(['standard', 'pro']);
 const BASIC_FEATURES = Object.freeze(['code']);
 // Код клиента в Стандарт не входит (кодов в месяц 0), поэтому в списке разделов его нет.
 // Раздел при этом открыт на любом тарифе — коды берутся из пакетов, см. effectiveFeatures.
-const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes']);
+// «Сотрудники» (график, зарплата) — со «Стандарта» с 16.11.2026 (решение владельца), до этого были только в «Про».
+const STANDARD_FEATURES = Object.freeze(['cells', 'way', 'boxes', 'goods', 'search', 'tryon', 'notes', 'staff']);
 // С 02.11.2026 «Про» включает «Загрузку с другого ПК» для своих пунктов (PLANS.pro.mirror):
 // владелец с 4 ПК ждал, что домашний компьютер увидит пункт. На «Стандарте» услуга по-прежнему пакетом.
 const PRO_FEATURES = Object.freeze([
-  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'staff', 'stickers', 'video', 'mirror', 'ops',
+  ...BASIC_FEATURES, ...STANDARD_FEATURES, 'expensive', 'reviews', 'telegram', 'dossier', 'risky', 'stickers', 'video', 'mirror', 'ops',
 ]);
 // Стандарт до 31.10.2026 включал эти разделы — купившие его их не теряют. Старую подписку
 // узнаём по снимку лимита кодов: в новом Стандарте кодов нет.
@@ -46,7 +47,7 @@ const PLANS = Object.freeze({
     stickers: 0,
     devices: 2,
     points: 1,
-    summary: 'Ячейки, товары, поиск клиента и заметки',
+    summary: 'Ячейки, товары, поиск клиента, заметки, график и зарплата сотрудников',
     features: STANDARD_FEATURES,
   }),
   pro: Object.freeze({
@@ -60,7 +61,7 @@ const PLANS = Object.freeze({
     points: 2,
     // сколько пунктов можно загружать на другие ПК без пакетов mirror_* (= points)
     mirror: 2,
-    summary: 'Всё из Стандарта, коды клиента, стикеры, досье, отзывы, сотрудники и загрузка пункта на другие ПК',
+    summary: 'Всё из Стандарта, коды клиента, стикеры, досье, отзывы и загрузка пункта на другие ПК',
     features: PRO_FEATURES,
   }),
 });

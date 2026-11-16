@@ -250,12 +250,11 @@ describe('разделы по тарифам и услуга «Архив»', ()
     expect(p.effectiveFeatures('basic', future, false)).toEqual(['code']);
     expect(p.addonAllowed('archive', 'basic')).toBe(false);
   });
-  it('Стандарт открывает ячейки, коробки, ШК и примерку, но не досье и сотрудников', () => {
+  it('Стандарт открывает ячейки, коробки, ШК, примерку и сотрудников, но не досье', () => {
     const f = p.effectiveFeatures('standard', {}, false);
-    expect(f).toEqual(expect.arrayContaining(['cells', 'boxes', 'goods', 'tryon', 'notes']));
+    expect(f).toEqual(expect.arrayContaining(['cells', 'boxes', 'goods', 'tryon', 'notes', 'staff']));
     expect(f).not.toContain('dossier');
     expect(f).not.toContain('reviews');
-    expect(f).not.toContain('staff');
     expect(f).not.toContain('archive');
   });
   it('архив открыт только пока услуга не истекла', () => {

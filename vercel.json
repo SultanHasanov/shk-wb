@@ -42,6 +42,11 @@
     { "source": "/api/feedback/public/:slug/photo", "destination": "/api/cabinet?action=feedback-upload&slug=:slug" },
     { "source": "/api/feedback/public/:slug/submit", "destination": "/api/cabinet?action=feedback-submit&slug=:slug" },
     { "source": "/api/feedback/photo/:id", "destination": "/api/cabinet?action=feedback-photo&id=:id" },
+    { "source": "/api/cabinet/staff", "destination": "/api/cabinet?action=staff" },
+    { "source": "/api/cabinet/staff/all", "destination": "/api/cabinet?action=staff-all" },
+    { "source": "/api/cabinet/staff/history", "destination": "/api/cabinet?action=staff-history" },
+    { "source": "/api/cabinet/staff/link", "destination": "/api/cabinet?action=staff-link" },
+    { "source": "/api/staff/public/:token", "destination": "/api/cabinet?action=staff-public&token=:token" },
     { "source": "/api/trial", "destination": "/api/app?action=trial" },
     { "source": "/api/app/devices/:id", "destination": "/api/app?action=device&id=:id" },
     { "source": "/api/app/login/start", "destination": "/api/app?action=login-start" },
@@ -107,6 +112,7 @@
     ,{ "source": "/reset-password", "destination": "/" }
     ,{ "source": "/r/:code", "destination": "/" }
     ,{ "source": "/o/:slug", "destination": "/" }
+    ,{ "source": "/grafik/:token", "destination": "/" }
     ,{ "source": "/cabinet/:path*", "destination": "/" }
     ,{ "source": "/cabinet", "destination": "/" }
     ,{ "source": "/panel/:path*", "destination": "/" }

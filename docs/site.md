@@ -220,3 +220,25 @@ OAuth на `/?auth=login&oauth=error&reason=…`, бот открывает Mini
 4. Проверка: `curl -s -o /dev/null -w "%{http_code}" https://shk-wb.ru/o/TEST2345` → 200 (оболочка SPA),
    `https://shk-wb.ru/api/feedback/public/TEST2345` → 404 JSON `NOT_FOUND` (не голый `404: NOT_FOUND`);
    создать QR, отправить отзыв с фото с телефона, проверить кабинет, Telegram и почту.
+
+## «Сотрудники» на сайте (2026-11-16, ветка staff-web, НЕ выложено)
+Раздел кабинета `/cabinet/staff`: график, замены, зарплата, люди и настройки пунктов — те же документы `staff` и `schedule`
+в `app_docs`, что синхронизирует «Помощник ПВЗ». Формат документов не менялся: программы 1.9–1.14 подхватывают правки сайта
+обычной синхронизацией, обновлять их для работы сайта не нужно. План и решения — память `staff-web-section`.
+- Сервер: `server/_staff.js`, действия `staff*` в `api/cabinet.js`, строки в `vercel.json`. Сайт пишет через ту же
+  `rpc/app_doc_put` со сверкой версии (`p_device = null`, в истории — «сайт»). 409 `VERSION_CONFLICT` отдаёт текущую версию,
+  браузер сливает (`src/lib/staff-core/merge.ts`, те же правила, что `docs.rs`) и повторяет. 409 `EMPTY_GUARD` — сайт не
+  стирает всех сотрудников / все смены без подтверждения. Доступ — фича `staff`: с 16.11.2026 входит в «Стандарт» и «Про» (`STANDARD_FEATURES` в `server/_app-plans.js`; программа получает её в подписанной аренде, отдельный выпуск не нужен), пункт — только свой.
+- Чтение — через общую память `_app-device-cache` (`staffdocs:<пункт>`), её сбрасывает любая запись документа: опрос
+  сайта раз в 45 с не ходит в Supabase. Лимиты `staff-owner` / `staff-public` — в памяти процесса (`_rate-limit.js`).
+- Общее ядро `src/lib/staff-core/`: `schedule.ts` и `payroll.ts` — побайтовые копии из программы (правка — в обоих местах),
+  кисть и замены (`editor.ts`), итоги (`totals.ts`), «Все пункты» (`overview.ts`), выгрузка (`export.ts`, `xlsx.ts` — свой
+  .xlsx без библиотек). Страница — `src/pages/cabinet/staff/*`, отдельный ленивый чанк.
+- Ссылка для сотрудников: таблица `staff_share_links` (миграция `20261123_staff_share_links.sql`), страница `/grafik/<token>`
+  (`src/pages/StaffPublicPage.tsx`), API `/api/staff/public/:token` — только имена, смены, часы и замены за три месяца.
+  `/grafik/` закрыт в robots.txt и `X-Robots-Tag`. При слиянии Telegram-аккаунтов ссылки не переносятся (как и пункты).
+- Порядок выкладки: миграция `npx supabase db query --linked -f supabase/migrations/20261123_staff_share_links.sql` →
+  влить `staff-web` в `main` → `deploy.sh` → проверить `curl -s -o /dev/null -w "%{http_code}" https://shk-wb.ru/api/cabinet/staff`
+  (ожидается 401) и `/api/staff/public/AAAAAAAAAAAA` (404 `LINK_INACTIVE`). Изменился `_app-plans.js` (описание «Стандарта» в экране тарифов бота) — после сайта выложить и узел бота в Германии.
+- Тесты: `src/lib/staff-core/*.test.ts`, `src/api/staff.test.ts`, `src/pages/cabinet/staff/StaffPage.test.tsx`.
+  НЕ проверено: настоящий браузер с боевыми данными, одновременная правка с сайта и с ПК вживую, открытие .xlsx в Excel/Р7.
