@@ -27,7 +27,6 @@ import { CROSS_SELL, CrossSell } from '../components/CrossSell';
 import { MobileActionBar } from '../components/MobileActionBar';
 import { SendToPc, useShareLink } from '../components/SendToPc';
 import { Accordion, Alert, Button, Card, Checkbox, ScreenshotSlot, Stat } from '../ui';
-import { RELEASES } from '../data/releases';
 import {
   getLicensePack,
   iterationWord,
@@ -35,6 +34,7 @@ import {
   POPULAR_LICENSE_PACK,
 } from '../lib/pricing';
 import { PROGRAM_DOWNLOAD_URL } from '../lib/downloads';
+import { LinuxInstall, PlatformCards } from '../components/LinuxInstall';
 import { useDocumentMeta } from '../lib/seo';
 import s from './ProgramPage.module.css';
 import { useMoney } from '../lib/currency';
@@ -42,9 +42,6 @@ import { RubChargeNote } from '../components/CurrencySwitch';
 import { type T, useLocale, useLocalePath, useT } from '../i18n';
 
 type Payment = { confirmationUrl: string };
-
-/** Витринный номер версии — из общего src/data/releases.json. */
-const APP_VERSION = RELEASES.pvzHelper;
 
 const features = (t: T) => [
   {
@@ -107,7 +104,7 @@ const steps = (t: T) => [
 const specs = (t: T) => [
   {
     term: t('Операционная система', 'Операциялық жүйе'),
-    value: t('Windows 10 и Windows 11, 64 бит.', 'Windows 10 және Windows 11, 64 бит.'),
+    value: t('Windows 10 и Windows 11, 64 бит. Linux x86_64 — запуск из терминала, интерфейс в браузере.', 'Windows 10 және Windows 11, 64 бит. Linux x86_64 — терминалдан іске қосу, интерфейс браузерде.'),
   },
   {
     term: t('Размер установщика', 'Орнатқыш көлемі'),
@@ -124,10 +121,6 @@ const specs = (t: T) => [
   {
     term: t('Хранение данных', 'Деректерді сақтау'),
     value: t('База пункта читается только для просмотра и не покидает ваш компьютер.', 'Пункт базасы тек қарау үшін оқылады және компьютеріңізден шықпайды.'),
-  },
-  {
-    term: t('Текущая версия', 'Ағымдағы нұсқа'),
-    value: APP_VERSION,
   },
 ];
 
@@ -218,7 +211,7 @@ export function ProgramPage() {
   return (
     <>
       <Hero
-        eyebrow={t(`«Помощник ПВЗ» для Windows · версия ${APP_VERSION}`, `Windows-қа арналған «ПВЗ көмекшісі» · ${APP_VERSION} нұсқасы`)}
+        eyebrow={t('«Помощник ПВЗ» для Windows и Linux', 'Windows пен Linux-қа арналған «ПВЗ көмекшісі»')}
         title={
           <>
             {t('Программа для ПВЗ ВБ —', 'ВБ БП-ға арналған бағдарлама —')} <em>{t('вся выдача', 'бүкіл беру')}</em> {t('в одном окне', 'бір терезеде')}
@@ -236,18 +229,13 @@ export function ProgramPage() {
         }
         trust={[
           t('Скачивание без оплаты и регистрации', 'Төлемсіз және тіркелусіз жүктеу'),
-          t('Windows 10 и 11', 'Windows 10 және 11'),
+          t('Windows и Linux', 'Windows және Linux'),
           t('Подбор списывается только за найденный код', 'Іріктеу тек табылған код үшін есептеледі'),
           t('Данные пункта остаются на вашем ПК', 'Пункт деректері сіздің ДК-де қалады'),
         ]}
       >
+        <PlatformCards downloadUrl={PROGRAM_DOWNLOAD_URL} />
         <div className={s.heroActions}>
-          <a href={PROGRAM_DOWNLOAD_URL} className="desktop-only">
-            <Button size="lg">
-              <Download size={18} />
-              {t('Скачать бесплатно', 'Тегін жүктеп алу')}
-            </Button>
-          </a>
           <Button size="lg" variant="secondary" onClick={() => scrollTo('plans')}>
             {t('Смотреть тарифы', 'Тарифтерді көру')}
           </Button>
@@ -310,6 +298,18 @@ export function ProgramPage() {
 
       <Section eyebrow={t('Три шага', 'Үш қадам')} title={t('Как начать работу', 'Жұмысты қалай бастау керек')}>
         <Steps steps={steps(t)} />
+      </Section>
+
+      <Section
+        id="linux"
+        eyebrow={t('Для Linux', 'Linux үшін')}
+        title={t('«Помощник ПВЗ» на Linux — одной командой в терминале', 'Linux-тағы «ПВЗ көмекшісі» — терминалда бір командамен')}
+        lead={t(
+          'Ничего не устанавливается: программа запускается из терминала и открывается в браузере. Вход — тем же аккаунтом, что на сайте.',
+          'Ештеңе орнатылмайды: бағдарлама терминалдан іске қосылып, браузерде ашылады. Кіру — сайттағы аккаунтпен.',
+        )}
+      >
+        <LinuxInstall />
       </Section>
 
       <Section
