@@ -93,7 +93,10 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
   const today = todayYmd();
   const isCurrent = month === monthKey(today);
   // выплатить можно за любой открытый месяц, кроме будущих: за них ещё ничего не начислено
-  const payable = !closed && month <= monthKey(today) && docs.caps?.edit !== false;
+  // на ПК, где владелец закрыл правку, зарплата только читается: кнопки правок скрыты, как в закрытом месяце
+  const readOnly = docs.caps?.edit === false;
+  const locked = closed || readOnly;
+  const payable = !locked && month <= monthKey(today);
   const advanceDay = Math.min(data.advanceRule.day, Number(monthEnd(month).slice(8)));
   const payDay = Math.min(data.payDay, Number(monthEnd(month).slice(8)));
 
@@ -109,7 +112,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
         <span className={s.muted} style={{ fontWeight: 600, color: closed ? 'var(--text-muted)' : 'var(--success)' }}>{closed ? 'Месяц закрыт' : 'Месяц открыт'}</span>
         <div className={s.toolbarEnd}>
           {payable && rows.length > 0 && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'mass' })}>Выплатить всем</Button>}
-          {closed
+          {readOnly ? null : closed
             ? <Button size="sm" variant="secondary" onClick={() => docs.update(sn => ({ ...sn, schedule: reopenMonth(sn.schedule, month) }))}>Открыть месяц снова</Button>
             : <Button size="sm" onClick={() => setDlg({ kind: 'close' })} disabled={!rows.length}>Закрыть месяц</Button>}
         </div>
@@ -195,7 +198,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
         )
       )}
 
-      {view === 'journal' && <Journal snap={snap} month={month} onCancel={(what, id) => setDlg({ kind: 'cancel', what, id })} onAdj={t => setDlg({ kind: 'adj', t })} onPay={() => setDlg({ kind: 'pay' })} closed={closed} payable={payable} />}
+      {view === 'journal' && <Journal snap={snap} month={month} onCancel={(what, id) => setDlg({ kind: 'cancel', what, id })} onAdj={t => setDlg({ kind: 'adj', t })} onPay={() => setDlg({ kind: 'pay' })} closed={locked} payable={payable} />}
       {view === 'deductions' && <Deductions docs={docs} month={month} onEdit={id => setDlg({ kind: 'deduction', id })} />}
       {view === 'reports' && <Reports snap={snap} month={month} />}
 
@@ -205,7 +208,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
       {dlg?.kind === 'cancel' && <CancelDialog snap={snap} what={dlg.what} id={dlg.id} onClose={() => setDlg(null)} onSave={why => pay(d => (dlg.what === 'payment' ? cancelPayment(d, dlg.id, why) : cancelAdjust(d, dlg.id, why)))} />}
       {dlg?.kind === 'deduction' && <DeductionDialog snap={snap} id={dlg.id} onClose={() => setDlg(null)} onSave={d => pay(x => saveDeduction(x, d))} onRemove={id => pay(x => removeDeduction(x, id))} />}
       {dlg?.kind === 'close' && <CloseDialog snap={snap} month={month} onClose={() => setDlg(null)} onSave={() => pay(d => closeMonth(d, staff, month))} onGo={next => { setDlg(null); if (next === 'deductions') setView('deductions'); else setDlg(next); }} />}
-      {dlg?.kind === 'sheet' && <SheetDialog snap={snap} staffId={dlg.staffId} month={month} onClose={() => setDlg(null)} onDlg={setDlg} />}
+      {dlg?.kind === 'sheet' && <SheetDialog snap={snap} staffId={dlg.staffId} month={month} readOnly={readOnly} onClose={() => setDlg(null)} onDlg={setDlg} />}
       {dlg?.kind === 'goods' && <GoodsDialog docs={docs} month={month} onClose={() => setDlg(null)} />}
     </>
   );
@@ -321,7 +324,7 @@ function Deductions({ docs, month, onEdit }: { docs: StaffDocs; month: string; o
   const list = (data.deductions ?? []).filter(d => monthKey(d.date) === month).sort((a, b) => Number(Boolean(a.assign)) - Number(Boolean(b.assign)) || a.date.localeCompare(b.date));
   const nameOf = (id: string) => staff.find(p => p.id === id)?.name || 'сотрудник';
   const short = (id: string) => nameOf(id).split(/\s+/)[0];
-  const closed = Boolean(data.closed[month]);
+  const closed = Boolean(data.closed[month]) || docs.caps?.edit === false;
 
   return (
     <section className={s.block}>
@@ -704,13 +707,13 @@ function CloseDialog({ snap, month, onClose, onSave, onGo }: { snap: Snap; month
 
 // ───────── листок сотрудника ─────────
 
-function SheetDialog({ snap, staffId, month, onClose, onDlg }: { snap: Snap; staffId: string; month: string; onClose: () => void; onDlg: (d: Dlg) => void }) {
+function SheetDialog({ snap, staffId, month, readOnly, onClose, onDlg }: { snap: Snap; staffId: string; month: string; readOnly: boolean; onClose: () => void; onDlg: (d: Dlg) => void }) {
   const data = snap.schedule;
   const person = snap.staff.staff_list.find(p => p.id === staffId);
   if (!person) return null;
   const c = monthCalc(person, data, month);
   const lines = sheetLines(c, person, data, month);
-  const closed = Boolean(data.closed[month]);
+  const closed = Boolean(data.closed[month]) || readOnly;
   return (
     <Modal open onOpenChange={o => !o && onClose()} title={person.name} description={`Листок за ${monthTitle(month).toLowerCase()}`}>
       <div className={s.lines}>
@@ -848,7 +851,7 @@ export function GoodsDialog({ docs, month, onClose }: { docs: StaffDocs; month: 
   const person = people.find(p => p.id === who);
   const days = range(monthStart(month), monthEnd(month));
   const today = todayYmd();
-  const closed = Boolean(data.closed[month]);
+  const closed = Boolean(data.closed[month]) || docs.caps?.edit === false;
   const set = (day: string, text: string) => {
     const t = text.replace(/\D/g, '');
     docs.update(sn => ({ ...sn, schedule: setShkCount(sn.schedule, who, day, t ? Number(t) : null) }));

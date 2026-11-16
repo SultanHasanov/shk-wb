@@ -141,7 +141,7 @@
 .calWrap { position: relative; min-width: 0; display: flex; }
 .calWrap > .calCell { flex: 1; }
 .calTop { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.calBadge { margin-left: auto; padding: 1px 6px; border-radius: 999px; background: var(--warning); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+.calBadge { margin-left: auto; padding: 1px 6px; border-radius: 999px; background: var(--warning); color: var(--text-on-accent); font-size: 10.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
 .calName { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .calName > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .calPaid { flex: none; }
@@ -281,7 +281,7 @@
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
-.coverZero { background: var(--danger); color: #fff; font-weight: 700; }
+.coverZero { background: var(--danger); color: var(--text-on-accent); font-weight: 700; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--text-muted); }
 .legend > span { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -366,8 +366,8 @@
 .steps li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--border); font-size: var(--fs-13); color: var(--text-muted); }
 .steps li b { flex: none; width: 26px; height: 26px; border-radius: 999px; display: grid; place-items: center; background: var(--surface-sunken); color: var(--text-muted); font-size: var(--fs-12); }
 .stepOn { border-color: var(--accent) !important; color: var(--text) !important; font-weight: 600; }
-.stepOn b { background: var(--accent) !important; color: #fff !important; }
-.stepDone b { background: var(--success) !important; color: #fff !important; }
+.stepOn b { background: var(--accent) !important; color: var(--text-on-accent) !important; }
+.stepDone b { background: var(--success) !important; color: var(--text-on-accent) !important; }
 
 .personRow { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.1fr) minmax(0, 1fr) 44px; gap: var(--sp-3); align-items: center; }
 .modeRow { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: var(--sp-3); align-items: start; padding: var(--sp-3) 0; border-top: 1px solid var(--surface-sunken); }
@@ -427,13 +427,14 @@
   cursor: pointer;
 }
 .subTabOn { background: var(--text); color: var(--surface); border-color: var(--text); font-weight: 600; }
-.count { font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; background: var(--danger); color: #fff; }
+.count { font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; background: var(--danger); color: var(--text-on-accent); }
 .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .strong { font-weight: 700; }
 .minus { color: var(--danger); }
 .plus { color: var(--success); }
 .rowName { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.rowName span { display: flex; flex-direction: column; gap: 2px; }
+/* кружок с инициалами — тоже span: его не трогаем, иначе буквы съезжают в угол */
+.rowName span:not(.avatar) { display: flex; flex-direction: column; gap: 2px; }
 .rowName small { font-size: var(--fs-11); color: var(--text-muted); }
 .clickRow { cursor: pointer; }
 .clickRow:hover td { background: var(--surface-muted); }

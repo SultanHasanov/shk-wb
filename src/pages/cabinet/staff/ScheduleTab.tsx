@@ -39,7 +39,11 @@ import s from './staff.module.css';
 
 export type GoTo = { kind: 'replace'; from?: string; day?: string } | { kind: 'template' } | { kind: 'goods' } | { kind: 'people'; personId?: string } | { kind: 'deductions' } | { kind: 'export' } | { kind: 'payroll' } | { kind: 'settings' };
 
-export type Todo = { key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go?: GoTo; day?: string; run?: () => void; allow?: number };
+export type Todo = {
+  key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go?: GoTo; day?: string; run?: () => void; allow?: number;
+  /** ещё действия у того же пункта (программа: «Скрыть» у подсказки о выдачах без смены) */
+  more?: { label: string; run: () => void }[];
+};
 
 /** Чем раздел дополняет график там, где он встроен (программа: выдачи WB без смены, очистка периода). */
 export interface ScheduleExt {
@@ -217,6 +221,7 @@ export function ScheduleTab({ docs, month, setMonth, go, ext }: { docs: StaffDoc
                 <span>{t.text}</span>
                 <button type="button" onClick={() => (t.run ? t.run() : t.day ? openDay(t.day) : t.go && go(t.go))}>{t.action}</button>
                 {t.allow && canEdit && <button type="button" onClick={() => allow(t.allow!)}>Разрешить {t.allow === 2 ? 'двоих' : 'троих'} в день</button>}
+                {t.more?.map(m => <button key={m.label} type="button" onClick={m.run}>{m.label}</button>)}
               </div>
             ))}
           </div>
