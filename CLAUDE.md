@@ -14,6 +14,7 @@
 |---|---|---|
 | Сайт, сервер, базы | [docs/site.md](docs/site.md) | доступ, выкладка, Supabase + свой Postgres, бэкапы, хранилище облака |
 | «Помощник ПВЗ» (Tauri) | [docs/pvz-helper.md](docs/pvz-helper.md) | боевая программа: тарифы и аренда, облако и пункты, загрузка с другого ПК, видео по ШК, код клиента, график и зарплата, выпуск обновлений |
+| «Помощник ПВЗ» для Linux | [docs/pvz-linux.md](docs/pvz-linux.md) | запуск `curl … \| sh`, локальный сервер + браузер, данные не выгружаются; поиск базы WB, защита, сборка в Docker, выпуск в `/dl/`, версия общая с Windows |
 | «Печать ячеек» | [docs/cell-print.md](docs/cell-print.md) | 2.x на Tauri и 1.5.x на Tkinter, подписанный канал обновлений, сверка версии перед правкой |
 | Telegram-бот | [docs/telegram-bot.md](docs/telegram-bot.md) | меню, баланс, магазин, рефералка, релей до api.telegram.org |
 | Бэкапы и восстановление | [docs/restore.md](docs/restore.md) | что лежит в бэкапе, порядок восстановления VPS, Supabase, узла бота |

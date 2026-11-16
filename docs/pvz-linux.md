@@ -1,0 +1,109 @@
+# «Помощник ПВЗ» для Linux — запуск из терминала, интерфейс в браузере
+
+Запуск одной командой, без установки:
+
+```
+curl -fsSL https://shk-wb.ru/dl/linux.sh | sh
+```
+
+Скрипт качает программу (один статический файл) в `~/.cache/pvz-helper/`, сверяет SHA-256 и запускает.
+Программа поднимает сервер **только на 127.0.0.1** и открывает браузер. В отличие от аналога (WBCash
+inspector), который выгружает данные пункта на свой сервер и показывает их оттуда, здесь **данные пункта
+не покидают компьютер**: сервер читает базу WB этой машины (только чтение, `immutable=1`) и отдаёт её
+своему же браузеру. В интернет уходит то же, что у программы для Windows: аккаунт и аренда shk-wb.ru,
+запрос кода клиента, стикеры, вход в WB для «Товара по ШК».
+
+Ключи: `--wb-db <файл>`, `--port <номер>` (по умолчанию 47815), `--no-browser`, `--version`.
+Через однострочник: `curl -fsSL https://shk-wb.ru/dl/linux.sh | sh -s -- --wb-db /путь/к/базе`.
+
+## Разделы
+
+Ячейки · Дорогие · В пути · Коробки · Товар по ШК · Код клиента (с досье) · Операции по дням · Стикеры ·
+Настройки · Аккаунт и тариф. Тарифы и права — те же, по подписанной аренде.
+
+Нет (только в программе для Windows): окно примерки поверх WB, трей и автозапуск, сообщения владельца
+поверх окон, Видео по ШК, Сотрудники/график, Инвентаризация, Контроль пункта, Отзывы, загрузка с другого
+ПК и облачная синхронизация. Логика этих разделов кроссплатформенна — добавляются по запросу.
+
+Стикеры: генерация на сервере как обычно; печать — **через окно печати браузера**: «Этикетки W×H» — страница
+на стикер ровно размера этикетки (принтер этикеток с драйвером CUPS), «Обычный принтер (A4)», PDF/PNG
+сохраняются в «Загрузки» (`XDG_DOWNLOAD_DIR`). Прямой печати без окна и NIIMBOT по Bluetooth нет.
+
+## Где база WB
+
+Ищется тот же файл, что у клиента WB под Windows (`%APPDATA%\com.example\wb_point_desktop\wb_point_db.sqlite`,
+клиент на Flutter). На Linux — `~/.local/share/com.example/wb_point_desktop/wb_point_db.sqlite`, а также внутри
+Flatpak (`~/.var/app/*/data`), Snap, Wine-префиксов (`~/.wine`, `$WINEPREFIX`, Bottles, Lutris `~/Games/*`,
+PlayOnLinux) — `drive_c/users/*/AppData/Roaming/…`. Не нашли — обход `$HOME` по имени файла (глубина 9,
+до 60 тыс. папок, до 8 с, без симлинков). Каждый кандидат проверяется: открывается immutable и должна быть
+таблица `goods_in_pick_point`. Порядок: `--wb-db` → выбранная в настройках (`general.linux_wb_db`) →
+найденная (несколько — менявшаяся последней, с учётом `-wal`). В браузере: Настройки → «База WB на этом
+компьютере» (найдено, выбрать другую, указать путь, «Найти заново»). Код — `pvz-serve/src/wbdb.rs`.
+
+## Как устроено
+
+Исходники — `_local-only/` (как у остальных программ, в git не входят):
+- `_local-only/pvz-serve/` — крейт сервера: `main.rs` (ключи, фоновые задачи: аренда раз в 10 мин, архив
+  клиентов раз в 5 мин, продление входа WB), `web.rs` (axum, вшитый интерфейс, защита), `cmd.rs` (команды),
+  `wbdb.rs` (поиск базы), `cloud.rs` (заглушка журнала), `tauri-shim/`.
+- **Логика не скопирована**: модули Помощника (`../pvz-tauri/src-tauri/src/{db,boxes,ops,stickers,account,lease,…}.rs`)
+  подключены через `#[path]`. От Tauri им нужен только `tauri::async_runtime` — его даёт крошечный крейт
+  `tauri-shim` поверх tokio. Правка модуля Помощника сразу попадает в обе версии.
+- Linux-ветки в общих модулях — только `#[cfg(not(windows))]` (Windows-сборка их не видит):
+  `paths.rs` (XDG-папки, путь к найденной базе, «Загрузки»), `account.rs` (ID устройства из `/etc/machine-id`
+  вместо MachineGuid, имя ПК из hostname), `stickers.rs` (папка «Загрузки»).
+- Интерфейс — тот же React-бандл `pvz-tauri/dist`. `src/lib/platform.ts` выбирает транспорт: в окне Tauri —
+  `invoke`/`listen`, в браузере — `POST /api/cmd/<имя>` и `EventSource('/api/events')`. Разделы для Linux —
+  `WEB_TABS` (фильтр `NAV` в `app/nav.ts`); экранные отличия — по `IS_WEB` (Настройки, Аккаунт, Стикеры,
+  заслонка обновления, Главная).
+- Команды: ответ `{ok}` или `{err}`, где err — строка или ApiError, как отказ Tauri-команды. Аргументы — в camelCase,
+  как их шлёт интерфейс. Нет команды → `NOT_AVAILABLE: …`.
+
+### Защита локального сервера
+- слушает только 127.0.0.1; `Host` должен быть `127.0.0.1|localhost|[::1]:<порт>` (DNS-rebinding);
+- вход — по ссылке из терминала `/?t=<токен>`: cookie `pvz_s` (HttpOnly, SameSite=Strict), редирект на `/`.
+  Токен постоянный (`wb_pvz_tools/serve-token`, 0600) — закладка работает после перезапуска; удалить файл —
+  все браузеры войдут заново;
+- команды — только POST с `Content-Type: application/json` и своим `Origin` (чужая страница, даже на другом
+  порту 127.0.0.1, вызвать их не может); без cookie — 401 и страница «откройте ссылку из терминала»;
+- папка данных `~/.local/share/wb_pvz_tools` — 0700: сессии аккаунта и WB на Linux без DPAPI, их защищают права.
+
+## Сборка и выпуск
+
+```
+bash _local-only/pvz-serve/build-linux.sh          # release → _local-only/pvz-serve/out/pvz-helper-linux-x86_64
+bash _local-only/pvz-serve/build-linux.sh debug    # отладка: «Про без входа» (lease::preview), для проверки
+bash _local-only/pvz-serve/publish-linux.sh "Что нового"
+```
+
+Сборка — в Docker, musl, статический бинарник; кэши — тома `pvz-serve-cargo`, `pvz-serve-target`. Образ:
+Docker Hub из РФ не отдаёт слои («TLS handshake timeout»), а большой слой `rust:alpine` и с `mirror.gcr.io` висит.
+Поэтому собран свой `pvz-rust:alpine` — скрипт берёт его сам, если он есть (иначе `mirror.gcr.io/library/rust:1-alpine`,
+свой — `PVZ_RUST_IMAGE=…`). Пересоздать:
+```
+docker run --name pvz-rust-build mirror.gcr.io/library/alpine:latest sh -c "apk add --no-cache rust cargo musl-dev"
+docker commit pvz-rust-build pvz-rust:alpine && docker rm pvz-rust-build
+```
+Docker Desktop после запуска бывает «Internal Server Error» на `docker version` — помогает перезапуск Docker Desktop.
+`build.rs` не соберёт, если версия `pvz-serve/Cargo.toml` ≠ версии Помощника или не собран `pvz-tauri/dist`.
+
+Выпуск кладёт в `/srv/shk-wb/app-updates/pvz-helper/public/` (это `/dl/`): `pvz-helper-linux-x86_64-<версия>`,
+`pvz-helper-linux.json` (`version`, `notes`, `file_x86_64`, `sha256_x86_64`; бэкап — на уровень выше, не в `/dl/`),
+`linux.sh` (из `selfhost/linux/linux.sh`). **Сайт не выкладывается** — новых `/api` нет. Программа сама смотрит
+`/dl/pvz-helper-linux.json` («Нужно обновить» показывает команду запуска — она же ставит новую версию).
+
+**Версия общая с Windows.** Сервер проверяет `X-App-Name: pvz-helper` + `X-App-Version` по `PVZ_APP_MIN_VERSION`.
+Подняли минимум для Windows — **пересоберите и выпустите Linux той же версии**, иначе у Linux-пользователей
+заслонка «Нужно обновить» без новой версии.
+
+**Устройство новое.** ID устройства на Linux — `sha256("pvz-helper:linux:" + /etc/machine-id)`: компьютер
+занимает место в лимите ПК аккаунта, как любой новый.
+
+## Проверка перед выпуском
+1. `bash build-linux.sh debug`, затем в контейнере с копией тестовой базы (`%APPDATA%\wb_pvz_tools\test-db\pvz-1.sqlite`):
+   `pvz-helper --wb-db /db/pvz-1.sqlite --no-browser` — открыть ссылку, пройти разделы.
+2. Авто-поиск: база в `~/.local/share/com.example/wb_point_desktop/` — находится без ключа; мусорный файл с тем же
+   именем — отбраковывается.
+3. Защита: `/api/cmd/*` без cookie → 401; с чужим Origin → 403; с `Host: evil.example` → 403.
+4. Windows-сборка не сломана: `cargo check --lib` в `pvz-tauri/src-tauri`, `npm run build` в `pvz-tauri`.
+5. После выпуска: `curl -fsSL https://shk-wb.ru/dl/pvz-helper-linux.json`, `curl -sI https://shk-wb.ru/dl/linux.sh` → 200.
