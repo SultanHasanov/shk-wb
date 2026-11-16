@@ -61,11 +61,19 @@ function mockServer({ plan = 'pro', version = 4, putStatus = 200, link = true }:
     if (url.includes('rpc/app_entitlements')) return json({ plan, device_limit: 4, addons: {} });
     if (url.includes('/rest/v1/app_points?id=eq.')) return json([{ id: POINT, wb_point_id: 317162, name: 'Ленина, 14' }]);
     if (url.includes('/rest/v1/app_points?user_id=eq.')) return json([{ id: POINT, wb_point_id: 317162, name: 'Ленина, 14', created_at: '2026-10-01T00:00:00Z' }]);
+    if (url.includes('/rest/v1/app_docs_history?')) {
+      // в истории лежит одна старая версия графика: одна смена, выплат нет
+      if (!url.includes('version=eq.3')) return json([]);
+      return json([{ data_enc: appCrypto.seal(OWNER, JSON.stringify({ ...scheduleDoc, shifts: { '2026-11-17': [{ staffId: 's1', kind: 'full' }] }, payments: [] })) }]);
+    }
     if (url.includes('/rest/v1/app_docs?')) {
-      return json([
+      const rows = [
         { key: 'staff', version: 2, data_enc: appCrypto.seal(OWNER, JSON.stringify(staffDoc)), updated_at: '2026-11-15T10:00:00Z', device_id: 'dev-1' },
         { key: 'schedule', version, data_enc: appCrypto.seal(OWNER, JSON.stringify(scheduleDoc)), updated_at: '2026-11-16T09:00:00Z', device_id: null },
-      ]);
+      ];
+      // как настоящая база: запрос одного документа отдаёт только его
+      const only = /[?&]key=eq\.(\w+)/.exec(url)?.[1];
+      return json(only ? rows.filter(r => r.key === only) : rows);
     }
     if (url.includes('rpc/app_doc_put')) {
       if (putStatus === 409) return json({ message: 'VERSION_CONFLICT' }, 400);
@@ -212,5 +220,38 @@ describe('ссылка для сотрудников', () => {
     const bad = response();
     await handler(req('staff-public', { query: { token: '../etc' }, auth: false }), bad);
     expect(bad.statusCode).toBe(404);
+  });
+});
+
+describe('история изменений: возврат версии', () => {
+  it('перед возвратом показывает, что лежит в версии и что сейчас', async () => {
+    mockServer();
+    const res = response();
+    await handler(req('staff-history', { query: { point: POINT, key: 'schedule', version: '3' } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      version: 3,
+      was: { days: 1, lastDay: '2026-11-17', payments: 0, paid: 0 },
+      now: { days: 2, lastDay: '2026-11-18', payments: 1, paid: 10000 },
+    });
+  });
+
+  it('возврат записывает старую версию как новую — прежняя остаётся в истории', async () => {
+    const calls = mockServer();
+    const res = response();
+    await handler(req('staff-history', { method: 'POST', body: { point: POINT, key: 'schedule', version: 3 } }), res);
+    expect(res.statusCode).toBe(200);
+    expect((res.body as any).version).toBe(5);
+    expect(Object.keys((res.body as any).data.shifts)).toEqual(['2026-11-17']);
+    const put = calls.find(c => c.url.includes('rpc/app_doc_put'))!;
+    expect(put.body).toMatchObject({ p_user: OWNER, p_scope: POINT, p_key: 'schedule', p_base: 4, p_device: null });
+  });
+
+  it('версии, которой уже нет в истории, не возвращает и ничего не пишет', async () => {
+    const calls = mockServer();
+    const res = response();
+    await handler(req('staff-history', { method: 'POST', body: { point: POINT, key: 'schedule', version: 1 } }), res);
+    expect(res.statusCode).toBe(404);
+    expect(calls.some(c => c.url.includes('rpc/app_doc_put'))).toBe(false);
   });
 });

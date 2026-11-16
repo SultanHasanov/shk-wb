@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Button, Input, Switch, useToast } from '../../../ui';
-import { useRestoreStaffVersion, useStaffHistory } from '../../../api/staff';
+import { Button, Input, Modal, Switch, useToast } from '../../../ui';
+import { fetchStaffVersionPreview, useRestoreStaffVersion, useStaffHistory, type StaffHistoryItem, type StaffVersionPreview, type StaffVersionSummary } from '../../../api/staff';
 import { moneyInput, parseClock, parseMoney, Dropdown } from './parts';
 import type { DocKey, StaffDocs } from './useStaffDocs';
-import { maxPerDay, type ScheduleData } from '../../../lib/staff-core';
+import { dayMonth, maxPerDay, rub, type ScheduleData } from '../../../lib/staff-core';
 import s from './staff.module.css';
 
 const ADV_DAYS = ['5', '10', '12', '15', '20', '25'];
@@ -100,7 +100,7 @@ export function SettingsTab({ docs, pointId, pointName }: { docs: StaffDocs; poi
 
       <section className={s.block}>
         <div className={s.blockHead}><h2>История изменений</h2></div>
-        <p className={s.muted} style={{ marginBottom: 8 }}>Если график или список людей испортили — верните состояние на нужный момент. Перед возвратом нынешнее тоже сохраняется, поэтому вернуть можно и обратно.</p>
+        <p className={s.muted} style={{ marginBottom: 8 }}>Каждое изменение с сайта и с компьютеров пунктов сохраняется здесь — последние 20. Если график или список людей испортили, в том числе при синхронизации с программой, верните состояние на нужный момент. Перед возвратом нынешнее тоже сохраняется, поэтому вернуть можно и обратно.</p>
         <History docs={docs} pointId={pointId} docKey="schedule" title="График и зарплата" />
         <History docs={docs} pointId={pointId} docKey="staff" title="Список сотрудников" />
       </section>
@@ -108,11 +108,35 @@ export function SettingsTab({ docs, pointId, pointName }: { docs: StaffDocs; poi
   );
 }
 
+/** «людей в списке — 6, из них работают — 5» или «дней со сменами — 53, последний — 30 ноября; выплат — 3 на 12 000 ₽». */
+function summaryText(docKey: DocKey, x: StaffVersionSummary | null): string {
+  if (!x) return 'нет данных';
+  if (docKey === 'staff') return `людей в списке — ${x.people ?? 0}, из них работают — ${x.working ?? 0}`;
+  const days = `дней со сменами — ${x.days ?? 0}${x.lastDay ? `, последний — ${dayMonth(x.lastDay)}` : ''}`;
+  return `${days}; выплат — ${x.payments ?? 0}${x.payments ? ` на ${rub(x.paid ?? 0)}` : ''}`;
+}
+
 function History({ docs, pointId, docKey, title }: { docs: StaffDocs; pointId: string; docKey: DocKey; title: string }) {
   const history = useStaffHistory(pointId, docKey);
   const restore = useRestoreStaffVersion();
   const toast = useToast();
+  // что вернуть: сначала показываем, что изменится, и только потом возвращаем
+  const [ask, setAsk] = useState<{ item: StaffHistoryItem; preview: StaffVersionPreview | null; error: string } | null>(null);
   const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'время неизвестно');
+  const open = (item: StaffHistoryItem) => {
+    setAsk({ item, preview: null, error: '' });
+    fetchStaffVersionPreview(pointId, docKey, item.version)
+      .then(preview => setAsk(a => (a && a.item.version === item.version ? { ...a, preview } : a)))
+      .catch(e => setAsk(a => (a && a.item.version === item.version ? { ...a, error: e?.message || 'Не удалось прочитать эту версию' } : a)));
+  };
+  const confirm = () => {
+    if (!ask) return;
+    restore.mutate({ point: pointId, key: docKey, version: ask.item.version }, {
+      onSuccess: r => { docs.applyRestored(docKey, r.version, r.data); toast('Версия возвращена', 'success'); setAsk(null); history.refetch(); },
+      onError: e => toast(e.message || 'Не удалось вернуть версию', 'error'),
+    });
+  };
+  const what = docKey === 'staff' ? 'список сотрудников' : 'график и зарплату';
   return (
     <div style={{ marginTop: 12 }}>
       <div className={s.label}>{title}</div>
@@ -124,15 +148,31 @@ function History({ docs, pointId, docKey, title }: { docs: StaffDocs; pointId: s
             <div key={h.version} className={s.line}>
               <span><b style={{ fontWeight: 600 }}>{when(h.at)}</b><small>{h.by === 'сайт' ? 'с сайта' : `компьютер «${h.by}»`}</small></span>
               {h.current ? <b style={{ color: 'var(--success)', fontSize: 12 }}>сейчас</b> : (
-                <Button size="sm" variant="secondary" loading={restore.isPending && restore.variables?.version === h.version} onClick={() => restore.mutate({ point: pointId, key: docKey, version: h.version }, {
-                  onSuccess: r => { docs.applyRestored(docKey, r.version, r.data); toast('Версия возвращена', 'success'); history.refetch(); },
-                  onError: e => toast(e.message || 'Не удалось вернуть версию', 'error'),
-                })}>Вернуть</Button>
+                <Button size="sm" variant="secondary" aria-label={`Вернуть: ${title}, ${when(h.at)}`} onClick={() => open(h)}>Вернуть</Button>
               )}
             </div>
           ))}
         </div>
       )}
+
+      <Modal open={Boolean(ask)} onOpenChange={o => !o && !restore.isPending && setAsk(null)} title={`Вернуть ${what}?`}
+        description={ask ? `Состояние на ${when(ask.item.at)}, записано ${ask.item.by === 'сайт' ? 'с сайта' : `с компьютера «${ask.item.by}»`}.` : undefined}>
+        {ask && (
+          <div className={s.form}>
+            {ask.error ? <p className={`${s.note} ${s.noteWarn}`} role="alert">{ask.error}</p> : !ask.preview ? <p className={s.muted}>Смотрим, что изменится…</p> : (
+              <div className={s.lines}>
+                <div className={s.line}><span><b style={{ fontWeight: 600 }}>Сейчас</b><small>{summaryText(docKey, ask.preview.now)}</small></span></div>
+                <div className={s.line}><span><b style={{ fontWeight: 600 }}>Станет</b><small>{summaryText(docKey, ask.preview.was)}</small></span></div>
+              </div>
+            )}
+            <p className={s.muted}>Нынешнее состояние сохранится в истории — вернуть можно и обратно. Изменение придёт и на компьютеры пунктов при следующей синхронизации.</p>
+            <div className={s.dialogActions}>
+              <Button variant="secondary" disabled={restore.isPending} onClick={() => setAsk(null)}>Отмена</Button>
+              <Button loading={restore.isPending} disabled={!ask.preview} onClick={confirm}>Вернуть</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

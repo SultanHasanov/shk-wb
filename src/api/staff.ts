@@ -7,6 +7,9 @@ export type StaffDocRow = { version: number; data: unknown; updatedAt: string; f
 export type StaffPointDocs = { point: StaffPoint; staff: StaffDocRow; schedule: StaffDocRow };
 export type StaffLink = { token: string; url: string; shortNames: boolean; showSubs: boolean; createdAt: string };
 export type StaffHistoryItem = { version: number; at: string | null; by: string; current: boolean };
+/** Что лежит в версии: у списка людей — people/working, у графика — days/lastDay/payments/paid. */
+export type StaffVersionSummary = { people?: number; working?: number; days?: number; lastDay?: string | null; payments?: number; paid?: number };
+export type StaffVersionPreview = { version: number; was: StaffVersionSummary; now: StaffVersionSummary | null };
 
 export const staffKey = ['cabinet', 'staff'] as const;
 
@@ -46,6 +49,11 @@ export function useStaffHistory(pointId: string, key: 'staff' | 'schedule') {
     queryKey: [...staffKey, 'history', pointId, key],
     queryFn: () => api<{ items: StaffHistoryItem[] }>(`/api/cabinet/staff/history?point=${encodeURIComponent(pointId)}&key=${key}`),
   });
+}
+
+/** Что изменится, если вернуть версию: читается по нажатию «Вернуть», перед подтверждением. */
+export function fetchStaffVersionPreview(pointId: string, key: 'staff' | 'schedule', version: number) {
+  return api<StaffVersionPreview>(`/api/cabinet/staff/history?point=${encodeURIComponent(pointId)}&key=${key}&version=${version}`);
 }
 
 export function useRestoreStaffVersion() {

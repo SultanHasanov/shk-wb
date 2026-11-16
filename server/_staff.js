@@ -170,6 +170,7 @@ async function history(req, res, userId) {
   const key = String(req.query.key || req.body?.key || '');
   if (!KEYS.includes(key)) return fail(res, 400, 'VALIDATION_ERROR', 'Неизвестный документ');
   if (req.method === 'POST') return restore(req, res, userId, point, key);
+  if (req.query.version) return preview(req, res, userId, point, key);
   const [current, rows] = await Promise.all([
     supabaseFetch(`app_docs?user_id=eq.${q(userId)}&scope=eq.${q(point.id)}&key=eq.${q(key)}&secret=eq.false&select=version,device_id,updated_at`),
     supabaseFetch(`app_docs_history?user_id=eq.${q(userId)}&scope=eq.${q(point.id)}&key=eq.${q(key)}&select=version,device_id,created_at&order=version.desc&limit=20`),
@@ -186,15 +187,43 @@ async function history(req, res, userId) {
   return res.status(200).json({ items });
 }
 
-async function restore(req, res, userId, point, key) {
-  const version = Number(req.body?.version);
-  if (!Number.isSafeInteger(version) || version <= 0) return fail(res, 400, 'VALIDATION_ERROR', 'Некорректная версия');
+/** Прочитать старую версию документа из истории. Ошибку отдаёт сам и возвращает null. */
+async function readVersion(res, userId, point, key, raw) {
+  const version = Number(raw);
+  if (!Number.isSafeInteger(version) || version <= 0) { fail(res, 400, 'VALIDATION_ERROR', 'Некорректная версия'); return null; }
   const [row] = await supabaseFetch(`app_docs_history?user_id=eq.${q(userId)}&scope=eq.${q(point.id)}&key=eq.${q(key)}&version=eq.${version}&select=data_enc&limit=1`);
-  if (!row) return fail(res, 404, 'NOT_FOUND', 'Этой версии уже нет в истории');
+  if (!row) { fail(res, 404, 'NOT_FOUND', 'Этой версии уже нет в истории'); return null; }
   const text = open(userId, row.data_enc, 'data');
   let data = null;
   try { data = text == null ? null : JSON.parse(text); } catch (_) { data = null; }
-  if (!data || validate(key, data)) return fail(res, 422, 'UNREADABLE', 'Эту версию не удалось прочитать');
+  if (!data || validate(key, data)) { fail(res, 422, 'UNREADABLE', 'Эту версию не удалось прочитать'); return null; }
+  return { version, data };
+}
+
+/** Что лежит в документе — коротко, чтобы перед возвратом версии было видно, что изменится. */
+function summarize(key, data) {
+  if (key === 'staff') {
+    const list = Array.isArray(data?.staff_list) ? data.staff_list : [];
+    return { people: list.length, working: list.filter(p => p && p.active !== false).length };
+  }
+  const shifts = isObj(data?.shifts) ? data.shifts : {};
+  const days = Object.keys(shifts).filter(d => Array.isArray(shifts[d]) && shifts[d].length);
+  const payments = Array.isArray(data?.payments) ? data.payments.filter(p => p && !p.cancelled) : [];
+  return { days: days.length, lastDay: days.sort().pop() || null, payments: payments.length, paid: payments.reduce((a, p) => a + (Number(p.amount) || 0), 0) };
+}
+
+/** Предпросмотр возврата: что в выбранной версии и что сейчас. Читается одна версия — только по нажатию «Вернуть». */
+async function preview(req, res, userId, point, key) {
+  const old = await readVersion(res, userId, point, key, req.query.version);
+  if (!old) return undefined;
+  const current = (await pointDocs(userId, point.id))[key];
+  return res.status(200).json({ version: old.version, was: summarize(key, old.data), now: current?.data ? summarize(key, current.data) : null });
+}
+
+async function restore(req, res, userId, point, key) {
+  const old = await readVersion(res, userId, point, key, req.body?.version);
+  if (!old) return undefined;
+  const { data } = old;
   const [current] = await supabaseFetch(`app_docs?user_id=eq.${q(userId)}&scope=eq.${q(point.id)}&key=eq.${q(key)}&secret=eq.false&select=version`);
   // обычная запись поверх текущей: прежняя версия сама уйдёт в историю, вернуть можно и обратно
   const out = await sync.docPut(userId, null, { key, point: point.id, base: current ? current.version : 0, data });
