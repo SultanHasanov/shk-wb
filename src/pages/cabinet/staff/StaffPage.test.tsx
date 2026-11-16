@@ -60,6 +60,9 @@ function renderPage(path = '/cabinet/staff') {
 
 const puts = () => calls.filter(c => c.method === 'PUT');
 
+// сценарии длинные (несколько сохранений с задержкой 700 мс): на загруженной машине 5 секунд по умолчанию не хватает
+vi.setConfig({ testTimeout: 20000 });
+
 describe('Сотрудники на сайте', () => {
   it('без тарифа — замок вместо графика', async () => {
     allowed = false;
