@@ -13,14 +13,35 @@
 #   4. запускает её. Программа поднимает сервер только на 127.0.0.1 и открывает браузер.
 #
 # Данные пункта никуда не выгружаются: программа читает базу WB (wb_point_db.sqlite) на этом компьютере,
-# только чтение. Ничего не ставится в систему, root не нужен. Удалить: rm -rf ~/.cache/pvz-helper
+# только чтение. Ничего не ставится в систему, root не нужен, автозапуска нет: закрыли (Ctrl+C) — не работает.
+#
+# Удалить программу и всё, что она хранила на компьютере (вход в аккаунт и WB, настройки, архив клиентов):
+#   curl -fsSL https://shk-wb.ru/dl/linux.sh | sh -s -- --uninstall
+# Базу WB и клиент WB это не трогает. Место компьютера в аккаунте освобождается в кабинете на сайте.
 set -eu
 
 BASE="${PVZ_DL:-https://shk-wb.ru/dl}"
 DIR="${XDG_CACHE_HOME:-$HOME/.cache}/pvz-helper"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/wb_pvz_tools"
+IMAGES="${XDG_CACHE_HOME:-$HOME/.cache}/pvz_helper"
 
 say() { printf '%s\n' "$*" >&2; }
 die() { say "Ошибка: $*"; exit 1; }
+
+if [ "${1:-}" = "--uninstall" ]; then
+  if pgrep -f "$DIR/pvz-helper-" >/dev/null 2>&1; then
+    die "программа ещё запущена — закройте её (Ctrl+C в её терминале) и повторите"
+  fi
+  for d in "$DIR" "$IMAGES" "$DATA"; do
+    if [ -e "$d" ]; then
+      rm -rf "$d"
+      say "Удалено: $d"
+    fi
+  done
+  say "Помощник ПВЗ удалён с этого компьютера. База WB и клиент WB не тронуты."
+  say "Освободить место компьютера в аккаунте: https://shk-wb.ru/cabinet/subscription"
+  exit 0
+fi
 
 [ "$(uname -s)" = "Linux" ] || die "этот скрипт — для Linux (для Windows есть установщик на https://shk-wb.ru/program)"
 case "$(uname -m)" in
