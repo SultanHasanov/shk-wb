@@ -1,6 +1,6 @@
 import { useMemo, useState, type ClipboardEvent, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { Button, Input, Modal, Table } from '../../../ui';
+import { Button, Input, Modal, Table, useToast } from '../../../ui';
 import {
   DEDUCTION_KINDS,
   PAY_METHOD,
@@ -11,6 +11,7 @@ import {
   cancelPayment,
   closeMonth,
   dayMonth,
+  dueFor,
   isActive,
   journal,
   monthCalc,
@@ -20,6 +21,8 @@ import {
   monthStart,
   monthTitle,
   newId,
+  paidOn,
+  payDate,
   paysShk,
   payrollPeople,
   range,
@@ -37,16 +40,17 @@ import {
   undecided,
   unitsText,
   type Deduction,
+  type Due,
   type MonthCalc,
   type Payment,
   type ScheduleData,
   type StaffEntry,
 } from '../../../lib/staff-core';
-import { Avatar, Dropdown, escapeHtml, moneyInput, parseMoney, printHtml } from './parts';
+import { Avatar, Dropdown, copyText, escapeHtml, moneyInput, parseMoney, printHtml } from './parts';
 import type { Snap, StaffDocs } from './useStaffDocs';
 import s from './staff.module.css';
 
-type View = 'people' | 'journal' | 'deductions';
+type View = 'people' | 'journal' | 'deductions' | 'reports';
 type Dlg =
   | { kind: 'pay'; staffId?: string; type?: Payment['type'] }
   | { kind: 'mass' }
@@ -57,6 +61,8 @@ type Dlg =
   | { kind: 'sheet'; staffId: string }
   | { kind: 'goods' };
 
+/** «октябрь» из ключа месяца — для «зарплата за октябрь». */
+const monthNom = (m: string) => monthTitle(m).split(' ')[0].toLowerCase();
 const signed = (n: number) => (n > 0 ? `+${rub(n)}` : n < 0 ? `−${rub(-n)}` : rub(0));
 const METHOD_LABEL: Record<Payment['method'], string> = { cash: 'Наличными', card: 'Переводом на карту', other: 'Другим способом' };
 const TYPE_LABEL: Record<Payment['type'], string> = { advance: 'Аванс', salary: 'Зарплата', other: 'В счёт зарплаты' };
@@ -86,6 +92,8 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
   const pay = (fn: (d: ScheduleData) => ScheduleData) => docs.update(sn => ({ ...sn, schedule: fn(withLedger(sn.schedule)) }));
   const today = todayYmd();
   const isCurrent = month === monthKey(today);
+  // выплатить можно за любой открытый месяц, кроме будущих: за них ещё ничего не начислено
+  const payable = !closed && month <= monthKey(today) && docs.caps?.edit !== false;
   const advanceDay = Math.min(data.advanceRule.day, Number(monthEnd(month).slice(8)));
   const payDay = Math.min(data.payDay, Number(monthEnd(month).slice(8)));
 
@@ -100,7 +108,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
         <span className={s.muted}>Аванс {advanceDay} {dayMonth(monthStart(month)).replace(/^\d+ /, '')}, зарплата {payDay}</span>
         <span className={s.muted} style={{ fontWeight: 600, color: closed ? 'var(--text-muted)' : 'var(--success)' }}>{closed ? 'Месяц закрыт' : 'Месяц открыт'}</span>
         <div className={s.toolbarEnd}>
-          {!closed && isCurrent && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'mass' })}>Выплатить всем</Button>}
+          {payable && rows.length > 0 && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'mass' })}>Выплатить всем</Button>}
           {closed
             ? <Button size="sm" variant="secondary" onClick={() => docs.update(sn => ({ ...sn, schedule: reopenMonth(sn.schedule, month) }))}>Открыть месяц снова</Button>
             : <Button size="sm" onClick={() => setDlg({ kind: 'close' })} disabled={!rows.length}>Закрыть месяц</Button>}
@@ -115,7 +123,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
       </div>
 
       <div className={s.subTabs} role="tablist" aria-label="Зарплата">
-        {([['people', 'По людям'], ['journal', 'Все операции'], ['deductions', 'Удержания WB']] as const).map(([v, l]) => (
+        {([['people', 'По людям'], ['journal', 'Все операции'], ['deductions', 'Удержания WB'], ['reports', 'Отчёты']] as const).map(([v, l]) => (
           <button key={v} type="button" role="tab" aria-selected={view === v} className={`${s.subTab} ${view === v ? s.subTabOn : ''}`} onClick={() => setView(v)}>
             {l}{v === 'deductions' && open.length > 0 && <span className={s.count}>{open.length}</span>}
           </button>
@@ -164,7 +172,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
                     <td className={s.num}>{rub(c.paid)}</td>
                     <td className={`${s.num} ${s.strong} ${c.left < 0 ? s.minus : ''}`}>{rub(c.left)}</td>
                     <td className={s.num} onClick={e => e.stopPropagation()}>
-                      {!closed && isActive(p) && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'pay', staffId: p.id })}>Выплатить</Button>}
+                      {payable && (isActive(p) || c.left > 0) && <Button size="sm" variant="secondary" onClick={() => setDlg({ kind: 'pay', staffId: p.id })}>Выплатить</Button>}
                     </td>
                   </tr>
                 ))}
@@ -187,11 +195,12 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
         )
       )}
 
-      {view === 'journal' && <Journal snap={snap} month={month} onCancel={(what, id) => setDlg({ kind: 'cancel', what, id })} onAdj={t => setDlg({ kind: 'adj', t })} onPay={() => setDlg({ kind: 'pay' })} closed={closed} />}
+      {view === 'journal' && <Journal snap={snap} month={month} onCancel={(what, id) => setDlg({ kind: 'cancel', what, id })} onAdj={t => setDlg({ kind: 'adj', t })} onPay={() => setDlg({ kind: 'pay' })} closed={closed} payable={payable} />}
       {view === 'deductions' && <Deductions docs={docs} month={month} onEdit={id => setDlg({ kind: 'deduction', id })} />}
+      {view === 'reports' && <Reports snap={snap} month={month} />}
 
-      {dlg?.kind === 'pay' && <PayDialog snap={snap} staffId={dlg.staffId} type={dlg.type} onClose={() => setDlg(null)} onSave={p => pay(d => addPayment(d, p))} />}
-      {dlg?.kind === 'mass' && <MassPayDialog snap={snap} onClose={() => setDlg(null)} onSave={list => pay(d => list.reduce((acc, p) => addPayment(acc, p), d))} />}
+      {dlg?.kind === 'pay' && <PayDialog snap={snap} month={month} staffId={dlg.staffId} type={dlg.type} onClose={() => setDlg(null)} onSave={p => pay(d => addPayment(d, p))} />}
+      {dlg?.kind === 'mass' && <MassPayDialog snap={snap} month={month} onClose={() => setDlg(null)} onSave={list => pay(d => list.reduce((acc, p) => addPayment(acc, p), d))} />}
       {dlg?.kind === 'adj' && <AdjDialog snap={snap} staffId={dlg.staffId} t={dlg.t} onClose={() => setDlg(null)} onSave={(a, parts) => pay(d => addAdjust(d, a, parts))} />}
       {dlg?.kind === 'cancel' && <CancelDialog snap={snap} what={dlg.what} id={dlg.id} onClose={() => setDlg(null)} onSave={why => pay(d => (dlg.what === 'payment' ? cancelPayment(d, dlg.id, why) : cancelAdjust(d, dlg.id, why)))} />}
       {dlg?.kind === 'deduction' && <DeductionDialog snap={snap} id={dlg.id} onClose={() => setDlg(null)} onSave={d => pay(x => saveDeduction(x, d))} onRemove={id => pay(x => removeDeduction(x, id))} />}
@@ -204,7 +213,7 @@ export function PayrollTab({ docs, month, setMonth, initialView, initialGoods }:
 
 // ───────── журнал ─────────
 
-function Journal({ snap, month, onCancel, onAdj, onPay, closed }: { snap: Snap; month: string; onCancel: (what: 'payment' | 'adjust', id: string) => void; onAdj: (t: 'bonus' | 'fine' | 'correction') => void; onPay: () => void; closed: boolean }) {
+function Journal({ snap, month, onCancel, onAdj, onPay, closed, payable }: { snap: Snap; month: string; onCancel: (what: 'payment' | 'adjust', id: string) => void; onAdj: (t: 'bonus' | 'fine' | 'correction') => void; onPay: () => void; closed: boolean; payable: boolean }) {
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const [person, setPerson] = useState('');
@@ -237,7 +246,7 @@ function Journal({ snap, month, onCancel, onAdj, onPay, closed }: { snap: Snap; 
             <Button size="sm" variant="secondary" onClick={() => onAdj('bonus')}>Премия</Button>
             <Button size="sm" variant="secondary" onClick={() => onAdj('fine')}>Штраф</Button>
             <Button size="sm" variant="secondary" onClick={() => onAdj('correction')}>Исправление</Button>
-            <Button size="sm" onClick={onPay}>Записать выплату</Button>
+            {payable && <Button size="sm" onClick={onPay}>Записать выплату</Button>}
           </div>
         )}
       </div>
@@ -252,7 +261,7 @@ function Journal({ snap, month, onCancel, onAdj, onPay, closed }: { snap: Snap; 
                 const p = i.p;
                 return (
                   <tr key={`p${p.id}`} className={p.cancelled ? s.cancelled : ''}>
-                    <td>{dayMonth(p.date)}</td><td>{nameOf(p.staffId)}</td><td>{TYPE_LABEL[p.type]}, {METHOD_LABEL[p.method].toLowerCase()}</td>
+                    <td>{dayMonth(paidOn(p))}</td><td>{nameOf(p.staffId)}</td><td>{TYPE_LABEL[p.type]}{p.paidAt ? ` за ${monthNom(month)}` : ''}, {METHOD_LABEL[p.method].toLowerCase()}</td>
                     <td /><td className={`${s.num} ${s.strong}`}>{rub(p.amount)}</td>
                     <td>{p.cancelled ? `отменено: ${p.cancelled.why}` : p.note}</td>
                     <td className={s.num}>{!p.cancelled && !closed && <Button size="sm" variant="secondary" onClick={() => onCancel('payment', p.id)}>Отменить</Button>}</td>
@@ -437,46 +446,55 @@ function DeductionDialog({ snap, id, onClose, onSave, onRemove }: { snap: Snap; 
 
 // ───────── выплаты, премии, отмена ─────────
 
-function PayDialog({ snap, staffId, type, onClose, onSave }: { snap: Snap; staffId?: string; type?: Payment['type']; onClose: () => void; onSave: (p: Omit<Payment, 'id'>) => void }) {
+function PayDialog({ snap, month, staffId, type, onClose, onSave }: { snap: Snap; month: string; staffId?: string; type?: Payment['type']; onClose: () => void; onSave: (p: Omit<Payment, 'id'>) => void }) {
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const today = todayYmd();
-  const people = staff.filter(isActive);
+  const current = month === monthKey(today);
+  const people = staff.filter(p => isActive(p) || p.id === staffId);
   const [id, setId] = useState(staffId ?? people[0]?.id ?? '');
   const person = staff.find(x => x.id === id);
-  const calc = person ? monthCalc(person, data, monthKey(today)) : null;
-  const def: Payment['type'] = type ?? (calc && calc.advance > calc.advancePaid && Number(today.slice(8)) < data.payDay ? 'advance' : 'salary');
+  // считаем за месяц, который открыт во вкладке: выплата из октября — это зарплата за октябрь
+  const dueOf = (pid: string): Due | null => { const p = staff.find(x => x.id === pid); return p ? dueFor(p, data, month) : null; };
+  const d = dueOf(id);
+  const def: Payment['type'] = type ?? (current && d && d.advanceDue > 0 && Number(today.slice(8)) < data.payDay ? 'advance' : 'salary');
   const [t, setT] = useState<Payment['type']>(def);
-  const suggest = (tt: Payment['type'], c: MonthCalc | null) => (!c ? '' : tt === 'advance' ? moneyInput(Math.max(0, c.advance - c.advancePaid) || null) : tt === 'salary' ? moneyInput(Math.max(0, c.left) || null) : '');
-  const [amount, setAmount] = useState(suggest(def, calc));
+  const suggest = (tt: Payment['type'], x: Due | null) => (!x ? '' : tt === 'advance' ? moneyInput(x.advanceDue || null) : tt === 'salary' ? moneyInput(x.due || null) : '');
+  const [amount, setAmount] = useState(suggest(def, d));
   const [date, setDate] = useState(today);
   const [method, setMethod] = useState<Payment['method']>('cash');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const paid = Math.round(parseMoney(amount) ?? 0);
   const short = person?.name.split(/\s+/)[0] ?? '';
+  const forMonth = monthNom(month);
+  const left = d ? (d.settledLater ? d.due : d.calc.left) : 0;
 
   const save = () => {
     if (!person) return setErr('Выберите сотрудника');
     if (!(paid > 0)) return setErr('Укажите сумму больше нуля');
-    if (data.closed[monthKey(date)]) return setErr('Этот месяц закрыт — выберите дату в открытом месяце');
-    onSave({ staffId: person.id, date, type: t, amount: paid, method, note: note.trim() || TYPE_LABEL[t] });
+    if (data.closed[month]) return setErr('Этот месяц закрыт — откройте его снова или запишите выплату в открытом месяце');
+    const acc = payDate(month, date);
+    onSave({ staffId: person.id, date: acc, ...(acc !== date ? { paidAt: date } : {}), type: t, amount: paid, method, note: note.trim() || TYPE_LABEL[t] });
     onClose();
   };
 
-  const hint = !calc ? '' : calc.left <= 0 && t === 'salary' ? `${short} сейчас нечего выплачивать. Выплату можно записать — она уйдёт в счёт будущей зарплаты.`
-    : t === 'salary' ? `${short}: осталось выплатить ${rub(calc.left)}. Можно выдать часть — остальное останется за пунктом и перейдёт на следующий месяц.`
-    : t === 'advance' ? (calc.advancePaid ? `Аванс в этом месяце уже выдан: ${rub(calc.advancePaid)}. Если выдаёте ещё раз, сумма вычтется из зарплаты.` : `Сумма посчитана по правилу аванса из настроек: ${rub(calc.advance)}. Её можно изменить.`)
+  const hint = !d ? ''
+    : t === 'salary' && d.due <= 0 ? (d.settledLater
+      ? `Остаток за ${forMonth} перешёл на следующий месяц и уже выплачен там — платить второй раз не нужно.`
+      : `${short} за ${forMonth} выплачено всё. Выплату можно записать — она уйдёт в счёт будущей зарплаты.`)
+    : t === 'salary' ? `${short}: за ${forMonth} осталось выплатить ${rub(d.due)} — сумма подставлена. Можно выдать часть: остальное останется за пунктом и перейдёт на следующий месяц.`
+    : t === 'advance' ? (d.calc.advancePaid ? `Аванс за ${forMonth} уже выдан: ${rub(d.calc.advancePaid)}. Если выдаёте ещё раз, сумма вычтется из зарплаты.` : `Сумма посчитана по правилу аванса из настроек: ${rub(d.calc.advance)}. Её можно изменить.`)
     : 'Деньги в любой день по просьбе сотрудника. Сумма вычтется из того, что осталось выплатить.';
 
   return (
-    <Modal open onOpenChange={o => !o && onClose()} title="Записать выплату" description="Отметьте деньги, которые вы отдали сотруднику. Сайт сам ничего не переводит, он только ведёт счёт.">
+    <Modal open onOpenChange={o => !o && onClose()} title={`Выплата за ${monthTitle(month).toLowerCase()}`} description="Отметьте деньги, которые вы отдали сотруднику. Сайт сам ничего не переводит, он только ведёт счёт.">
       <div className={s.form}>
-        <div><label className={s.label} htmlFor="pd-s">Кому</label><div style={{ marginTop: 6 }}><Dropdown id="pd-s" label="Кому" value={id} onChange={v => { setId(v); const ns = staff.find(x => x.id === v); setAmount(suggest(t, ns ? monthCalc(ns, data, monthKey(today)) : null)); }} options={people.map(p => ({ value: p.id, label: p.name }))} /></div></div>
+        <div><label className={s.label} htmlFor="pd-s">Кому</label><div style={{ marginTop: 6 }}><Dropdown id="pd-s" label="Кому" value={id} onChange={v => { setId(v); setAmount(suggest(t, dueOf(v))); }} options={people.map(p => ({ value: p.id, label: p.name }))} /></div></div>
         <div>
           <div className={s.label} style={{ marginBottom: 6 }}>Что это за выплата</div>
           <div className={s.choiceGrid} role="group" aria-label="Что это за выплата">
-            {(['advance', 'salary', 'other'] as const).map(k => <button key={k} type="button" aria-pressed={t === k} onClick={() => { setT(k); setAmount(suggest(k, calc)); }}>{TYPE_LABEL[k]}</button>)}
+            {(['advance', 'salary', 'other'] as const).map(k => <button key={k} type="button" aria-pressed={t === k} onClick={() => { setT(k); setAmount(suggest(k, d)); }}>{TYPE_LABEL[k]}</button>)}
           </div>
           <p className={s.note} style={{ marginTop: 8 }}>{hint}</p>
         </div>
@@ -484,17 +502,17 @@ function PayDialog({ snap, staffId, type, onClose, onSave }: { snap: Snap; staff
           <div><label className={s.label} htmlFor="pd-a">Сумма, ₽</label><Input id="pd-a" inputMode="decimal" value={amount} placeholder="впишите сумму" onChange={e => setAmount(e.target.value)} style={{ marginTop: 6, fontWeight: 600 }} /></div>
           <div><label className={s.label} htmlFor="pd-d">Когда выдали</label><Input id="pd-d" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} style={{ marginTop: 6 }} /></div>
         </div>
-        {calc && calc.left > 0 && (
+        {d && d.due > 0 && (
           <div className={s.pills}>
-            <button type="button" className={s.pill} onClick={() => setAmount(moneyInput(calc.left))}>Весь остаток, {rub(calc.left)}</button>
-            <button type="button" className={s.pill} onClick={() => setAmount(moneyInput(Math.round(calc.left / 2)))}>Половина, {rub(calc.left / 2)}</button>
+            <button type="button" className={s.pill} onClick={() => setAmount(moneyInput(d.due))}>Весь остаток, {rub(d.due)}</button>
+            <button type="button" className={s.pill} onClick={() => setAmount(moneyInput(Math.round(d.due / 2)))}>Половина, {rub(d.due / 2)}</button>
           </div>
         )}
         <div className={s.formGrid}>
           <div><label className={s.label} htmlFor="pd-m">Как выдали</label><div style={{ marginTop: 6 }}><Dropdown id="pd-m" label="Как выдали" value={method} onChange={setMethod} options={(Object.keys(PAY_METHOD) as Payment['method'][]).map(k => ({ value: k, label: METHOD_LABEL[k] }))} /></div></div>
           <div><label className={s.label} htmlFor="pd-n">Заметка, если нужна</label><Input id="pd-n" placeholder="например, попросила раньше" value={note} onChange={e => setNote(e.target.value)} style={{ marginTop: 6 }} /></div>
         </div>
-        {calc && <div className={s.total}><span>После этой выплаты останется получить</span><b>{rub(calc.left - paid)}</b></div>}
+        {d && <div className={s.total}><span>После этой выплаты останется получить за {forMonth}</span><b>{rub(left - paid)}</b></div>}
         {err && <p className={`${s.note} ${s.noteWarn}`} role="alert">{err}</p>}
         <div className={s.dialogActions}>
           <span className={`${s.muted} ${s.grow}`}>Ошиблись? Запись можно отменить в журнале.</span>
@@ -506,24 +524,25 @@ function PayDialog({ snap, staffId, type, onClose, onSave }: { snap: Snap; staff
   );
 }
 
-function MassPayDialog({ snap, onClose, onSave }: { snap: Snap; onClose: () => void; onSave: (list: Omit<Payment, 'id'>[]) => void }) {
+function MassPayDialog({ snap, month, onClose, onSave }: { snap: Snap; month: string; onClose: () => void; onSave: (list: Omit<Payment, 'id'>[]) => void }) {
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const today = todayYmd();
-  const month = monthKey(today);
-  const rows = payrollPeople(staff, data, month).filter(isActive).map(p => ({ p, c: monthCalc(p, data, month) }));
-  const [kind, setKind] = useState<'advance' | 'salary'>(Number(today.slice(8)) < data.payDay ? 'advance' : 'salary');
-  const auto = (c: MonthCalc) => (kind === 'advance' ? Math.max(0, c.advance - c.advancePaid) : Math.max(0, c.left));
+  const current = month === monthKey(today);
+  const rows = payrollPeople(staff, data, month).map(p => ({ p, d: dueFor(p, data, month) })).filter(r => isActive(r.p) || r.d.due > 0);
+  const [kind, setKind] = useState<'advance' | 'salary'>(current && Number(today.slice(8)) < data.payDay ? 'advance' : 'salary');
+  const auto = (d: Due) => (kind === 'advance' ? d.advanceDue : d.due);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [off, setOff] = useState<Set<string>>(new Set());
   const [method, setMethod] = useState<Payment['method']>('card');
   const [date, setDate] = useState(today);
-  const value = (p: StaffEntry, c: MonthCalc) => (amounts[`${kind}:${p.id}`] !== undefined ? Math.round(parseMoney(amounts[`${kind}:${p.id}`]) ?? 0) : auto(c));
-  const chosen = rows.filter(r => !off.has(r.p.id) && value(r.p, r.c) > 0);
-  const total = chosen.reduce((a, r) => a + value(r.p, r.c), 0);
+  const value = (p: StaffEntry, d: Due) => (amounts[`${kind}:${p.id}`] !== undefined ? Math.round(parseMoney(amounts[`${kind}:${p.id}`]) ?? 0) : auto(d));
+  const chosen = rows.filter(r => !off.has(r.p.id) && value(r.p, r.d) > 0);
+  const total = chosen.reduce((a, r) => a + value(r.p, r.d), 0);
+  const forMonth = monthTitle(month).toLowerCase();
 
   return (
-    <Modal open onOpenChange={o => !o && onClose()} size="lg" title={kind === 'advance' ? 'Выплатить аванс всем' : 'Выплатить зарплату всем'} description="Сумму в каждой строке можно поправить. В журнал попадёт отдельная запись на каждого.">
+    <Modal open onOpenChange={o => !o && onClose()} size="lg" title={kind === 'advance' ? `Выплатить аванс всем за ${forMonth}` : `Выплатить зарплату всем за ${forMonth}`} description="Суммы подставлены сами — в каждой строке их можно поправить. В журнал попадёт отдельная запись на каждого.">
       <div className={s.form}>
         <div className={s.choiceGrid} role="group" aria-label="Что выплачиваем">
           <button type="button" aria-pressed={kind === 'advance'} onClick={() => setKind('advance')}>Аванс по правилу</button>
@@ -532,14 +551,14 @@ function MassPayDialog({ snap, onClose, onSave }: { snap: Snap; onClose: () => v
         <Table>
           <thead><tr><th /><th>Сотрудник</th><th className={s.num}>{kind === 'advance' ? 'Аванс по правилу' : 'Осталось'}</th><th>Выдаём, ₽</th></tr></thead>
           <tbody>
-            {rows.map(({ p, c }) => {
-              const a = auto(c);
+            {rows.map(({ p, d }) => {
+              const a = auto(d);
               const key = `${kind}:${p.id}`;
               return (
                 <tr key={p.id}>
                   <td><input type="checkbox" aria-label={`Выплатить: ${p.name}`} checked={!off.has(p.id)} onChange={e => setOff(x => { const n = new Set(x); if (e.target.checked) n.delete(p.id); else n.add(p.id); return n; })} style={{ width: 20, height: 20, accentColor: 'var(--accent)' }} /></td>
-                  <td>{p.name}{c.noRate && <small className={s.gWarn}> · ставка не указана</small>}</td>
-                  <td className={s.num}>{a ? rub(a) : <span className={s.muted}>нечего выплачивать</span>}</td>
+                  <td>{p.name}{d.calc.noRate && <small className={s.gWarn}> · ставка не указана</small>}</td>
+                  <td className={s.num}>{a ? rub(a) : <span className={s.muted}>{kind === 'salary' && d.settledLater ? 'уже выплачено позже' : 'нечего выплачивать'}</span>}</td>
                   <td style={{ width: 140 }}><Input aria-label={`Сумма: ${p.name}`} inputMode="decimal" value={amounts[key] ?? moneyInput(a || null)} disabled={off.has(p.id)} onChange={e => setAmounts(m => ({ ...m, [key]: e.target.value }))} /></td>
                 </tr>
               );
@@ -554,7 +573,8 @@ function MassPayDialog({ snap, onClose, onSave }: { snap: Snap; onClose: () => v
         <div className={s.dialogActions}>
           <Button variant="secondary" onClick={onClose}>Отмена</Button>
           <Button disabled={!total} onClick={() => {
-            onSave(chosen.map(r => ({ staffId: r.p.id, date, type: kind, amount: value(r.p, r.c), method, note: kind === 'advance' ? 'Аванс' : 'Зарплата' })));
+            const acc = payDate(month, date);
+            onSave(chosen.map(r => ({ staffId: r.p.id, date: acc, ...(acc !== date ? { paidAt: date } : {}), type: kind, amount: value(r.p, r.d), method, note: kind === 'advance' ? 'Аванс' : 'Зарплата' })));
             onClose();
           }}>{total ? `Выплатить ${rub(total)}` : 'Никто не выбран'}</Button>
         </div>
@@ -725,15 +745,89 @@ function sheetLines(c: MonthCalc, p: StaffEntry, data: ScheduleData, month: stri
   for (const a of c.fines) out.push({ name: a.kind === 'correction' ? 'Исправление' : 'Штраф', note: `${dayMonth(a.date)}, ${a.reason}`, sum: a.amount });
   for (const h of c.held) out.push({ name: 'Удержание WB', note: `${dayMonth(h.d.date)}, ${h.d.kind.toLowerCase()}${h.d.assign?.type === 'split' ? ', поровну' : ''}`, sum: -h.amount });
   for (const h of c.credits) out.push({ name: 'WB вернул удержание', note: dayMonth(h.d.date), sum: h.amount });
-  for (const pay of c.payments) out.push({ name: TYPE_LABEL[pay.type], note: `${dayMonth(pay.date)}, ${METHOD_LABEL[pay.method].toLowerCase()}`, sum: -pay.amount });
+  for (const pay of c.payments) out.push({ name: TYPE_LABEL[pay.type], note: `${dayMonth(paidOn(pay))}, ${METHOD_LABEL[pay.method].toLowerCase()}`, sum: -pay.amount });
   void data;
   return out;
 }
 
-function printSlip(p: StaffEntry, c: MonthCalc, lines: Line[], month: string) {
-  printHtml(`Листок ${p.name}`, `<h1>${escapeHtml(p.name)}</h1><p>Листок за ${escapeHtml(monthTitle(month).toLowerCase())}</p>
+function slipHtml(p: StaffEntry, c: MonthCalc, lines: Line[], month: string): string {
+  return `<section><h1>${escapeHtml(p.name)}</h1><p>Листок за ${escapeHtml(monthTitle(month).toLowerCase())}</p>
     <table><tbody>${lines.map(l => `<tr><td>${escapeHtml(l.name)}${l.note ? `<br><small>${escapeHtml(l.note)}</small>` : ''}</td><td class="n">${escapeHtml(signed(l.sum))}</td></tr>`).join('')}
-    <tr><th>Осталось выплатить</th><th class="n">${escapeHtml(rub(c.left))}</th></tr></tbody></table>`);
+    <tr><th>${c.left < 0 ? 'Сотрудник должен пункту' : 'Осталось выплатить'}</th><th class="n">${escapeHtml(rub(Math.abs(c.left)))}</th></tr></tbody></table></section>`;
+}
+
+function printSlip(p: StaffEntry, c: MonthCalc, lines: Line[], month: string) {
+  printHtml(`Листок ${p.name}`, slipHtml(p, c, lines, month));
+}
+
+// ───────── отчёты ─────────
+
+/** Печать всех листков, свод для Excel и расходы на зарплату по месяцам. */
+function Reports({ snap, month }: { snap: Snap; month: string }) {
+  const data = snap.schedule;
+  const staff = snap.staff.staff_list;
+  const toast = useToast();
+  const rows = payrollPeople(staff, data, month).map(p => ({ p, c: monthCalc(p, data, month) }));
+  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(month, i - 5));
+  const [from, setFrom] = useState(shiftMonth(month, -2));
+  const totals = months.map(m => payrollPeople(staff, data, m).reduce((a, p) => { const c = monthCalc(p, data, m); return a + c.earned + c.bonus + c.creditSum - c.fine - c.heldSum; }, 0));
+  const max = Math.max(1, ...totals) * 1.15;
+
+  const sheets = () => printHtml(`Расчётные листки — ${monthTitle(month)}`, rows.map(({ p, c }) => slipHtml(p, c, sheetLines(c, p, data, month), month)).join(''));
+  const copySummary = async () => {
+    const lines = [['Месяц', 'Сотрудник', 'Остаток на начало', 'Начислено', 'Премии', 'Штрафы', 'Удержания WB', 'Выплачено', 'Остаток'].join('\t')];
+    for (const m of months.filter(x => x >= from && x <= month)) {
+      for (const p of payrollPeople(staff, data, m)) {
+        const c = monthCalc(p, data, m);
+        lines.push([monthTitle(m), p.name, c.opening, c.earned, c.bonus + c.creditSum, c.fine, c.heldSum, c.paid, c.left].join('\t'));
+      }
+    }
+    const ok = await copyText(lines.join('\n'));
+    toast(ok ? `Скопировано строк: ${lines.length - 1}. Вставьте в Excel` : 'Не удалось скопировать — разрешите доступ к буферу обмена', ok ? 'success' : 'error');
+  };
+
+  const W = 520, H = 200, pl = 56, pb = 26, bw = 44, step = (W - pl - 16) / months.length;
+  const ticks = [0, 0.5, 1].map(x => Math.round((max * x) / 1000) * 1000);
+  return (
+    <div className={s.reports}>
+      <section className={s.block}>
+        <div className={s.blockHead}><h2>Ведомость на выплату</h2></div>
+        <p className={s.muted} style={{ marginBottom: 12 }}>{monthTitle(month)}, с колонкой для подписи. Суммы — сколько осталось выплатить.</p>
+        <Button variant="secondary" disabled={!rows.length} onClick={() => printPayout(rows, month, data)}>Печать ведомости</Button>
+      </section>
+      <section className={s.block}>
+        <div className={s.blockHead}><h2>Расчётные листки</h2></div>
+        <p className={s.muted} style={{ marginBottom: 12 }}>На каждого сотрудника: что перешло с прошлого месяца, начисления, удержания, выплаты и остаток.</p>
+        <Button variant="secondary" disabled={!rows.length} onClick={sheets}>Печать всех листков</Button>
+      </section>
+      <section className={s.block}>
+        <div className={s.blockHead}><h2>Свод за период</h2></div>
+        <p className={s.muted} style={{ marginBottom: 12 }}>Все суммы по людям и месяцам — для бухгалтера или проверки. Копируется таблицей и вставляется в Excel.</p>
+        <div className={s.toolbar} style={{ marginBottom: 0 }}>
+          <div style={{ width: 190 }}><Dropdown label="С какого месяца" value={from} onChange={setFrom} options={months.map(m => ({ value: m, label: monthTitle(m) }))} /></div>
+          <span className={s.muted}>по {monthTitle(month).toLowerCase()}</span>
+          <Button variant="secondary" onClick={copySummary}>Скопировать для Excel</Button>
+        </div>
+      </section>
+      <section className={s.block}>
+        <div className={s.blockHead}><h2>Расходы на зарплату</h2></div>
+        <p className={s.muted} style={{ marginBottom: 8 }}>Начислено за вычетом штрафов и удержаний, по месяцам.</p>
+        <svg viewBox={`0 0 ${W} ${H}`} className={s.chart} role="img" aria-label={`Расходы на зарплату по месяцам: ${months.map((m, i) => `${monthTitle(m)} — ${rub(Math.max(0, totals[i]))}`).join(', ')}`}>
+          {ticks.map(x => { const y = H - pb - (x / max) * (H - pb - 14); return <g key={x}><line x1={pl} x2={W - 8} y1={y} y2={y} stroke="var(--border)" /><text x={pl - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--text-muted)">{Math.round(x / 1000)} тыс</text></g>; })}
+          {months.map((m, i) => {
+            const v = Math.max(0, totals[i]); const h = (v / max) * (H - pb - 14); const x = pl + step * i + (step - bw) / 2;
+            return (
+              <g key={m}>
+                <rect x={x} y={H - pb - h} width={bw} height={h} rx={4} fill="var(--accent)" />
+                {v > 0 && <text x={x + bw / 2} y={H - pb - h - 6} textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--text)">{Math.round(v / 1000)} тыс</text>}
+                <text x={x + bw / 2} y={H - 8} textAnchor="middle" fontSize="11.5" fill="var(--text-muted)">{monthTitle(m).slice(0, 3)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </section>
+    </div>
+  );
 }
 
 function printPayout(rows: { p: StaffEntry; c: MonthCalc }[], month: string, data: ScheduleData) {

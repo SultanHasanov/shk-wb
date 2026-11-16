@@ -37,8 +37,10 @@ import { legacyStickerCodes } from '../lib/legacy-assets';
 import { forgetPendingOrder, readPendingOrders } from '../lib/pending-orders';
 import { preferCurrency } from '../lib/currency';
 import { LanguageSwitch } from '../components/LanguageSwitch';
+import { WhatsNew, useWhatsNewState } from '../components/WhatsNew';
 import { type T, useLocalePath, useT } from '../i18n';
 import { APP_SUBSCRIPTIONS_LIVE } from '../lib/app-release';
+import { entriesForAccount, isInSection, markOpened, newSections } from '../lib/whats-new';
 
 type NavItem = { to: string; label: string; Icon: typeof Home; end: boolean };
 
@@ -133,24 +135,57 @@ export const CabinetShell = observer(() => {
   const titles = titlesFor(t);
   const email = auth.displayName || t('Пользователь', 'Пайдаланушы');
 
+  // «Что нового» (src/lib/whats-new.ts): метка «new» у обновившегося раздела, пока его не открыли.
+  // Берём только новости про разделы, которые есть в меню этого аккаунта, и только вышедшие
+  // после регистрации: новому человеку старые новости не нужны.
+  const userId = auth.user?.id ?? null;
+  const userCreatedAt = auth.user?.created_at ?? null;
+  const navEnd = new Map(navGroups.flatMap(group => group.items.map(item => [item.to, item.end] as const)));
+  const newsEntries = entriesForAccount(userCreatedAt).flatMap(entry => {
+    const sections = entry.sections.filter(path => navEnd.has(path));
+    // Новость про раздел, которого в этом меню нет, не показываем; общая (без разделов) остаётся.
+    return entry.sections.length > 0 && sections.length === 0 ? [] : [{ ...entry, sections }];
+  });
+  const [newsState, updateNews] = useWhatsNewState(userId);
+  const freshSections = userId ? newSections(newsState, new Date(), newsEntries) : new Set<string>();
+  // Раздел открыт (сам или его вложенная страница) — метка снимается.
+  const openedNow = [...freshSections]
+    .filter(path => isInSection(location.pathname, path, navEnd.get(path)))
+    .sort()
+    .join('|');
+  useEffect(() => {
+    if (!openedNow) return;
+    updateNews(state => openedNow.split('|').reduce((acc, path) => markOpened(acc, path), state));
+  }, [openedNow, updateNews]);
+
   // Нижняя навигация кабинета (телефон): частые разделы + «Ещё», открывающее тот
   // же боковой drawer со всем списком. Бейдж уведомлений переезжает на «Ещё».
   const unread = cabinet.data?.unreadNotifications ?? 0;
+  const tabPaths = ['/cabinet', '/cabinet/subscription', '/cabinet/packages', '/cabinet/referrals'];
+  // Обновился раздел, до которого с телефона можно дойти только через «Ещё», — точка на «Ещё».
+  // Счётчик непрочитанных важнее: при нём точка не рисуется (см. TabBar).
+  const newsBehindMore = [...freshSections].some(path => !tabPaths.includes(path));
   const cabinetTabs: TabItem[] = [
-    { key: 'overview', to: '/cabinet', end: true, label: t('Обзор', 'Шолу'), Icon: Home },
+    { key: 'overview', to: '/cabinet', end: true, label: t('Обзор', 'Шолу'), Icon: Home, dot: freshSections.has('/cabinet') },
     ...(APP_SUBSCRIPTIONS_LIVE
-      ? [{ key: 'subscription', to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop }]
+      ? [{ key: 'subscription', to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, dot: freshSections.has('/cabinet/subscription') }]
       : []),
-    { key: 'packages', to: '/cabinet/packages', label: t('Баланс', 'Баланс'), Icon: WalletCards },
-    { key: 'referrals', to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users },
+    { key: 'packages', to: '/cabinet/packages', label: t('Баланс', 'Баланс'), Icon: WalletCards, dot: freshSections.has('/cabinet/packages') },
+    { key: 'referrals', to: '/cabinet/referrals', label: t('Рефералы', 'Рефералдар'), Icon: Users, dot: freshSections.has('/cabinet/referrals') },
     {
       key: 'more',
       label: t('Ещё', 'Тағы'),
       Icon: Menu,
       onClick: ui.toggleMobile,
-      active: ui.sidebarOpen || !['/cabinet', '/cabinet/subscription', '/cabinet/packages', '/cabinet/referrals'].includes(location.pathname),
+      active: ui.sidebarOpen || !tabPaths.includes(location.pathname),
       badge: unread,
-      ariaLabel: unread > 0 ? t(`Ещё, непрочитанных: ${unread}`, `Тағы, оқылмаған: ${unread}`) : t('Ещё', 'Тағы'),
+      dot: newsBehindMore,
+      ariaLabel:
+        unread > 0
+          ? t(`Ещё, непрочитанных: ${unread}`, `Тағы, оқылмаған: ${unread}`)
+          : newsBehindMore
+            ? t('Ещё, есть новое', 'Тағы, жаңалық бар')
+            : t('Ещё', 'Тағы'),
     },
   ];
 
@@ -351,6 +386,11 @@ export const CabinetShell = observer(() => {
                 )}
               </span>
               <span className={s.label}>{label}</span>
+              {freshSections.has(to) && (
+                <span className={s.newPill} title={t('В разделе есть новое', 'Бөлімде жаңалық бар')}>
+                  new
+                </span>
+              )}
             </NavLink>
           ))}
             </Fragment>
@@ -455,6 +495,12 @@ export const CabinetShell = observer(() => {
       </div>
 
       <TabBar items={cabinetTabs} label={t('Навигация кабинета', 'Кабинет навигациясы')} />
+
+      {/* Окно «Что нового» — один раз, когда кабинет загрузился. На странице результата оплаты
+          не показываем: человек ждёт итог платежа, новость дождётся следующего экрана. */}
+      {auth.user && cabinet.data && location.pathname !== '/cabinet/payment-result' && (
+        <WhatsNew userId={auth.user.id} createdAt={userCreatedAt} entries={newsEntries} />
+      )}
     </div>
   );
 });

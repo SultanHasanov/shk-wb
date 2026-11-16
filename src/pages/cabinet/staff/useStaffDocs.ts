@@ -72,6 +72,11 @@ export interface StaffDocs {
   dismissExtended: () => void;
   /** что слилось с сервера после открытия: приходит при каждом изменении из другого места */
   applyRestored: (key: DocKey, version: number, data: unknown) => void;
+  /**
+   * Что разрешено на этом экране. Сайт не задаёт — владельцу можно всё. Программа задаёт по правам ПК:
+   * edit — менять график и людей, money — видеть суммы и отметки оплаты, export — выгрузка и ссылка.
+   */
+  caps?: { edit: boolean; money: boolean; export: boolean };
 }
 
 export function useStaffDocs(pointId: string): StaffDocs {

@@ -111,6 +111,25 @@
   color: var(--accent-dark);
 }
 
+/* Метка «new» у раздела, о котором вышла новость (src/lib/whats-new.ts). Пропадает, когда раздел открыли. */
+.newPill {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-bold);
+  line-height: 1.3;
+  letter-spacing: var(--tracking-wide);
+}
+
+.active .newPill {
+  background: var(--surface);
+  color: var(--accent-dark);
+}
+
 .nav:hover {
   background: var(--accent-soft);
   color: var(--accent-dark);
@@ -151,7 +170,8 @@
 }
 
 .collapsed .label,
-.collapsed .groupTitle {
+.collapsed .groupTitle,
+.collapsed .newPill {
   display: none;
 }
 
@@ -386,7 +406,8 @@
   .label,
   .collapsed .label,
   .groupTitle,
-  .collapsed .groupTitle {
+  .collapsed .groupTitle,
+  .collapsed .newPill {
     display: block;
   }
 

@@ -243,6 +243,132 @@ export function reopenMonth(data: ScheduleData, month: string): ScheduleData {
   return { ...data, closed };
 }
 
+// ---------- выплата за выбранный месяц и отметки «оплачено» ----------
+
+/**
+ * Дата учёта выплаты за месяц `month`, выданной в день `when`. Выплата попадает в месяц по своей дате,
+ * поэтому зарплата за октябрь, выданная 16 ноября, записывается последним днём октября (настоящий день — в `paidAt`).
+ * Так суммы совпадают и в старых версиях программы, которые про `paidAt` не знают.
+ */
+export function payDate(month: string, when: string): string {
+  const m = monthKey(when);
+  return m === month ? when : m > month ? monthEnd(month) : monthStart(month);
+}
+
+/** Когда деньги выдали на самом деле. */
+export function paidOn(p: Payment): string {
+  return p.paidAt ?? p.date;
+}
+
+interface Owed {
+  month: string;
+  day: string;
+  amount: number;
+  /** смена или принятые товары — у дня есть отметка в календаре; премии и возвраты WB — без отметки */
+  mark: boolean;
+  /** сколько из суммы ещё не выплачено */
+  unpaid: number;
+}
+
+/** Что пункт должен сотруднику за месяц: по дням — смены и принятые товары, отдельно — премии и возвраты WB. */
+function owedItems(c: MonthCalc): Owed[] {
+  const byDay = new Map<string, number>();
+  for (const d of c.days) byDay.set(d.day, (byDay.get(d.day) ?? 0) + d.value * d.rate);
+  for (const d of c.shkDays) byDay.set(d.day, (byDay.get(d.day) ?? 0) + d.n * d.rate);
+  const out: Owed[] = [...byDay].map(([day, amount]) => ({ month: c.month, day, amount, mark: true, unpaid: 0 }));
+  for (const a of c.bonuses) out.push({ month: c.month, day: a.date, amount: a.amount, mark: false, unpaid: 0 });
+  for (const x of c.credits) out.push({ month: c.month, day: x.d.returnedAt ?? monthStart(c.month), amount: x.amount, mark: false, unpaid: 0 });
+  return out.filter((x) => x.amount > 0);
+}
+
+/**
+ * Раскладывает сегодняшний остаток «Осталось выплатить» по тому, что пункт должен сотруднику с месяца `month`.
+ * Выплаты закрывают отработанные дни по порядку, с самых ранних, а премии и возвраты WB — в последнюю очередь.
+ * Значит, не выплачены: сначала премии, потом дни с конца. Что осталось после раскладки — долг более ранних месяцев.
+ *
+ * Месяц до начала учёта выплат считается сам по себе (его остаток дальше не переносится);
+ * месяц, закрытый по-старому, и всё, что до него, выплачено целиком.
+ */
+function allocate(s: StaffEntry, data: ScheduleData, month: string): { items: Owed[]; earlier: number } {
+  const cur = monthKey(todayYmd());
+  const first = monthCalc(s, data, month);
+  const alone = first.beforeLedger || !data.ledgerFrom || month >= cur;
+  let rest = Math.max(0, alone ? first.left : monthCalc(s, data, cur).left);
+  const items: Owed[] = [];
+  let settled = false;
+  for (let m = alone ? month : cur; m >= month; m = shiftMonth(m, -1)) {
+    const c = m === month ? first : monthCalc(s, data, m);
+    // долг не тянется через месяц, закрытый по-старому: он и всё до него выплачено
+    if (c.legacy) settled = true;
+    if (!settled) items.push(...owedItems(c));
+  }
+  items.sort((a, b) => Number(a.mark) - Number(b.mark) || b.day.localeCompare(a.day));
+  for (const x of items) {
+    x.unpaid = Math.min(rest, x.amount);
+    rest -= x.unpaid;
+  }
+  return { items, earlier: settled ? 0 : rest };
+}
+
+export interface Due {
+  calc: MonthCalc;
+  /** сколько осталось отдать за этот месяц (не меньше нуля) */
+  due: number;
+  /** сколько осталось от аванса по правилу */
+  advanceDue: number;
+  /** остаток месяца перешёл на следующие и уже выплачен там */
+  settledLater: boolean;
+}
+
+/**
+ * Сколько осталось выплатить за месяц. Остаток прошлого месяца переходит на следующий, и выплаты следующих
+ * месяцев сначала закрывают его — поэтому для прошлого месяца берём только ту часть сегодняшнего долга,
+ * которая приходится на него и на более ранние. Иначе окно выплаты предложило бы заплатить второй раз.
+ */
+export function dueFor(s: StaffEntry, data: ScheduleData, month: string): Due {
+  const calc = monthCalc(s, data, month);
+  const own = Math.max(0, calc.left);
+  let due = own;
+  if (month < monthKey(todayYmd()) && own > 0 && !calc.legacy && !calc.beforeLedger && data.ledgerFrom) {
+    const a = allocate(s, data, month);
+    const mine = a.items.filter((x) => x.month === month).reduce((sum, x) => sum + x.unpaid, 0) + a.earlier;
+    due = Math.min(own, Math.max(0, Math.round(mine)));
+  }
+  return { calc, due, advanceDue: Math.max(0, calc.advance - calc.advancePaid), settledLater: due < own };
+}
+
+export type PaidState = "paid" | "part" | "due";
+
+export interface PaidMarks {
+  /** отработанные дни месяца: оплачен, оплачен частично, не оплачен */
+  state: Record<string, PaidState>;
+  /** сколько осталось отдать за день (для «частично» и «не оплачен») */
+  unpaid: Record<string, number>;
+}
+
+/**
+ * Какие отработанные дни месяца уже оплачены — по той же раскладке, что и «Осталось выплатить»:
+ * неоплаченные дни плюс невыплаченные премии всегда дают этот остаток. Будущие дни без отметки.
+ */
+export function paidDays(s: StaffEntry, data: ScheduleData, month: string): PaidMarks {
+  const out: PaidMarks = { state: {}, unpaid: {} };
+  if (month > monthKey(todayYmd())) return out;
+  const calc = monthCalc(s, data, month);
+  const { items } = allocate(s, data, month);
+  const mine = items.filter((x) => x.month === month && x.mark);
+  // месяц закрыт по-старому или лежит за таким месяцем — всё выплачено
+  if (!mine.length) {
+    for (const x of owedItems(calc)) if (x.mark) out.state[x.day] = "paid";
+    return out;
+  }
+  for (const x of mine) {
+    // рубль — на округление начисленного за месяц
+    out.state[x.day] = x.unpaid < 1 ? "paid" : x.unpaid >= x.amount - 1 ? "due" : "part";
+    if (x.unpaid >= 1) out.unpaid[x.day] = Math.round(x.unpaid);
+  }
+  return out;
+}
+
 export function addPayment(data: ScheduleData, p: Omit<Payment, "id">): ScheduleData {
   return { ...data, payments: [...(data.payments ?? []), { ...p, id: newId() }] };
 }

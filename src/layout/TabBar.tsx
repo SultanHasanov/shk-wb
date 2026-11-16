@@ -17,6 +17,8 @@ export type TabItem = {
   onClick?: () => void;
   /** Счётчик на иконке (непрочитанные уведомления). */
   badge?: number;
+  /** Точка без числа («есть новое»). Счётчик важнее: при badge > 0 точка не рисуется. */
+  dot?: boolean;
   /** Доступное имя, если видимой подписи и бейджа мало (у «Ещё» с бейджем). */
   ariaLabel?: string;
   /** Активна принудительно (кнопка «Ещё», когда шторка открыта). */
@@ -39,6 +41,8 @@ export function TabBar({ items, label }: { items: readonly TabItem[]; label: str
             <span className={s.badge} aria-hidden="true">
               {item.badge > 99 ? '99+' : item.badge}
             </span>
+          ) : item.dot ? (
+            <span className={s.dot} aria-hidden="true" />
           ) : null;
         const inner = (
           <>

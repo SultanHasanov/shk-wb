@@ -1,23 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Redo2, Undo2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Check, ChevronLeft, ChevronRight, Contrast, Redo2, Undo2 } from 'lucide-react';
 import { Button, Modal } from '../../../ui';
 import {
-  WEEKDAYS,
   addDays,
-  brushOf,
   clearDays,
-  colorOf,
   coverage,
+  crowdedDays,
   dayMonth,
-  hoursOf,
   isActive,
-  isOwnerDay,
   maxPerDay,
   monthEnd,
   monthKey,
   monthStart,
   monthTitle,
-  overLimit,
+  paidDays,
   paysShk,
   personTotal,
   range,
@@ -27,54 +23,62 @@ import {
   shiftOf,
   shiftsOn,
   shkCountOn,
-  shortName,
   todayYmd,
   undecided,
   unitsText,
-  weekday,
+  type PaidMarks,
   type ScheduleData,
-  type Shift,
   type StaffEntry,
 } from '../../../lib/staff-core';
 import { Avatar, useIsPhone } from './parts';
 import { DayPanel } from './DayPanel';
+import { DayQuickPick } from './DayQuickPick';
+import { MonthCalendar } from './MonthCalendar';
 import type { StaffDocs } from './useStaffDocs';
 import s from './staff.module.css';
 
 export type GoTo = { kind: 'replace'; from?: string; day?: string } | { kind: 'template' } | { kind: 'goods' } | { kind: 'people'; personId?: string } | { kind: 'deductions' } | { kind: 'export' } | { kind: 'payroll' } | { kind: 'settings' };
 
-/** Что дописать под именем в клетке, если смена неполная или это замена. */
-function shiftNote(sh: Shift, data: ScheduleData): string {
-  const kind = brushOf(sh, data);
-  const part = kind === 'am' ? 'утро' : kind === 'pm' ? 'вечер' : kind === 'hours' ? hoursOf(sh, data) : '';
-  return [part, sh.replaces ? 'замена' : ''].filter(Boolean).join(', ');
-}
+export type Todo = { key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go?: GoTo; day?: string; run?: () => void; allow?: number };
 
-/** Подпись смены для чтения с экрана и поиска в тестах: «Анна · утро». */
-function shiftLabel(sh: Shift, name: string, data: ScheduleData): string {
-  const note = shiftNote(sh, data);
-  return `${shortName(name)}${note ? ` · ${note}` : ''}`;
+/** Чем раздел дополняет график там, где он встроен (программа: выдачи WB без смены, очистка периода). */
+export interface ScheduleExt {
+  toolbar?: ReactNode;
+  todo?: Todo[];
+  dayBadge?: (day: string) => ReactNode;
 }
 
 /**
  * График — календарь месяца, как на стене: неделя в строке, в клетке — кто работает.
- * Нажатие на день открывает его справа (на телефоне — окном), и там же всё меняется.
+ * Нажатие на день раскрывает рядом список сотрудников (поставить или убрать одним нажатием)
+ * и открывает день справа (на телефоне — окном), где меняется всё остальное.
  */
-export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; month: string; setMonth: (m: string) => void; go: (to: GoTo) => void }) {
+export function ScheduleTab({ docs, month, setMonth, go, ext }: { docs: StaffDocs; month: string; setMonth: (m: string) => void; go: (to: GoTo) => void; ext?: ScheduleExt }) {
   const snap = docs.snap!;
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const phone = useIsPhone();
   const today = todayYmd();
+  const canEdit = docs.caps?.edit !== false;
+  const money = docs.caps?.money !== false;
   const [picked, setPicked] = useState(() => (month === monthKey(today) ? today : monthStart(month)));
   const [sheet, setSheet] = useState(false);
+  const [quick, setQuick] = useState<string | null>(null);
+  const calRef = useRef<HTMLDivElement>(null);
   const days = useMemo(() => range(monthStart(month), monthEnd(month)), [month]);
   const closed = Boolean(data.closed[month]);
   const people = useMemo(() => staff.filter(p => isActive(p) || days.some(d => shiftOf(data, d, p.id))), [staff, data, days]);
-  const nameOf = (id: string) => staff.find(p => p.id === id)?.name || data.removedNames?.[id] || 'сотрудник';
+  // выплаты закрывают дни по порядку — считаем один раз на человека, а не в каждой клетке
+  const paid = useMemo(() => {
+    if (!money) return undefined;
+    const out: Record<string, PaidMarks> = {};
+    for (const p of people) out[p.id] = paidDays(p, data, month);
+    return out;
+  }, [money, people, data, month]);
 
   useEffect(() => {
     if (monthKey(picked) !== month) setPicked(month === monthKey(today) ? today : monthStart(month));
+    setQuick(null);
   }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ctrl+Z / Ctrl+Y, пока фокус не в поле ввода
@@ -94,64 +98,43 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
   const pick = (day: string) => {
     if (monthKey(day) !== month) setMonth(monthKey(day));
     setPicked(day);
+    setQuick(null);
   };
   const openDay = (day: string) => {
-    pick(day);
-    if (phone) setSheet(true);
+    if (monthKey(day) !== month) setMonth(monthKey(day));
+    setPicked(day);
+    if (phone) return setSheet(true);
+    // список у дня — только там, где смены можно менять
+    setQuick(q => (q === day || data.closed[monthKey(day)] || !canEdit ? null : day));
+  };
+  const closeQuick = (focus: boolean) => {
+    const day = quick;
+    setQuick(null);
+    if (focus && day) calRef.current?.querySelector<HTMLButtonElement>(`[data-day="${day}"]`)?.focus();
   };
 
-  const lead = weekday(days[0]);
-  const cells: (string | null)[] = [...Array.from({ length: lead }, () => null), ...days];
-  while (cells.length % 7) cells.push(null);
-  const maxLines = phone ? 2 : 3;
-  const todo = buildTodo(data, staff, people, days, today, month);
+  const todo = [...buildTodo(data, staff, people, days, today, month), ...(ext?.todo ?? [])];
   const total = people.reduce((a, p) => a + personTotal(p, data, days).money, 0);
+  const allow = (n: number) => docs.update(sn => ({ ...sn, schedule: { ...sn.schedule, maxPerDay: n } }));
 
   const calendar = (
-    <section className={s.cal} aria-label={`График на ${monthTitle(month).toLowerCase()}`}>
-      <div className={s.calWeekdays} aria-hidden="true">
-        {WEEKDAYS.map((w, i) => <span key={w} className={i >= 5 ? s.calWeekendName : ''}>{w.toLowerCase()}</span>)}
-      </div>
-      <div className={s.calGrid}>
-        {cells.map((d, i) => {
-          if (!d) return <span key={`gap-${i}`} />;
-          const list = shiftsOn(data, d);
-          const owner = isOwnerDay(data, d);
-          const empty = !list.length && !owner;
-          const lines = list.slice(0, list.length > maxLines ? maxLines - 1 : maxLines);
-          const names = [...list.map(x => shiftLabel(x, nameOf(x.staffId), data)), ...(owner ? ['владелец'] : [])];
-          const cls = [
-            s.calCell,
-            weekday(d) >= 5 && s.calWeekendCell,
-            d === today && s.calToday,
-            empty && d >= today && !closed && s.calNobody,
-            overLimit(data, d) && s.calOver,
-            d === picked && !phone && s.calPicked,
-          ].filter(Boolean).join(' ');
-          return (
-            <button key={d} type="button" className={cls} aria-current={d === today ? 'date' : undefined} aria-pressed={d === picked && !phone}
-              aria-label={`${dayMonth(d)}: ${names.length ? names.join(', ') : 'никого нет'}`} onClick={() => openDay(d)}>
-              <span className={s.calNum}>{Number(d.slice(8))}</span>
-              {lines.map(sh => {
-                const p = staff.find(x => x.id === sh.staffId);
-                const c = p ? colorOf(p, staff.indexOf(p)) : { bg: '#e9eaf0', fg: '#3a3d52', solid: '#6b6f88' };
-                const note = shiftNote(sh, data);
-                return (
-                  <span key={sh.staffId} className={s.calLine} style={{ background: c.bg, color: c.fg }}>
-                    {shortName(nameOf(sh.staffId))}
-                    {note && <small>{note}</small>}
-                  </span>
-                );
-              })}
-              {list.length > lines.length && <span className={s.calMore}>ещё {list.length - lines.length}</span>}
-              {owner && <span className={s.calLine} style={{ background: '#e9eaf0', color: '#3a3d52' }}>{phone ? 'Я' : 'Владелец'}</span>}
-              {empty && d >= today && !closed && <span className={s.calNone}>{phone ? 'никого' : 'никого нет'}</span>}
-            </button>
-          );
-        })}
-      </div>
-      <p className={s.calHint}>Нажмите на день, чтобы поставить или изменить смену. Красный пунктир — в этот день в пункте никого нет.</p>
-    </section>
+    <div ref={calRef}>
+      <MonthCalendar month={month} data={data} staff={staff} phone={phone} onDay={openDay} picked={picked} paid={paid} badge={ext?.dayBadge}
+        popover={quick ? { day: quick, node: place => <DayQuickPick docs={docs} day={quick} place={place} onClose={closeQuick} /> } : undefined}
+        footer={
+          <>
+            <p className={s.calHint}>
+              {canEdit && !closed ? `Нажмите на день — ${phone ? '' : 'рядом '}откроется список сотрудников: нажатие на имя ставит смену, повторное убирает.` : 'Нажмите на день, чтобы посмотреть, кто работает.'}
+            </p>
+            <div className={s.legend}>
+              <span><i className={`${s.swatch} ${s.swatchNobody}`} aria-hidden="true" />в пункте никого нет</span>
+              <span><i className={`${s.swatch} ${s.swatchOver}`} aria-hidden="true" />людей больше, чем разрешено в настройках</span>
+              {money && <span><Check size={13} strokeWidth={3} aria-hidden="true" />смена оплачена</span>}
+              {money && <span><Contrast size={13} aria-hidden="true" />оплачена частично</span>}
+            </div>
+          </>
+        } />
+    </div>
   );
 
   return (
@@ -175,14 +158,17 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
           <button type="button" className={s.iconBtn} aria-label="Следующий месяц" onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight size={16} /></button>
         </div>
         {month !== monthKey(today) && <Button size="sm" variant="ghost" onClick={() => pick(today)}>Сегодня</Button>}
-        <div className={s.btnRow}>
-          <Button size="sm" variant="secondary" disabled={!docs.canUndo} onClick={docs.undo}><Undo2 size={16} />Отменить</Button>
-          <Button size="sm" variant="secondary" disabled={!docs.canRedo} onClick={docs.redo}>Вернуть<Redo2 size={16} /></Button>
-        </div>
+        {canEdit && (
+          <div className={s.btnRow}>
+            <Button size="sm" variant="secondary" disabled={!docs.canUndo} onClick={docs.undo}><Undo2 size={16} />Отменить</Button>
+            <Button size="sm" variant="secondary" disabled={!docs.canRedo} onClick={docs.redo}>Вернуть<Redo2 size={16} /></Button>
+          </div>
+        )}
         <div className={s.toolbarEnd}>
-          <Button size="sm" onClick={() => go({ kind: 'template' })}>Заполнить по шаблону</Button>
-          <Button size="sm" variant="secondary" onClick={() => go({ kind: 'replace' })}>Замена на период</Button>
-          <Button size="sm" variant="secondary" onClick={() => go({ kind: 'export' })}>Выгрузить</Button>
+          {canEdit && <Button size="sm" onClick={() => go({ kind: 'template' })}>Заполнить по шаблону</Button>}
+          {canEdit && <Button size="sm" variant="secondary" onClick={() => go({ kind: 'replace' })}>Замена на период</Button>}
+          {ext?.toolbar}
+          {docs.caps?.export !== false && <Button size="sm" variant="secondary" onClick={() => go({ kind: 'export' })}>Выгрузить</Button>}
         </div>
       </div>
 
@@ -208,11 +194,11 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
                         <Avatar person={p} index={staff.indexOf(p)} size={28} />
                         <span><b>{p.name || 'Без имени'}</b><small>смен {unitsText(tot.units)}</small></span>
                       </span>
-                      <b className={tot.noRate && !tot.byGoods ? s.gWarn : ''}>{tot.byGoods ? 'по товарам' : tot.noRate && !tot.money ? 'нет ставки' : rub(tot.money)}</b>
+                      {money && <b className={tot.noRate && !tot.byGoods ? s.gWarn : ''}>{tot.byGoods ? 'по товарам' : tot.noRate && !tot.money ? 'нет ставки' : rub(tot.money)}</b>}
                     </div>
                   );
                 })}
-                {total > 0 && <div className={s.line}><span><b>Всего по сменам</b></span><b>{rub(total)}</b></div>}
+                {money && total > 0 && <div className={s.line}><span><b>Всего по сменам</b></span><b>{rub(total)}</b></div>}
               </section>
             )}
           </aside>
@@ -229,7 +215,8 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
               <div key={t.key} className={`${s.todoItem} ${t.tone === 'red' ? s.todoRed : t.tone === 'warn' ? s.todoWarn : ''}`}>
                 <span className={s.dot} aria-hidden="true" />
                 <span>{t.text}</span>
-                <button type="button" onClick={() => (t.day ? openDay(t.day) : t.go && go(t.go))}>{t.action}</button>
+                <button type="button" onClick={() => (t.run ? t.run() : t.day ? openDay(t.day) : t.go && go(t.go))}>{t.action}</button>
+                {t.allow && canEdit && <button type="button" onClick={() => allow(t.allow!)}>Разрешить {t.allow === 2 ? 'двоих' : 'троих'} в день</button>}
               </div>
             ))}
           </div>
@@ -237,16 +224,14 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
       </section>
 
       {phone && (
-        <Modal open={sheet} onOpenChange={setSheet} sheet title="Смены дня" description="Выберите для каждого сотрудника, работает ли он в этот день.">
-          <DayPanel key={picked} docs={docs} day={picked} onDay={pick} />
+        <Modal open={sheet} onOpenChange={setSheet} sheet title="Смены дня" description="Нажмите на имя, чтобы поставить или убрать смену. Полсмены, свои часы и замена — ниже.">
+          <DayPanel key={picked} docs={docs} day={picked} onDay={pick} quick />
           <div className={s.dialogActions} style={{ marginTop: 16 }}><Button onClick={() => setSheet(false)}>Готово</Button></div>
         </Modal>
       )}
     </>
   );
 }
-
-type Todo = { key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go?: GoTo; day?: string };
 
 function listDays(ds: string[]): string {
   if (ds.length > 6) return `${ds.length} дней`;
@@ -258,15 +243,21 @@ function listDays(ds: string[]): string {
 function buildTodo(data: ScheduleData, staff: StaffEntry[], people: StaffEntry[], days: string[], today: string, month: string): Todo[] {
   const out: Todo[] = [];
   if (!staff.length) return [{ key: 'nobody', tone: 'warn', action: 'Добавить сотрудников', go: { kind: 'template' }, text: 'В пункте нет сотрудников.' }];
+  const open = !data.closed[month];
   const future = days.filter(d => d >= today);
   const empty = future.filter(d => coverage(data, d) === 0);
-  if (empty.length && !data.closed[month]) {
+  if (empty.length && open) {
     out.push({ key: 'empty', tone: 'red', action: empty.length > 3 ? 'Заполнить по шаблону' : 'Открыть день', ...(empty.length > 3 ? { go: { kind: 'template' } as GoTo } : { day: empty[0] }), text: `В пункте никого нет: ${listDays(empty)}. Откройте день и выберите, кто выйдет, или отметьте, что работаете сами.` });
   }
-  const crowded = future.filter(d => overLimit(data, d));
+  // прошедшие дни тоже: за них начисляется зарплата обоим
+  const crowded = open ? crowdedDays(data, days) : [];
   if (crowded.length) {
     const limit = maxPerDay(data);
-    out.push({ key: 'crowded', tone: 'warn', action: 'Открыть день', day: crowded[0], text: `Людей больше, чем разрешено (${limit === 1 ? 'один человек' : `не больше ${limit}`} в день): ${listDays(crowded)}. Уберите лишнюю смену или разрешите больше людей в настройках.` });
+    const most = crowded.reduce((a, d) => Math.max(a, shiftsOn(data, d).length), 0);
+    out.push({
+      key: 'crowded', tone: 'warn', action: 'Открыть день', day: crowded[0], ...(most <= 3 ? { allow: most } : {}),
+      text: `Людей больше, чем разрешено в настройках (${limit === 1 ? 'один человек' : `не больше ${limit}`} в день): ${listDays(crowded)}. Откройте день и оставьте одного или разрешите работать вместе.`,
+    });
   }
   for (const p of people) {
     if (paysShk(p)) continue;
@@ -276,7 +267,7 @@ function buildTodo(data: ScheduleData, staff: StaffEntry[], people: StaffEntry[]
     const miss = days.filter(d => d <= today && shiftOf(data, d, p.id) && !shkCountOn(data, p.id, d));
     if (miss.length) out.push({ key: `goods-${p.id}`, tone: 'warn', action: 'Ввести товары', go: { kind: 'goods' }, text: `У сотрудника «${p.name}» не введены принятые товары: ${listDays(miss)}. Без них зарплата за эти дни не считается.` });
   }
-  const open = undecided(data, month);
-  if (open.length) out.push({ key: 'wb', tone: 'muted', action: 'Разобрать удержания', go: { kind: 'deductions' }, text: `Удержаний WB, не распределённых между сотрудниками: ${open.length}. Пока не решено, из зарплаты ничего не вычитается.` });
+  const und = undecided(data, month);
+  if (und.length) out.push({ key: 'wb', tone: 'muted', action: 'Разобрать удержания', go: { kind: 'deductions' }, text: `Удержаний WB, не распределённых между сотрудниками: ${und.length}. Пока не решено, из зарплаты ничего не вычитается.` });
   return out;
 }

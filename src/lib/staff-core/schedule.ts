@@ -51,7 +51,10 @@ export interface Cancelled {
 export interface Payment {
   id: string;
   staffId: string;
+  /** дата учёта: день внутри месяца, в счёт которого идёт выплата (по ней выплата попадает в месяц) */
   date: string;
+  /** когда деньги выдали на самом деле — только если это другой месяц (зарплата за октябрь, выданная в ноябре) */
+  paidAt?: string;
   type: "advance" | "salary" | "other";
   amount: number;
   method: "cash" | "card" | "other";
@@ -561,6 +564,15 @@ export function monthWeeks(month: string): { start: string; days: string[] }[] {
     out.push({ start: w, days: range(w, addDays(w, 6)).filter((d) => d >= first && d <= last) });
   }
   return out;
+}
+
+/** Дни выбранных недель месяца (неделя задаётся своим понедельником); `fromDay` отсекает дни раньше него. */
+export function weeksDays(month: string, weekStarts: string[], fromDay?: string): string[] {
+  const on = new Set(weekStarts);
+  return monthWeeks(month)
+    .filter((w) => on.has(w.start))
+    .flatMap((w) => w.days)
+    .filter((d) => !fromDay || d >= fromDay);
 }
 
 /** Очистить дни: все смены или только поставленные автозаполнением (ручные и замены остаются). */

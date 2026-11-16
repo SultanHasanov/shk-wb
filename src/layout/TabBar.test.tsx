@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QrCode, User } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 import { TabBar, type TabItem } from './TabBar';
+import s from './TabBar.module.css';
 
 // Таббар по умолчанию display:none (виден только в @media телефона, которого в
 // jsdom нет), поэтому его элементы «скрыты» для дерева доступности — ищем их с
@@ -57,5 +58,20 @@ describe('TabBar', () => {
   it('не рисует бейдж, когда непрочитанных нет', () => {
     renderBar([{ key: 'more', label: 'Ещё', Icon: User, onClick: () => {}, badge: 0 }]);
     expect(screen.getByRole('button', { name: 'Ещё', hidden: true })).not.toHaveTextContent('0');
+  });
+
+  it('точка «есть новое» рисуется без числа и уступает счётчику непрочитанных', () => {
+    const { unmount } = renderBar([
+      { key: 'more', label: 'Ещё', Icon: User, onClick: () => {}, badge: 0, dot: true, ariaLabel: 'Ещё, есть новое' },
+    ]);
+    const withDot = screen.getByRole('button', { name: 'Ещё, есть новое', hidden: true });
+    expect(withDot.querySelector(`.${s.dot}`)).not.toBeNull();
+    expect(withDot.querySelector(`.${s.badge}`)).toBeNull();
+    unmount();
+
+    renderBar([{ key: 'more', label: 'Ещё', Icon: User, onClick: () => {}, badge: 2, dot: true }]);
+    const withBadge = screen.getByRole('button', { name: 'Ещё', hidden: true });
+    expect(withBadge).toHaveTextContent('2');
+    expect(withBadge.querySelector(`.${s.dot}`)).toBeNull();
   });
 });

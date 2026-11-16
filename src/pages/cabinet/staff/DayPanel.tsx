@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button, Input } from '../../../ui';
 import {
@@ -9,7 +9,10 @@ import {
   isActive,
   isClosedDay,
   isOwnerDay,
+  keepOnly,
   maxPerDay,
+  monthKey,
+  paidDays,
   paintCell,
   paysShk,
   rateOn,
@@ -27,15 +30,18 @@ import {
   undoReplace,
   weekday,
   type Brush,
+  type PaidMarks,
   type ScheduleData,
 } from '../../../lib/staff-core';
 import { Avatar, Dropdown, parseClock } from './parts';
+import { DayQuickPick } from './DayQuickPick';
 import type { StaffDocs } from './useStaffDocs';
 import s from './staff.module.css';
 
 type Kind = 'off' | Exclude<Brush, 'erase'>;
 const WD_FULL = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
 const clock = (t: string) => t.replace(/^0(\d)/, '$1');
+const COUNT = ['', 'один', 'двое', 'трое', 'четверо', 'пятеро'];
 
 function kindOptions(data: ScheduleData): { value: Kind; label: string }[] {
   const half = secondHalf(data);
@@ -50,20 +56,26 @@ function kindOptions(data: ScheduleData): { value: Kind; label: string }[] {
 
 /**
  * Один день пункта: кто работает и как. У каждого сотрудника — список «Не работает / Смена / Полсмены / Свои часы»,
- * поэтому сразу видно и что стоит, и как это поменять. Справа от календаря на компьютере, окном — на телефоне.
+ * поэтому сразу видно и что стоит, и как это поменять. Справа от календаря на компьютере, окном — на телефоне
+ * (там же, сверху, быстрый список «кто работает» — `quick`).
  *
  * В пункте по умолчанию работает один человек в день (настройка `maxPerDay`): второго поставить нельзя,
- * панель предлагает заменить того, кто уже стоит, или разрешить двоих.
+ * панель предлагает заменить того, кто уже стоит, или разрешить двоих. Если людей уже больше, чем разрешено,
+ * панель говорит об этом всё время и даёт кнопки, чтобы исправить.
  */
-export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; onDay: (day: string) => void }) {
+export function DayPanel({ docs, day, onDay, quick = false }: { docs: StaffDocs; day: string; onDay: (day: string) => void; quick?: boolean }) {
   const snap = docs.snap!;
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const today = todayYmd();
-  const locked = isClosedDay(data, day);
+  const closedMonth = isClosedDay(data, day);
+  const canEdit = docs.caps?.edit !== false;
+  const money = docs.caps?.money !== false;
+  const locked = closedMonth || !canEdit;
   const owner = isOwnerDay(data, day);
   const working = shiftsOn(data, day);
   const limit = maxPerDay(data);
+  const over = working.length > limit;
   const people = staff.filter(p => isActive(p) || shiftOf(data, day, p.id));
   const options = kindOptions(data);
   const [pending, setPending] = useState<{ id: string; kind: Exclude<Kind, 'off'> } | null>(null);
@@ -73,6 +85,13 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
   const nameOf = (id: string) => staff.find(p => p.id === id)?.name || data.removedNames?.[id] || 'сотрудник';
   const short = (id: string) => nameOf(id).split(/\s+/)[0];
   const sched = (fn: (d: ScheduleData) => ScheduleData) => docs.update(sn => ({ ...sn, schedule: fn(sn.schedule) }));
+  const month = monthKey(day);
+  // оплачено ли за этот день — та же раскладка, что и в календаре
+  const paid = useMemo(() => {
+    const out: Record<string, PaidMarks> = {};
+    if (money && day <= today) for (const x of working) { const p = staff.find(q => q.id === x.staffId); if (p) out[p.id] = paidDays(p, data, month); }
+    return out;
+  }, [money, day, today, working, staff, data, month]);
 
   const hoursFor = (id: string) => {
     const sh = shiftOf(data, day, id);
@@ -118,12 +137,35 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
         <button type="button" className={s.iconBtn} aria-label="Следующий день" onClick={() => onDay(addDays(day, 1))}><ChevronRight size={16} /></button>
       </div>
 
-      <p className={`${s.dayState} ${!working.length && !owner ? (day >= today ? s.dayStateBad : '') : s.dayStateOk}`} role="status">
+      <p className={`${s.dayState} ${over ? s.dayStateWarn : !working.length && !owner ? (day >= today ? s.dayStateBad : '') : s.dayStateOk}`} role="status">
         {owner ? 'Работает владелец'
           : working.length ? `В пункте: ${working.map(x => short(x.staffId)).join(', ')}`
           : day >= today ? 'В пункте никого нет — выберите, кто выйдет' : 'В этот день никто не работал'}
       </p>
-      {locked && <p className={s.note}>Месяц закрыт — смены этого дня защищены от правок. Открыть месяц можно во вкладке «Зарплата».</p>}
+      {closedMonth && <p className={s.note}>Месяц закрыт — смены этого дня защищены от правок. Открыть месяц можно во вкладке «Зарплата».</p>}
+      {!closedMonth && !canEdit && <p className={s.note}>Изменение графика закрыто владельцем на этом компьютере — только просмотр.</p>}
+
+      {over && (
+        <div className={s.dayWarn} role="alert">
+          <p>
+            В этот день в пункте {COUNT[working.length] ?? working.length}: {working.map(x => short(x.staffId)).join(', ')}.
+            В настройках указано, что {limit === 1 ? 'работает один человек' : `работают не больше ${limit}`} в день{day <= today && money ? ' — зарплата начисляется каждому' : ''}.
+          </p>
+          {!locked && (
+            <div className={s.dayWarnActions}>
+              {working.map(x => (
+                <Button key={x.staffId} size="sm" onClick={() => sched(d => keepOnly(d, day, x.staffId))}>Оставить только: {short(x.staffId)}</Button>
+              ))}
+              {working.length <= 3 && (
+                <Button size="sm" variant="secondary" onClick={() => sched(d => ({ ...d, maxPerDay: working.length }))}>Разрешить {working.length === 2 ? 'двоих' : 'троих'} в день</Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {quick && !locked && <DayQuickPick docs={docs} day={day} inline onClose={() => {}} />}
+      {quick && !locked && people.length > 0 && <p className={s.daySection}>Полсмены, свои часы и замена</p>}
 
       <div className={s.dayList}>
         {people.map(p => {
@@ -133,13 +175,20 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
           const free = staff.filter(x => x.id !== p.id && isActive(x) && !shiftOf(data, day, x.id));
           const typed = hours[p.id] ?? (sh?.kind === 'custom' ? { from: clock(sh.from ?? ''), to: clock(sh.to ?? '') } : { from: '10:00', to: '18:00' });
           const goods = shkCountOn(data, p.id, day)?.n;
+          const mark = sh ? paid[p.id]?.state[day] : undefined;
+          const unpaid = paid[p.id]?.unpaid[day];
           return (
             <div key={p.id} className={s.dayRow}>
               <div className={s.dayPerson}>
                 <Avatar person={p} index={staff.indexOf(p)} size={28} />
                 <b>{p.name || 'Без имени'}</b>
-                {sh && <span className={s.dayPay}>{paysShk(p) ? 'по товарам' : pay ? rub(pay) : 'нет ставки'}</span>}
+                {sh && money && <span className={s.dayPay}>{paysShk(p) ? 'по товарам' : pay ? rub(pay) : 'нет ставки'}</span>}
               </div>
+              {mark && (
+                <p className={`${s.dayPaid} ${mark === 'paid' ? s.dayPaidOk : ''}`}>
+                  {mark === 'paid' ? 'За этот день оплачено' : mark === 'part' ? `Оплачено частично, осталось ${rub(unpaid ?? 0)}` : 'За этот день ещё не оплачено'}
+                </p>
+              )}
               <Dropdown label={`${p.name}: смена ${dayMonth(day)}`} value={kind} disabled={locked} onChange={v => choose(p.id, v)} options={options} />
 
               {kind === 'hours' && (
@@ -191,9 +240,11 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
                         Поставить вместо: {short(x.staffId)}
                       </Button>
                     ))}
-                    <Button size="sm" variant="secondary" onClick={() => { put(p.id, pending.kind, d => ({ ...d, maxPerDay: Math.min(3, working.length + 1) })); setPending(null); }}>
-                      Разрешить {working.length + 1 === 2 ? 'двоих' : 'троих'} в день
-                    </Button>
+                    {working.length < 3 && (
+                      <Button size="sm" variant="secondary" onClick={() => { put(p.id, pending.kind, d => ({ ...d, maxPerDay: Math.min(3, working.length + 1) })); setPending(null); }}>
+                        Разрешить {working.length + 1 === 2 ? 'двоих' : 'троих'} в день
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" onClick={() => setPending(null)}>Отмена</Button>
                   </div>
                 </div>
@@ -204,7 +255,7 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
 
         <div className={s.dayRow}>
           <div className={s.dayPerson}>
-            <span className={s.avatar} aria-hidden="true" style={{ width: 28, height: 28, background: '#e9eaf0', color: '#3a3d52', fontSize: 10 }}>Я</span>
+            <span className={s.avatar} aria-hidden="true" style={{ width: 28, height: 28, background: 'var(--surface-sunken)', color: 'var(--text)', fontSize: 10 }}>Я</span>
             <b>Владелец</b>
             {owner && <span className={s.dayPay}>без оплаты</span>}
           </div>
@@ -228,7 +279,7 @@ export function DayPanel({ docs, day, onDay }: { docs: StaffDocs; day: string; o
       </div>
 
       {people.length === 0 && <p className={s.note}>В пункте пока нет сотрудников. Добавьте их во вкладке «Люди».</p>}
-      {dayMoney > 0 && <p className={s.dayTotal}><span>Зарплата за день</span><b>{rub(dayMoney)}</b></p>}
+      {money && dayMoney > 0 && <p className={s.dayTotal}><span>Зарплата за день</span><b>{rub(dayMoney)}</b></p>}
     </section>
   );
 }

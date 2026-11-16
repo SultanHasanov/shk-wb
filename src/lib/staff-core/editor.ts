@@ -181,3 +181,45 @@ export function maxPerDay(data: ScheduleData): number {
 export function overLimit(data: ScheduleData, day: string): boolean {
   return (data.shifts[day]?.length ?? 0) > maxPerDay(data);
 }
+
+/** Дни из списка, где людей больше, чем разрешено (прошедшие тоже: за них начисляется зарплата). */
+export function crowdedDays(data: ScheduleData, days: string[]): string[] {
+  return days.filter((d) => overLimit(data, d));
+}
+
+export type QuickResult =
+  /** готово; swapped — кого сняли, чтобы поставить выбранного */
+  | { kind: "done"; data: ScheduleData; swapped?: string }
+  /** мест нет, и молча менять нельзя — пусть человек решит сам */
+  | { kind: "ask"; working: string[]; limit: number };
+
+/**
+ * Быстрый выбор в списке у дня: у кого смена есть — снять, у кого нет — поставить полную.
+ * Если в пункте работает один человек в день и он уже стоит обычной полной сменой, выбранный встаёт вместо него.
+ * Полсмены, свои часы, замена или введённые принятые товары у стоящего молча не теряются — тогда `ask`.
+ */
+export function quickToggle(data: ScheduleData, staffId: string, day: string): QuickResult {
+  if (isClosedDay(data, day)) return { kind: "done", data };
+  if (shiftOf(data, day, staffId)) return { kind: "done", data: paintCell(data, staffId, day, "erase") };
+  const working = data.shifts[day] ?? [];
+  const limit = maxPerDay(data);
+  if (working.length < limit) return { kind: "done", data: paintCell(data, staffId, day, "full") };
+  const only = working.length === 1 ? working[0] : undefined;
+  if (limit === 1 && only && only.kind === "full" && !only.replaces && !data.shkCounts?.[only.staffId]?.[day]) {
+    return { kind: "done", data: paintCell(removeShift(data, day, only.staffId), staffId, day, "full"), swapped: only.staffId };
+  }
+  return { kind: "ask", working: working.map((x) => x.staffId), limit };
+}
+
+/** Оставить в дне одного человека — остальных снять. */
+export function keepOnly(data: ScheduleData, day: string, staffId: string): ScheduleData {
+  if (isClosedDay(data, day)) return data;
+  return setShifts(data, day, (data.shifts[day] ?? []).filter((x) => x.staffId === staffId));
+}
+
+/** Убрать из дня всех: смены сотрудников и отметку «работает владелец». */
+export function clearDay(data: ScheduleData, day: string): ScheduleData {
+  if (isClosedDay(data, day)) return data;
+  const next = setShifts(data, day, []);
+  return isOwnerDay(next, day) ? { ...next, ownerDays: (next.ownerDays ?? []).filter((d) => d !== day) } : next;
+}

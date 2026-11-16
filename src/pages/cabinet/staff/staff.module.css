@@ -131,8 +131,24 @@
 .calCell:focus-visible { outline: 3px solid rgba(203, 17, 171, 0.45); outline-offset: 1px; }
 .calWeekendCell { background: var(--surface-muted); }
 .calNobody { border: 2px dashed var(--danger); background: var(--danger-soft); padding: 5.5px; }
-.calOver { border-color: var(--warning); background: var(--warning-soft); }
-.calPicked, .calPicked:hover { border: 2px solid var(--text); padding: 5.5px; }
+.calOver, .calOver:hover { border-color: var(--warning); background: var(--warning-soft); }
+/* выбранный день — обводкой снаружи: рамка клетки остаётся цветом её состояния (никого нет, людей больше) */
+.calPicked { box-shadow: 0 0 0 2px var(--text); }
+.calDim { opacity: 0.4; }
+.calStatic { cursor: default; }
+.calStatic:hover { border-color: var(--border); }
+.calStatic.calOver:hover { border-color: var(--warning); }
+.calWrap { position: relative; min-width: 0; display: flex; }
+.calWrap > .calCell { flex: 1; }
+.calTop { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.calBadge { margin-left: auto; padding: 1px 6px; border-radius: 999px; background: var(--warning); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+.calName { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.calName > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.calPaid { flex: none; }
+.calFresh { outline: 2px solid; outline-offset: -2px; }
+.calWithWeeks { grid-template-columns: 30px repeat(7, minmax(0, 1fr)); }
+.calWeekPick { display: grid; place-items: center; cursor: pointer; }
+.calWeekPick input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
 .calNum { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 999px; font-size: var(--fs-13); font-weight: 600; font-variant-numeric: tabular-nums; }
 .calToday .calNum { background: var(--accent); color: var(--text-on-accent); }
 .calLine { padding: 2px 6px; border-radius: 6px; font-size: var(--fs-12); font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -140,6 +156,59 @@
 .calMore { font-size: var(--fs-11); color: var(--text-muted); padding-left: 6px; }
 .calNone { font-size: var(--fs-12); font-weight: 600; color: var(--danger); padding-left: 2px; }
 .calHint { margin: var(--sp-3) 0 0; font-size: var(--fs-13); color: var(--text-muted); }
+.swatch { flex: none; width: 14px; height: 14px; border-radius: 4px; box-sizing: border-box; }
+.swatchNobody { border: 2px dashed var(--danger); background: var(--danger-soft); }
+.swatchOver { border: 1.5px solid var(--warning); background: var(--warning-soft); }
+
+/* ── быстрый список у дня ── */
+.quick {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  width: 250px;
+  max-width: 86vw;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  text-align: left;
+}
+.quickUp { top: auto; bottom: calc(100% + 4px); }
+.quickRight { left: auto; right: 0; }
+.quickInline { display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; }
+.quickHead { margin: 0; padding: 4px 8px 6px; display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-13); }
+.quickHead b { flex: 1; font-weight: 600; }
+.quickHead span { font-size: var(--fs-12); color: var(--text-muted); }
+.quickItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-14);
+  text-align: left;
+  cursor: pointer;
+}
+.quickItem > span:nth-child(2) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.quickItem:hover:not(:disabled), .quickItem:focus-visible { background: var(--surface-muted); outline: none; }
+.quickItem:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.quickItem svg { flex: none; }
+.quickOn { color: var(--accent-dark); font-weight: 600; background: var(--accent-soft); }
+.quickOn:hover:not(:disabled) { background: var(--accent-soft); }
+.quickClear { margin-top: 4px; border-top: 1px solid var(--surface-sunken); border-radius: 0 0 8px 8px; color: var(--danger); font-size: var(--fs-13); font-weight: 600; }
+.quickClear:disabled { color: var(--text-muted); cursor: default; }
+.quickFoot { margin: 0; padding: 4px 8px 2px; font-size: var(--fs-12); line-height: 1.4; color: var(--text-muted); }
+.quick .dayWarn, .quickInline .dayWarn { margin: 4px 0; }
 
 /* ── день ── */
 .dayPanel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-md); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
@@ -150,6 +219,10 @@
 .dayState { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--surface-muted); font-size: var(--fs-14); font-weight: 600; }
 .dayStateOk { background: var(--success-soft); color: var(--success); }
 .dayStateBad { background: var(--danger-soft); color: var(--danger); }
+.dayStateWarn { background: var(--warning-soft); color: var(--warning); }
+.daySection { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--text-muted); }
+.dayPaid { margin: -4px 0 0; font-size: var(--fs-12); color: var(--text-muted); }
+.dayPaidOk { color: var(--success); font-weight: 600; }
 .dayList { display: flex; flex-direction: column; }
 .dayRow { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--surface-sunken); }
 .dayRow:first-child { border-top: 0; padding-top: 0; }
@@ -210,6 +283,7 @@
 }
 .coverZero { background: var(--danger); color: #fff; font-weight: 700; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--text-muted); }
+.legend > span { display: inline-flex; align-items: center; gap: 6px; }
 
 .banner {
   display: flex;
@@ -300,6 +374,32 @@
 .modeRow:first-child { border-top: 0; }
 .modeName { display: flex; align-items: center; gap: 10px; font-size: var(--fs-14); font-weight: 600; }
 .modeBody { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+/* мини-месяц в мастере: нажатие на день — с него начинается рабочая смена */
+.mini { max-width: 320px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.mini > small { text-align: center; font-size: 10px; color: var(--text-muted); }
+.miniDay {
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.miniDay:hover:not(:disabled) { border-color: var(--text-tertiary); }
+.miniDay:disabled { cursor: default; }
+.miniStart { box-shadow: 0 0 0 2px var(--text); }
+.wizBar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
+
+/* ── отчёты ── */
+.reports { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--sp-4); }
+.reports > .block { margin-bottom: 0; }
+.chart { width: 100%; max-width: 560px; height: auto; display: block; }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
 .statBox { padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-muted); display: flex; flex-direction: column; gap: 4px; }
@@ -439,7 +539,11 @@
   .cal { padding: 8px; }
   .calGrid, .calWeekdays { gap: 3px; }
   .calCell { min-height: 60px; padding: 3px; align-items: center; gap: 2px; }
-  .calNobody, .calPicked { padding: 2.5px; }
+  .calNobody { padding: 2.5px; }
+  .calBadge { padding: 0 4px; font-size: 9px; }
+  .calWithWeeks { grid-template-columns: 24px repeat(7, minmax(0, 1fr)); }
+  .calTop { justify-content: center; }
+  .calStatic { min-height: 48px; }
   .calNum { width: 20px; height: 20px; font-size: var(--fs-12); }
   .calLine { width: 100%; box-sizing: border-box; padding: 1px 2px; font-size: 10px; text-align: center; }
   .calLine small { font-size: 9px; }

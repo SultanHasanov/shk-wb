@@ -1,0 +1,26 @@
+.entries {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.entryTitle {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-16);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-snug);
+  color: var(--text);
+}
+
+.list {
+  margin: 0;
+  padding-left: var(--sp-5);
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--text-muted);
+  font-size: var(--fs-14);
+  line-height: var(--lh-normal);
+}
+
+.entryAction {
+  margin-top: var(--sp-3);
+}
