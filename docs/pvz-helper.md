@@ -5,6 +5,21 @@
 История Python-версии 1.4.x — `docs/archive/pvz-helper-python-1.4.md` (не инструкция).
 Хранилище облака (Supabase + свой Postgres на shk-wb, бэкапы, аварийные выключатели) — `docs/site.md`.
 
+## Общий код с версией для Linux (с 17.11.2026) — правя Помощника, не сломайте её
+Версия для Linux (`_local-only/pvz-serve`, подробно — `docs/pvz-linux.md`) собирается из ЭТИХ ЖЕ исходников:
+- Rust-модули `db, boxes, mp_boxes, ops, goods_local, inventory, stickers, account, lease, license, points, config, paths,
+  images, util, models, archive, downloads, mirror, notes, telegram, wb_online` подключены в pvz-serve через `#[path]`.
+  В них можно звать только `tauri::async_runtime` (его даёт `tauri-shim`); `AppHandle`, `emit`, окна — только в `lib.rs`
+  и оконных модулях. Новый `crate::<модуль>` в этих файлах → модуль тоже должен собираться без Tauri (или заглушка в pvz-serve).
+- Linux-ветки — `#[cfg(not(windows))]` в `paths.rs` (XDG, найденная база, «Загрузки»), `account.rs` (ID из `/etc/machine-id`,
+  hostname), `stickers.rs`. Windows-сборка их не компилирует.
+- Фронт общий: `src/lib/platform.ts` — транспорт (Tauri `invoke`/`listen` или `fetch`/`EventSource`) и `WEB_TABS` (разделы
+  Linux). **Новые вызовы — только через `api.*` из `lib/ipc.ts` и `listen` оттуда же, не `@tauri-apps/api` напрямую.**
+  Отличия по `IS_WEB` — в Settings, Account, Stickers, Gates, Home, App.
+- Команда, нужная Linux-разделу, добавляется ещё и в `pvz-serve/src/cmd.rs` (иначе там `NOT_AVAILABLE`).
+- **Версия одна:** `pvz-serve/Cargo.toml` = версии Помощника (`build.rs` проверяет). Подняли `PVZ_APP_MIN_VERSION` —
+  пересобрать и выложить Linux той же версии: `build-linux.sh` + `publish-linux.sh` (сайт выкладывать не нужно).
+
 ## Сотрудники — ТОЛЬКО из онлайн-API WB (в sqlite их нет: issued_by пустое, ФИО нет)
 Проверено по `my-pvz.wb.ru6.har`. Авторизация — тот же вход в WB, что для отзывов
 (`WbReviewsClient`: request_code → confirm_code → load_point_ids → enrich_for_point → JWT `self.token`).
