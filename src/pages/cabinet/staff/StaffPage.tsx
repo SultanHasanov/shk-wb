@@ -110,6 +110,7 @@ function Workspace({ point, tab, setTab, initialMonth }: { point: StaffPoint; ta
     else if (to.kind === 'people') { setFocusPerson(to.personId); setTab('people'); }
     else if (to.kind === 'deductions') { setPayView('deductions'); setTab('payroll'); }
     else if (to.kind === 'payroll') setTab('payroll');
+    else if (to.kind === 'settings') setTab('settings');
   };
   const empty = docs.snap.staff.staff_list.length === 0;
 

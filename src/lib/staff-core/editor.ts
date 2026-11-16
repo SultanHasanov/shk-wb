@@ -170,3 +170,14 @@ function cleanUndefined(data: ScheduleData): ScheduleData {
   }
   return { ...data, shifts };
 }
+
+/** Сколько человек может работать в пункте в один день: 1 (по умолчанию), 2 или 3. */
+export function maxPerDay(data: ScheduleData): number {
+  const n = Number(data.maxPerDay);
+  return n === 2 || n === 3 ? n : 1;
+}
+
+/** В этот день сотрудников больше, чем разрешено настройкой пункта. */
+export function overLimit(data: ScheduleData, day: string): boolean {
+  return (data.shifts[day]?.length ?? 0) > maxPerDay(data);
+}

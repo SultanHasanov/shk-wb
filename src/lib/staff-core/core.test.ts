@@ -3,6 +3,8 @@ import {
   buildOverview,
   copyDays,
   emptySchedule,
+  maxPerDay,
+  overLimit,
   exportSheets,
   monthCalc,
   normalizeSchedule,
@@ -62,6 +64,17 @@ describe('кисть', () => {
     expect(d.ownerDays).toEqual(['2026-11-10']);
     d = paintCell(d, 'm', '2026-11-10', 'full');
     expect(d.ownerDays).toEqual([]);
+  });
+});
+
+describe('сколько человек в день', () => {
+  it('по умолчанию один; больше — день помечается, настройка разрешает двоих', () => {
+    let d = paintCell(sched(), 'a', '2026-11-20', 'full');
+    d = paintCell(d, 'm', '2026-11-20', 'am');
+    expect(maxPerDay(d)).toBe(1);
+    expect(overLimit(d, '2026-11-20')).toBe(true);
+    expect(overLimit({ ...d, maxPerDay: 2 }, '2026-11-20')).toBe(false);
+    expect(maxPerDay({ ...d, maxPerDay: 7 })).toBe(1);
   });
 });
 

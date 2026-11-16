@@ -161,6 +161,8 @@ export interface ScheduleData {
   ownerDays?: string[];
   /** с какого месяца ведётся учёт выплат: остаток переносится только начиная с него */
   ledgerFrom?: string;
+  /** сколько человек может работать в пункте в один день (1 по умолчанию); больше — предупреждение */
+  maxPerDay?: number;
 }
 
 export interface ShkCount {

@@ -104,44 +104,73 @@
 .blockHead { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
 .blockHead h2 { margin: 0; font-size: var(--fs-16); font-weight: 600; }
 
-/* ── кисть ── */
-.palette { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.paletteLabel { font-size: var(--fs-13); font-weight: 600; margin-right: 4px; }
-.brush {
+/* ── календарь месяца ── */
+.schedLayout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--sp-4); align-items: start; }
+.side { position: sticky; top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.cal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: var(--sp-3); }
+.calWeekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 6px; text-align: center; font-size: var(--fs-12); color: var(--text-muted); }
+.calWeekendName { color: var(--accent-dark); }
+.calGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.calCell {
+  min-width: 0;
+  min-height: 96px;
   display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 44px;
-  padding: 5px 14px 5px 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 6px;
+  border: 1.5px solid var(--border);
   border-radius: 10px;
-  border: 2px solid var(--border);
   background: var(--surface);
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.brushOn { border-color: var(--accent); background: var(--accent-soft); }
-.brushGap { margin-left: var(--sp-3); }
-.swatch { flex: none; width: 26px; height: 26px; border-radius: 6px; box-sizing: border-box; border: 1px solid var(--text-muted); }
-.brushText { display: flex; flex-direction: column; gap: 3px; }
-.brushText b { font-size: var(--fs-13); font-weight: 600; }
-.brushText small { font-size: var(--fs-11); color: var(--text-muted); }
-.hoursBar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  padding: 10px 12px;
-  margin-top: var(--sp-3);
-  border-radius: 10px;
-  background: var(--surface-muted);
-  font-size: var(--fs-14);
-}
-.timeInput { width: 84px; }
-.hint { margin: var(--sp-3) 0; font-size: var(--fs-13); line-height: 1.45; color: var(--text-muted); max-width: 96ch; }
+.calCell:hover { border-color: var(--text-tertiary); }
+.calCell:focus-visible { outline: 3px solid rgba(203, 17, 171, 0.45); outline-offset: 1px; }
+.calWeekendCell { background: var(--surface-muted); }
+.calNobody { border: 2px dashed var(--danger); background: var(--danger-soft); padding: 5.5px; }
+.calOver { border-color: var(--warning); background: var(--warning-soft); }
+.calPicked, .calPicked:hover { border: 2px solid var(--text); padding: 5.5px; }
+.calNum { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 999px; font-size: var(--fs-13); font-weight: 600; font-variant-numeric: tabular-nums; }
+.calToday .calNum { background: var(--accent); color: var(--text-on-accent); }
+.calLine { padding: 2px 6px; border-radius: 6px; font-size: var(--fs-12); font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calLine small { display: block; font-size: 10.5px; font-weight: 500; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
+.calMore { font-size: var(--fs-11); color: var(--text-muted); padding-left: 6px; }
+.calNone { font-size: var(--fs-12); font-weight: 600; color: var(--danger); padding-left: 2px; }
+.calHint { margin: var(--sp-3) 0 0; font-size: var(--fs-13); color: var(--text-muted); }
 
-/* ── табель ── */
+/* ── день ── */
+.dayPanel { background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-md); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.dayHead { display: flex; align-items: center; gap: var(--sp-2); }
+.dayTitle { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.dayTitle b { font-size: var(--fs-18); }
+.dayTitle small { font-size: var(--fs-13); color: var(--text-muted); }
+.dayState { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--surface-muted); font-size: var(--fs-14); font-weight: 600; }
+.dayStateOk { background: var(--success-soft); color: var(--success); }
+.dayStateBad { background: var(--danger-soft); color: var(--danger); }
+.dayList { display: flex; flex-direction: column; }
+.dayRow { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--surface-sunken); }
+.dayRow:first-child { border-top: 0; padding-top: 0; }
+.dayPerson { display: flex; align-items: center; gap: 8px; font-size: var(--fs-14); min-width: 0; }
+.dayPerson b { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dayPay { font-size: var(--fs-13); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeInput { width: 84px; }
+.dayHours { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-14); }
+.daySub { margin: 0; font-size: var(--fs-13); color: var(--text-muted); }
+.dayReplace { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.dayReplace > :first-child { width: 100%; }
+.linkBtn { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-13); font-weight: 600; color: var(--accent-dark); cursor: pointer; }
+.linkBtn:hover { text-decoration: underline; }
+.dayWarn { padding: 12px; border-radius: 10px; background: var(--warning-soft); border: 1px solid var(--warning); display: flex; flex-direction: column; gap: 10px; }
+.dayWarn p { margin: 0; font-size: var(--fs-14); line-height: 1.45; }
+.dayWarnActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dayTotal { margin: 0; display: flex; align-items: baseline; gap: 10px; padding-top: var(--sp-3); border-top: 1px solid var(--surface-sunken); font-size: var(--fs-14); }
+.dayTotal span { flex: 1; color: var(--text-muted); }
+.dayTotal b { font-variant-numeric: tabular-nums; }
+
+/* ── таблицы «люди × дни» (все пункты, мастер) ── */
 .gridWrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
 .grid { min-width: 1000px; user-select: none; }
 .gRow { display: grid; align-items: center; border-top: 1px solid var(--surface-sunken); }
@@ -168,24 +197,6 @@
 .gSum { text-align: right; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }
 .gSum b { font-size: var(--fs-13); font-weight: 600; }
 .gSum small { font-size: var(--fs-11); color: var(--text-muted); }
-.cell {
-  height: 34px;
-  margin: 3px 1px;
-  padding: 0;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  font: 600 10px/1 inherit;
-  font-family: inherit;
-  color: var(--text-muted);
-  cursor: cell;
-}
-.cell:hover:not(:disabled) { outline: 2px solid var(--accent); outline-offset: -1px; }
-.cell:focus-visible { outline: 3px solid rgba(203, 17, 171, 0.45); outline-offset: 1px; }
-.cell:disabled { cursor: not-allowed; opacity: 0.55; }
-.cellWeekend { background: var(--surface-muted); }
-.cellPicked { box-shadow: 0 0 0 3px var(--accent); }
 .cover {
   justify-self: center;
   min-width: 22px;
@@ -199,20 +210,6 @@
 }
 .coverZero { background: var(--danger); color: #fff; font-weight: 700; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: var(--sp-3); font-size: var(--fs-12); color: var(--text-muted); }
-
-.selPanel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  margin-top: var(--sp-3);
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-softer);
-  font-size: var(--fs-14);
-}
-.selPanel > span { flex: 1 1 260px; line-height: 1.4; }
 
 .banner {
   display: flex;
@@ -248,45 +245,6 @@
 .todoRed .dot { background: var(--danger); }
 .todoWarn .dot { background: var(--warning); }
 .allClear { margin: 0; font-size: var(--fs-14); color: var(--success); }
-
-/* ── телефон: лента по дням ── */
-.strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: var(--sp-3); }
-.stripDay {
-  height: 60px;
-  padding: 0;
-  border-radius: var(--r-md);
-  border: 2px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  font: inherit;
-  cursor: pointer;
-}
-.stripDay small { font-size: 11px; color: var(--text-muted); }
-.stripDay b { font-size: var(--fs-16); }
-.stripDay i { font-style: normal; font-size: 10px; font-weight: 700; min-width: 16px; height: 14px; border-radius: 4px; display: grid; place-items: center; color: var(--text-muted); }
-.stripDay i.coverZero { color: #fff; }
-.stripOn { border-color: var(--accent); background: var(--accent-soft); }
-.feedPerson { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-top: 1px solid var(--surface-sunken); }
-.feedPerson:first-child { border-top: 0; }
-.feedHead { display: flex; align-items: center; gap: 8px; font-size: var(--fs-14); font-weight: 600; }
-.feedHead small { margin-left: auto; font-size: var(--fs-12); font-weight: 400; color: var(--text-muted); }
-.choice { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
-.choice button {
-  height: 44px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-13);
-  cursor: pointer;
-}
-.choice button[aria-pressed='true'] { border: 2px solid var(--accent); background: var(--accent-soft); font-weight: 600; }
 
 /* ── формы в окнах ── */
 .form { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -477,5 +435,14 @@
   .modeRow { grid-template-columns: 1fr; }
   .steps { grid-template-columns: 1fr; }
   .toolbarEnd { margin-left: 0; }
-  .brushGap { margin-left: 0; }
+  .schedLayout { grid-template-columns: 1fr; }
+  .cal { padding: 8px; }
+  .calGrid, .calWeekdays { gap: 3px; }
+  .calCell { min-height: 60px; padding: 3px; align-items: center; gap: 2px; }
+  .calNobody, .calPicked { padding: 2.5px; }
+  .calNum { width: 20px; height: 20px; font-size: var(--fs-12); }
+  .calLine { width: 100%; box-sizing: border-box; padding: 1px 2px; font-size: 10px; text-align: center; }
+  .calLine small { font-size: 9px; }
+  .calNone, .calMore { font-size: 10px; padding: 0; }
+  .dayPanel { border: 0; box-shadow: none; padding: 0; }
 }

@@ -3,7 +3,7 @@ import { Button, Input, Switch, useToast } from '../../../ui';
 import { useRestoreStaffVersion, useStaffHistory } from '../../../api/staff';
 import { moneyInput, parseClock, parseMoney, Dropdown } from './parts';
 import type { DocKey, StaffDocs } from './useStaffDocs';
-import type { ScheduleData } from '../../../lib/staff-core';
+import { maxPerDay, type ScheduleData } from '../../../lib/staff-core';
 import s from './staff.module.css';
 
 const ADV_DAYS = ['5', '10', '12', '15', '20', '25'];
@@ -50,6 +50,15 @@ export function SettingsTab({ docs, pointId, pointName }: { docs: StaffDocs; poi
               <Input id="se-to" className={s.timeInput} value={to} onChange={e => setTo(e.target.value)} onBlur={commitHours} />
             </div>
             <p className={hoursErr ? `${s.note} ${s.noteWarn}` : s.muted} style={{ marginTop: 8 }}>{hoursErr || 'От этого считаются полсмены и свои часы: 6 часов из 12 оплачиваются как половина ставки.'}</p>
+          </div>
+
+          <div>
+            <div className={s.blockHead}><h2>Сколько человек работает в пункте в один день</h2></div>
+            <div style={{ maxWidth: 320 }}>
+              <Dropdown label="Сколько человек работает в пункте в один день" value={String(maxPerDay(data))} onChange={v => set({ maxPerDay: Number(v) })}
+                options={[{ value: '1', label: 'Один' }, { value: '2', label: 'Двое' }, { value: '3', label: 'Трое' }]} />
+            </div>
+            <p className={s.muted} style={{ marginTop: 8 }}>Если поставить в день больше людей, график предупредит и предложит заменить того, кто уже стоит. Меньше — можно: день считается закрытым, когда в пункте есть хотя бы один человек.</p>
           </div>
 
           <div>

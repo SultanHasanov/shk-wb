@@ -7,7 +7,10 @@ import { ToastProvider } from '../../../ui';
 import { StaffPage } from './StaffPage';
 
 const POINT = '33333333-3333-4333-8333-333333333333';
-const staffDoc = { staff_list: [{ id: 's1', name: 'Анна Соколова', last4: '', sid: '', phone: '', rates: [{ from: '2026-01-01', rate: 2500 }] }], staff: {} };
+const staffDoc = { staff_list: [
+  { id: 's1', name: 'Анна Соколова', last4: '', sid: '', phone: '', rates: [{ from: '2026-01-01', rate: 2500 }] },
+  { id: 's2', name: 'Марина Ким', last4: '', sid: '', phone: '', rates: [{ from: '2026-01-01', rate: 2000 }] },
+], staff: {} };
 const scheduleDoc = { v: 1, shifts: { '2026-11-03': [{ staffId: 's1', kind: 'full' }] }, dayHours: { from: '09:00', to: '21:00' } };
 
 let allowed = true;
@@ -62,14 +65,20 @@ describe('Сотрудники на сайте', () => {
     expect(calls.some(c => c.url.includes('?point='))).toBe(false);
   });
 
-  it('щелчок по дню ставит смену и сохраняет график со сверкой версии', async () => {
+  async function setShift(user: ReturnType<typeof userEvent.setup>, day: string, person: string, option: RegExp) {
+    await user.click(await screen.findByRole('button', { name: new RegExp(`^${day}:`) }));
+    await user.click(screen.getByRole('button', { name: `${person}: смена ${day}` }));
+    fireEvent.pointerDown(screen.getByRole('option', { name: option }));
+  }
+
+  it('график — календарь: день открывается справа, смена выбирается из списка и сохраняется', async () => {
     const user = userEvent.setup();
     renderPage();
-    const cell = await screen.findByRole('button', { name: 'Анна Соколова, 10 ноября: смены нет' });
-    expect(screen.getByRole('button', { name: /Анна Соколова, 3 ноября: смена, 9:00–21:00/ })).toBeInTheDocument();
-    fireEvent.pointerDown(cell, { button: 0 });
-    fireEvent.pointerUp(window);
-    expect(await screen.findByRole('button', { name: /Анна Соколова, 10 ноября: смена/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '3 ноября: Анна' })).toBeInTheDocument();
+    // сегодня открыт сразу — не нужно гадать, куда нажимать
+    expect(screen.getByRole('region', { name: 'Смены 16 ноября' })).toBeInTheDocument();
+    await setShift(user, '10 ноября', 'Анна Соколова', /^Смена, 9:00–21:00/);
+    expect(await screen.findByRole('button', { name: '10 ноября: Анна' })).toBeInTheDocument();
     await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
     expect(puts()[0].body).toMatchObject({ key: 'schedule', point: POINT, base: 7 });
     expect(puts()[0].body.data.shifts['2026-11-10']).toEqual([{ staffId: 's1', kind: 'full' }]);
@@ -82,18 +91,36 @@ describe('Сотрудники на сайте', () => {
     expect(puts()[1].body.data.shifts['2026-11-10']).toBeUndefined();
   });
 
+  it('второго человека в день не ставит молча: предупреждает и предлагает заменить или разрешить двоих', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await setShift(user, '3 ноября', 'Марина Ким', /^Смена, 9:00–21:00/);
+    const warn = await screen.findByRole('alert');
+    expect(warn.textContent).toContain('уже работает: Анна');
+    expect(warn.textContent).toContain('в пункте работает один человек');
+    expect(puts()).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'Поставить вместо: Анна' }));
+    await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
+    expect(puts()[0].body.data.shifts['2026-11-03']).toEqual([{ staffId: 's2', kind: 'full' }]);
+    // «разрешить двоих» записывает настройку пункта и ставит обоих
+    await setShift(user, '3 ноября', 'Анна Соколова', /^Полсмены утром/);
+    await user.click(await screen.findByRole('button', { name: 'Разрешить двоих в день' }));
+    await waitFor(() => expect(puts()).toHaveLength(2), { timeout: 3000 });
+    expect(puts()[1].body.data.maxPerDay).toBe(2);
+    expect(puts()[1].body.data.shifts['2026-11-03']).toEqual([{ staffId: 's2', kind: 'full' }, { staffId: 's1', kind: 'half' }]);
+  });
+
   it('правку с компьютера пункта не затирает: сливает и сохраняет обе', async () => {
     putStatus = 409;
+    const user = userEvent.setup();
     renderPage();
-    const cell = await screen.findByRole('button', { name: 'Анна Соколова, 12 ноября: смены нет' });
-    fireEvent.pointerDown(cell, { button: 0 });
-    fireEvent.pointerUp(window);
+    await setShift(user, '12 ноября', 'Анна Соколова', /^Смена, 9:00–21:00/);
     await waitFor(() => expect(puts()).toHaveLength(2), { timeout: 3000 });
     const second = puts()[1].body;
     expect(second.base).toBe(8);
     expect(second.data.shifts['2026-11-12']).toEqual([{ staffId: 's1', kind: 'full' }]);
     expect(second.data.shifts['2026-11-20']).toEqual([{ staffId: 's1', kind: 'half' }]);
-    expect(await screen.findByRole('button', { name: /Анна Соколова, 20 ноября: полсмены утром/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '20 ноября: Анна · утро' })).toBeInTheDocument();
   });
 
   it('выгрузка списком без сумм', async () => {

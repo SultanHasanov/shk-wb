@@ -9,6 +9,7 @@ import {
   coverage,
   diffDays,
   isActive,
+  maxPerDay,
   monthEnd,
   monthKey,
   monthStart,
@@ -120,6 +121,10 @@ export function TemplateWizard({ docs, month, onClose }: { docs: StaffDocs; mont
   const after = useMemo(() => applyPlan(data, plan), [data, plan]);
   const monthDays = range(first, to);
   const empty = range(from, to).filter(d => coverage(after, d) === 0).length;
+  const [allowMore, setAllowMore] = useState(false);
+  const crowdDays = range(from, to).filter(d => (after.shifts[d]?.length ?? 0) > maxPerDay(data));
+  const crowdMax = crowdDays.reduce((a, d) => Math.max(a, after.shifts[d]?.length ?? 0), 0);
+  const blocked = crowdDays.length > 0 && !allowMore;
   const fund = plan.added.reduce((a, x) => {
     const p = people.find(pp => pp.id === x.staffId);
     return a + (p && !paysShk(p) ? rateOn(p, x.day) : 0);
@@ -131,6 +136,7 @@ export function TemplateWizard({ docs, month, onClose }: { docs: StaffDocs; mont
       const nextTemplates = { ...sn.schedule.templates };
       for (const p of people) nextTemplates[p.id] = effective[p.id];
       let sched = applyPlan({ ...sn.schedule, templates: nextTemplates }, planAutofill(sn.schedule, people, effective, from, to));
+      if (allowMore && crowdMax > maxPerDay(sched)) sched = { ...sched, maxPerDay: Math.min(3, crowdMax) };
       sched = { ...sched, autoExtend: extend, ...(extend ? { filledUntil: !sched.filledUntil || sched.filledUntil < to ? to : sched.filledUntil } : {}) };
       return { staff: { ...sn.staff, staff_list: list }, schedule: sched };
     });
@@ -148,7 +154,7 @@ export function TemplateWizard({ docs, month, onClose }: { docs: StaffDocs; mont
         <div className={s.dialogActions} style={{ width: '100%' }}>
           {step > (withPeople ? 1 : 2) && <Button variant="secondary" onClick={() => setStep(step - 1)}>Назад</Button>}
           <Button variant="ghost" className={s.grow} onClick={onClose}>{withPeople ? 'Пропустить' : 'Отмена'}</Button>
-          {step < 3 ? <Button onClick={() => setStep(step + 1)} disabled={!canNext}>Дальше</Button> : <Button onClick={finish} disabled={!people.length}>{withPeople ? 'Создать график' : `Поставить смены: ${plan.added.length}`}</Button>}
+          {step < 3 ? <Button onClick={() => setStep(step + 1)} disabled={!canNext}>Дальше</Button> : <Button onClick={finish} disabled={!people.length || blocked}>{withPeople ? 'Создать график' : `Поставить смены: ${plan.added.length}`}</Button>}
         </div>
       }
     >
@@ -265,6 +271,15 @@ export function TemplateWizard({ docs, month, onClose }: { docs: StaffDocs; mont
             <div className={`${s.statBox} ${empty ? s.statRed : ''}`}><span>Дней, когда в пункте никого нет</span><b>{empty}</b></div>
             <div className={s.statBox}><span>Зарплата за эти смены, примерно</span><b>{rub(fund)}</b></div>
           </div>
+          {crowdDays.length > 0 && (
+            <div className={s.dayWarn} role="alert">
+              <p>В {crowdDays.length} {crowdDays.length === 1 ? 'дне' : 'днях'} в пункте получается больше людей, чем разрешено в настройках ({maxPerDay(data) === 1 ? 'один человек' : `не больше ${maxPerDay(data)}`} в день). Вернитесь и сдвиньте режимы, чтобы смены не пересекались, или разрешите работать вместе.</p>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <input id="tw-more" type="checkbox" checked={allowMore} onChange={e => setAllowMore(e.target.checked)} style={{ width: 20, height: 20, margin: '1px 0 0', accentColor: 'var(--accent)' }} />
+                <label htmlFor="tw-more" style={{ fontSize: 14, lineHeight: 1.45 }}>Разрешить в этом пункте {crowdMax >= 3 ? 'троих' : 'двоих'} в один день</label>
+              </div>
+            </div>
+          )}
           {plan.kept > 0 && <p className={s.muted}>Ручные смены и замены не тронуты: {plan.kept}.</p>}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <input id="tw-extend" type="checkbox" checked={extend} onChange={e => setExtend(e.target.checked)} style={{ width: 20, height: 20, margin: '1px 0 0', accentColor: 'var(--accent)' }} />

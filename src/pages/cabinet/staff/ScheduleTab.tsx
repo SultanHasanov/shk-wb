@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Redo2, Undo2 } from 'lucide-react';
-import { Button, Input } from '../../../ui';
+import { Button, Modal } from '../../../ui';
 import {
   WEEKDAYS,
   addDays,
@@ -9,115 +9,73 @@ import {
   colorOf,
   coverage,
   dayMonth,
+  hoursOf,
   isActive,
-  isClosedDay,
   isOwnerDay,
+  maxPerDay,
   monthEnd,
   monthKey,
   monthStart,
   monthTitle,
-  paintCell,
+  overLimit,
   paysShk,
   personTotal,
   range,
   rateOn,
   rub,
-  sameAsBrush,
-  setOwnerDay,
   shiftMonth,
   shiftOf,
+  shiftsOn,
   shkCountOn,
+  shortName,
   todayYmd,
   undecided,
   unitsText,
-  weekStart,
   weekday,
-  type Brush,
-  type Hours,
   type ScheduleData,
   type Shift,
   type StaffEntry,
 } from '../../../lib/staff-core';
-import { hoursOf } from '../../../lib/staff-core';
-import { Avatar, parseClock, useIsPhone } from './parts';
+import { Avatar, useIsPhone } from './parts';
+import { DayPanel } from './DayPanel';
 import type { StaffDocs } from './useStaffDocs';
-import { ShiftDialog } from './ShiftDialog';
 import s from './staff.module.css';
 
-type Tool = Brush | 'open';
-const OWNER = '__owner';
+export type GoTo = { kind: 'replace'; from?: string; day?: string } | { kind: 'template' } | { kind: 'goods' } | { kind: 'people'; personId?: string } | { kind: 'deductions' } | { kind: 'export' } | { kind: 'payroll' } | { kind: 'settings' };
 
-const TOOLS: { id: Tool; name: string; sub: (d: ScheduleData, h: Hours) => string; swatch: string }[] = [
-  { id: 'full', name: 'Смена', sub: d => `${clock(d.dayHours.from)}–${clock(d.dayHours.to)}`, swatch: 'var(--text-muted)' },
-  { id: 'am', name: 'Полсмены утром', sub: d => hoursOf({ staffId: '', kind: 'half' }, d), swatch: 'linear-gradient(90deg, var(--text-muted) 50%, #fff 50%)' },
-  { id: 'pm', name: 'Полсмены вечером', sub: d => secondHalfLabel(d), swatch: 'linear-gradient(90deg, #fff 50%, var(--text-muted) 50%)' },
-  { id: 'hours', name: 'Свои часы', sub: (_d, h) => `${clock(h.from)}–${clock(h.to)}`, swatch: 'var(--surface-sunken)' },
-  { id: 'erase', name: 'Стереть', sub: () => 'убрать смену', swatch: '#fff' },
-  { id: 'open', name: 'Открыть смену', sub: () => 'часы, замена', swatch: '#fff' },
-];
-
-function clock(t: string) {
-  return t.replace(/^0(\d)/, '$1');
-}
-function secondHalfLabel(d: ScheduleData) {
-  const a = (Number(d.dayHours.from.slice(0, 2)) * 60 + Number(d.dayHours.from.slice(3))) || 0;
-  const b = (Number(d.dayHours.to.slice(0, 2)) * 60 + Number(d.dayHours.to.slice(3))) || 0;
-  const mid = a + Math.round((b - a) / 2);
-  return `${Math.floor(mid / 60)}:${String(mid % 60).padStart(2, '0')}–${clock(d.dayHours.to)}`;
-}
-
-export function cellLook(sh: Shift | undefined, person: StaffEntry, index: number, data: ScheduleData) {
-  const c = colorOf(person, index);
+/** Что дописать под именем в клетке, если смена неполная или это замена. */
+function shiftNote(sh: Shift, data: ScheduleData): string {
   const kind = brushOf(sh, data);
-  if (!sh || !kind) return null;
-  if (sh.replaces) return { background: c.bg, borderColor: c.solid, color: c.fg, text: 'з' };
-  if (kind === 'full') return { background: c.solid, borderColor: c.solid, color: '#fff', text: '' };
-  if (kind === 'am') return { background: `linear-gradient(90deg, ${c.solid} 50%, #fff 50%)`, borderColor: c.solid, color: c.fg, text: '' };
-  if (kind === 'pm') return { background: `linear-gradient(90deg, #fff 50%, ${c.solid} 50%)`, borderColor: c.solid, color: c.fg, text: '' };
-  const h = Math.round(((toMin(sh.to) - toMin(sh.from)) / 60) * 10) / 10;
-  return { background: c.bg, borderColor: c.solid, color: c.fg, text: `${String(h).replace('.', ',')}ч` };
-}
-function toMin(t?: string) {
-  const [h, m] = String(t ?? '').split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
+  const part = kind === 'am' ? 'утро' : kind === 'pm' ? 'вечер' : kind === 'hours' ? hoursOf(sh, data) : '';
+  return [part, sh.replaces ? 'замена' : ''].filter(Boolean).join(', ');
 }
 
-export function describeShift(sh: Shift | undefined, data: ScheduleData, nameOf: (id: string) => string): string {
-  if (!sh) return 'смены нет';
-  const kind = brushOf(sh, data);
-  const label = kind === 'full' ? 'смена' : kind === 'am' ? 'полсмены утром' : kind === 'pm' ? 'полсмены вечером' : 'свои часы';
-  return `${label}, ${hoursOf(sh, data)}${sh.replaces ? `, вышел(ла) за ${nameOf(sh.replaces)}` : ''}`;
+/** Подпись смены для чтения с экрана и поиска в тестах: «Анна · утро». */
+function shiftLabel(sh: Shift, name: string, data: ScheduleData): string {
+  const note = shiftNote(sh, data);
+  return `${shortName(name)}${note ? ` · ${note}` : ''}`;
 }
 
-export type GoTo = { kind: 'replace'; from?: string; day?: string } | { kind: 'template' } | { kind: 'goods' } | { kind: 'people'; personId?: string } | { kind: 'deductions' } | { kind: 'export' } | { kind: 'payroll' };
-
+/**
+ * График — календарь месяца, как на стене: неделя в строке, в клетке — кто работает.
+ * Нажатие на день открывает его справа (на телефоне — окном), и там же всё меняется.
+ */
 export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; month: string; setMonth: (m: string) => void; go: (to: GoTo) => void }) {
   const snap = docs.snap!;
   const data = snap.schedule;
   const staff = snap.staff.staff_list;
   const phone = useIsPhone();
-  const [tool, setTool] = useState<Tool>('full');
-  const [hours, setHours] = useState<Hours>({ from: '10:00', to: '18:00' });
-  const [hoursText, setHoursText] = useState({ from: '10:00', to: '18:00' });
-  const [picked, setPicked] = useState<{ id: string; day: string } | null>(null);
-  const [editing, setEditing] = useState<{ id: string; day: string } | null>(null);
-  const stroke = useRef<{ mode: 'set' | 'erase' } | null>(null);
   const today = todayYmd();
+  const [picked, setPicked] = useState(() => (month === monthKey(today) ? today : monthStart(month)));
+  const [sheet, setSheet] = useState(false);
   const days = useMemo(() => range(monthStart(month), monthEnd(month)), [month]);
   const closed = Boolean(data.closed[month]);
   const people = useMemo(() => staff.filter(p => isActive(p) || days.some(d => shiftOf(data, d, p.id))), [staff, data, days]);
   const nameOf = (id: string) => staff.find(p => p.id === id)?.name || data.removedNames?.[id] || 'сотрудник';
-  const indexOf = (p: StaffEntry) => staff.indexOf(p);
 
   useEffect(() => {
-    const stop = () => { stroke.current = null; };
-    window.addEventListener('pointerup', stop);
-    window.addEventListener('pointercancel', stop);
-    return () => {
-      window.removeEventListener('pointerup', stop);
-      window.removeEventListener('pointercancel', stop);
-    };
-  }, []);
+    if (monthKey(picked) !== month) setPicked(month === monthKey(today) ? today : monthStart(month));
+  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ctrl+Z / Ctrl+Y, пока фокус не в поле ввода
   useEffect(() => {
@@ -133,48 +91,68 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
     return () => window.removeEventListener('keydown', onKey);
   }, [docs]);
 
-  const apply = (id: string, day: string, mode: 'set' | 'erase') => {
-    docs.update(sn => {
-      const sched = id === OWNER
-        ? setOwnerDay(sn.schedule, day, mode === 'set')
-        : paintCell(sn.schedule, id, day, mode === 'erase' ? 'erase' : (tool as Brush), hours);
-      return sched === sn.schedule ? sn : { ...sn, schedule: sched };
-    }, { undo: false });
+  const pick = (day: string) => {
+    if (monthKey(day) !== month) setMonth(monthKey(day));
+    setPicked(day);
+  };
+  const openDay = (day: string) => {
+    pick(day);
+    if (phone) setSheet(true);
   };
 
-  const start = (id: string, day: string) => {
-    if (tool === 'open') {
-      setPicked({ id, day });
-      return;
-    }
-    if (isClosedDay(data, day)) return;
-    const own = id === OWNER ? isOwnerDay(data, day) : undefined;
-    const mode: 'set' | 'erase' = id === OWNER
-      ? (own || tool === 'erase' ? 'erase' : 'set')
-      : tool === 'erase' || sameAsBrush(shiftOf(data, day, id), tool, data, hours) ? 'erase' : 'set';
-    docs.checkpoint();
-    stroke.current = { mode };
-    apply(id, day, mode);
-  };
-
-  const drag = (id: string, day: string) => {
-    if (stroke.current && tool !== 'open') apply(id, day, stroke.current.mode);
-  };
-
-  const commitHours = (which: 'from' | 'to', text: string) => {
-    const t = parseClock(text);
-    if (!t) {
-      setHoursText(h => ({ ...h, [which]: hours[which] }));
-      return;
-    }
-    const next = { ...hours, [which]: t };
-    setHours(next);
-    setHoursText({ from: clock(next.from), to: clock(next.to) });
-  };
-
-  const todo = useTodo(data, staff, people, days, today, month);
+  const lead = weekday(days[0]);
+  const cells: (string | null)[] = [...Array.from({ length: lead }, () => null), ...days];
+  while (cells.length % 7) cells.push(null);
+  const maxLines = phone ? 2 : 3;
+  const todo = buildTodo(data, staff, people, days, today, month);
   const total = people.reduce((a, p) => a + personTotal(p, data, days).money, 0);
-  const cols = `184px repeat(${days.length}, minmax(26px, 1fr)) 104px`;
+
+  const calendar = (
+    <section className={s.cal} aria-label={`График на ${monthTitle(month).toLowerCase()}`}>
+      <div className={s.calWeekdays} aria-hidden="true">
+        {WEEKDAYS.map((w, i) => <span key={w} className={i >= 5 ? s.calWeekendName : ''}>{w.toLowerCase()}</span>)}
+      </div>
+      <div className={s.calGrid}>
+        {cells.map((d, i) => {
+          if (!d) return <span key={`gap-${i}`} />;
+          const list = shiftsOn(data, d);
+          const owner = isOwnerDay(data, d);
+          const empty = !list.length && !owner;
+          const lines = list.slice(0, list.length > maxLines ? maxLines - 1 : maxLines);
+          const names = [...list.map(x => shiftLabel(x, nameOf(x.staffId), data)), ...(owner ? ['владелец'] : [])];
+          const cls = [
+            s.calCell,
+            weekday(d) >= 5 && s.calWeekendCell,
+            d === today && s.calToday,
+            empty && d >= today && !closed && s.calNobody,
+            overLimit(data, d) && s.calOver,
+            d === picked && !phone && s.calPicked,
+          ].filter(Boolean).join(' ');
+          return (
+            <button key={d} type="button" className={cls} aria-current={d === today ? 'date' : undefined} aria-pressed={d === picked && !phone}
+              aria-label={`${dayMonth(d)}: ${names.length ? names.join(', ') : 'никого нет'}`} onClick={() => openDay(d)}>
+              <span className={s.calNum}>{Number(d.slice(8))}</span>
+              {lines.map(sh => {
+                const p = staff.find(x => x.id === sh.staffId);
+                const c = p ? colorOf(p, staff.indexOf(p)) : { bg: '#e9eaf0', fg: '#3a3d52', solid: '#6b6f88' };
+                const note = shiftNote(sh, data);
+                return (
+                  <span key={sh.staffId} className={s.calLine} style={{ background: c.bg, color: c.fg }}>
+                    {shortName(nameOf(sh.staffId))}
+                    {note && <small>{note}</small>}
+                  </span>
+                );
+              })}
+              {list.length > lines.length && <span className={s.calMore}>ещё {list.length - lines.length}</span>}
+              {owner && <span className={s.calLine} style={{ background: '#e9eaf0', color: '#3a3d52' }}>{phone ? 'Я' : 'Владелец'}</span>}
+              {empty && d >= today && !closed && <span className={s.calNone}>{phone ? 'никого' : 'никого нет'}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <p className={s.calHint}>Нажмите на день, чтобы поставить или изменить смену. Красный пунктир — в этот день в пункте никого нет.</p>
+    </section>
+  );
 
   return (
     <>
@@ -196,16 +174,15 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
           <div className={s.monthTitle}>{monthTitle(month)}</div>
           <button type="button" className={s.iconBtn} aria-label="Следующий месяц" onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight size={16} /></button>
         </div>
-        {month !== monthKey(today) && <Button size="sm" variant="ghost" onClick={() => setMonth(monthKey(today))}>Сегодня</Button>}
+        {month !== monthKey(today) && <Button size="sm" variant="ghost" onClick={() => pick(today)}>Сегодня</Button>}
         <div className={s.btnRow}>
           <Button size="sm" variant="secondary" disabled={!docs.canUndo} onClick={docs.undo}><Undo2 size={16} />Отменить</Button>
           <Button size="sm" variant="secondary" disabled={!docs.canRedo} onClick={docs.redo}>Вернуть<Redo2 size={16} /></Button>
         </div>
         <div className={s.toolbarEnd}>
-          {staff.some(p => isActive(p) && paysShk(p)) && <Button size="sm" variant="secondary" onClick={() => go({ kind: 'goods' })}>Принятые товары</Button>}
-          <Button size="sm" variant="secondary" onClick={() => go({ kind: 'template' })}>Заполнить по шаблону</Button>
+          <Button size="sm" onClick={() => go({ kind: 'template' })}>Заполнить по шаблону</Button>
           <Button size="sm" variant="secondary" onClick={() => go({ kind: 'replace' })}>Замена на период</Button>
-          <Button size="sm" onClick={() => go({ kind: 'export' })}>Выгрузить</Button>
+          <Button size="sm" variant="secondary" onClick={() => go({ kind: 'export' })}>Выгрузить</Button>
         </div>
       </div>
 
@@ -215,165 +192,34 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
         </p>
       )}
 
-      {phone ? (
-        <PhoneDay docs={docs} days={days} people={people} staff={staff} today={today} />
-      ) : (
-        <section className={s.block} aria-label="Табель">
-          <div className={s.palette} role="group" aria-label="Что делаем">
-            <span className={s.paletteLabel}>Что делаем</span>
-            {TOOLS.map(t => (
-              <button
-                key={t.id}
-                type="button"
-                className={`${s.brush} ${tool === t.id ? s.brushOn : ''} ${t.id === 'open' ? s.brushGap : ''}`}
-                aria-pressed={tool === t.id}
-                onClick={() => { setTool(t.id); if (t.id !== 'open') setPicked(null); }}
-              >
-                <span className={s.swatch} aria-hidden="true" style={{ background: t.swatch, borderStyle: t.id === 'erase' ? 'dashed' : 'solid', borderWidth: t.id === 'open' ? 3 : 1, borderColor: t.id === 'open' ? 'var(--accent)' : undefined }} />
-                <span className={s.brushText}><b>{t.name}</b><small>{t.sub(data, hours)}</small></span>
-              </button>
-            ))}
-          </div>
-          {tool === 'hours' && (
-            <div className={s.hoursBar}>
-              <label htmlFor="st-h1">Свои часы: с</label>
-              <Input id="st-h1" className={s.timeInput} value={hoursText.from} inputMode="numeric" onChange={e => setHoursText(h => ({ ...h, from: e.target.value }))} onBlur={e => commitHours('from', e.target.value)} />
-              <label htmlFor="st-h2">до</label>
-              <Input id="st-h2" className={s.timeInput} value={hoursText.to} inputMode="numeric" onChange={e => setHoursText(h => ({ ...h, to: e.target.value }))} onBlur={e => commitHours('to', e.target.value)} />
-              <span className={s.muted}>{hoursShare(hours, data)} Теперь щёлкайте по дням.</span>
-            </div>
-          )}
-          <p className={s.hint}>
-            {tool === 'open'
-              ? 'Щёлкните по дню в табеле: ниже появится, что в нём стоит, и кнопки, чтобы поменять часы, найти замену или убрать смену.'
-              : 'Выберите, что ставить, и щёлкайте по дням или тяните мышью вдоль строки. Повторный щелчок по такой же смене убирает её. Чтобы поменять часы одной смены или найти замену, выберите «Открыть смену». Любое действие можно отменить.'}
-          </p>
-
-          {people.length === 0 ? (
-            <p className={s.note}>В пункте пока нет сотрудников. Добавьте их во вкладке «Люди» или через «Заполнить по шаблону».</p>
-          ) : (
-            <div className={s.gridWrap}>
-              <div className={s.grid}>
-                <div className={`${s.gRow} ${s.gHead}`} style={{ gridTemplateColumns: cols }}>
-                  <span className={s.muted}>Сотрудник</span>
-                  {days.map(d => (
-                    <span key={d} className={`${s.gDay} ${weekday(d) >= 5 ? s.gWeekend : ''} ${d === today ? s.gToday : ''}`}>
-                      <small>{WEEKDAYS[weekday(d)].toLowerCase()}</small>
-                      <b>{Number(d.slice(8))}</b>
-                    </span>
-                  ))}
-                  <span className={s.muted} style={{ textAlign: 'right' }}>За месяц</span>
-                </div>
+      <div className={s.schedLayout}>
+        <div>{calendar}</div>
+        {!phone && (
+          <aside className={s.side}>
+            <DayPanel key={picked} docs={docs} day={picked} onDay={pick} />
+            {people.length > 0 && (
+              <section className={s.block} style={{ marginBottom: 0 }} aria-label="Итоги месяца">
+                <div className={s.blockHead}><h2>Итого за {monthTitle(month).toLowerCase()}</h2></div>
                 {people.map(p => {
-                  const idx = indexOf(p);
                   const tot = personTotal(p, data, days);
-                  const rate = rateOn(p, today);
                   return (
-                    <div key={p.id} className={s.gRow} style={{ gridTemplateColumns: cols }}>
-                      <span className={s.gName}>
-                        <Avatar person={p} index={idx} />
-                        <span className={s.gNameText}>
-                          <b>{p.name || 'Без имени'}</b>
-                          <small className={tot.noRate || (!paysShk(p) && !rate) ? s.gWarn : ''}>
-                            {!isActive(p) ? 'не работает' : paysShk(p) ? 'за принятые товары' : rate ? `${rub(rate)} за смену` : 'Ставка не указана'}
-                          </small>
-                        </span>
+                    <div key={p.id} className={s.line}>
+                      <span className={s.rowName} style={{ flexDirection: 'row' }}>
+                        <Avatar person={p} index={staff.indexOf(p)} size={28} />
+                        <span><b>{p.name || 'Без имени'}</b><small>смен {unitsText(tot.units)}</small></span>
                       </span>
-                      {days.map(d => {
-                        const sh = shiftOf(data, d, p.id);
-                        const look = cellLook(sh, p, idx, data);
-                        const pickedHere = picked?.id === p.id && picked.day === d && tool === 'open';
-                        return (
-                          <button
-                            key={d}
-                            type="button"
-                            className={`${s.cell} ${weekday(d) >= 5 ? s.cellWeekend : ''} ${pickedHere ? s.cellPicked : ''}`}
-                            style={look ?? undefined}
-                            disabled={closed && tool !== 'open'}
-                            aria-label={`${p.name}, ${dayMonth(d)}: ${describeShift(sh, data, nameOf)}`}
-                            onPointerDown={e => { if ((e.button ?? 0) === 0) { e.preventDefault(); start(p.id, d); } }}
-                            onPointerEnter={() => drag(p.id, d)}
-                            onClick={e => { if (e.detail === 0) { start(p.id, d); stroke.current = null; } }}
-                          >
-                            {look?.text}
-                          </button>
-                        );
-                      })}
-                      <span className={s.gSum}>
-                        <b>{tot.byGoods ? 'по товарам' : tot.noRate && !tot.money ? 'нет ставки' : rub(tot.money)}</b>
-                        <small>смен {unitsText(tot.units)}</small>
-                      </span>
+                      <b className={tot.noRate && !tot.byGoods ? s.gWarn : ''}>{tot.byGoods ? 'по товарам' : tot.noRate && !tot.money ? 'нет ставки' : rub(tot.money)}</b>
                     </div>
                   );
                 })}
-                <div className={`${s.gRow} ${s.gOwnerRow}`} style={{ gridTemplateColumns: cols }}>
-                  <span className={s.gName}>
-                    <span className={s.avatar} aria-hidden="true" style={{ width: 32, height: 32, background: '#e9eaf0', color: '#3a3d52', fontSize: 12 }}>Я</span>
-                    <span className={s.gNameText}><b>Владелец</b><small>если работаете сами</small></span>
-                  </span>
-                  {days.map(d => {
-                    const on = isOwnerDay(data, d);
-                    return (
-                      <button
-                        key={d}
-                        type="button"
-                        className={`${s.cell} ${weekday(d) >= 5 ? s.cellWeekend : ''}`}
-                        style={on ? { background: '#6b6f88', borderColor: '#6b6f88' } : undefined}
-                        disabled={closed || tool === 'open'}
-                        aria-label={`Владелец, ${dayMonth(d)}: ${on ? 'работает сам' : 'не работает'}`}
-                        onPointerDown={e => { if ((e.button ?? 0) === 0) { e.preventDefault(); start(OWNER, d); } }}
-                        onPointerEnter={() => drag(OWNER, d)}
-                        onClick={e => { if (e.detail === 0) { start(OWNER, d); stroke.current = null; } }}
-                      />
-                    );
-                  })}
-                  <span className={s.gSum}><b>без оплаты</b><small>дней {days.filter(d => isOwnerDay(data, d)).length}</small></span>
-                </div>
-                <div className={`${s.gRow} ${s.gFoot}`} style={{ gridTemplateColumns: cols }}>
-                  <span className={s.label}>В пункте, человек</span>
-                  {days.map(d => {
-                    const n = coverage(data, d);
-                    return <span key={d} className={`${s.cover} ${n ? '' : s.coverZero}`}>{n}</span>;
-                  })}
-                  <span className={s.num} style={{ fontWeight: 700 }}>{rub(total)}</span>
-                </div>
-              </div>
-            </div>
-          )}
+                {total > 0 && <div className={s.line}><span><b>Всего по сменам</b></span><b>{rub(total)}</b></div>}
+              </section>
+            )}
+          </aside>
+        )}
+      </div>
 
-          {picked && tool === 'open' && (() => {
-            const p = staff.find(x => x.id === picked.id);
-            if (!p) return null;
-            const sh = shiftOf(data, picked.day, p.id);
-            const locked = isClosedDay(data, picked.day);
-            return (
-              <div className={s.selPanel}>
-                <span><b>{p.name}, {dayMonth(picked.day)}:</b> {describeShift(sh, data, nameOf)}</span>
-                {locked ? <span className={s.muted}>Месяц закрыт.</span> : sh ? (
-                  <>
-                    <Button size="sm" onClick={() => setEditing(picked)}>Изменить часы или найти замену</Button>
-                    <Button size="sm" variant="secondary" onClick={() => docs.update(sn => ({ ...sn, schedule: paintCell(sn.schedule, p.id, picked.day, 'erase') }))}>Убрать смену</Button>
-                  </>
-                ) : (
-                  <>
-                    <Button size="sm" onClick={() => docs.update(sn => ({ ...sn, schedule: paintCell(sn.schedule, p.id, picked.day, 'full') }))}>Поставить смену</Button>
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(picked)}>Другие часы</Button>
-                  </>
-                )}
-              </div>
-            );
-          })()}
-
-          <div className={s.legend}>
-            <span>«8ч» — свои часы</span>
-            <span>«з» — вышел на замену</span>
-            <span>Красный ноль внизу — в этот день в пункте никого нет</span>
-            <span>Строка «Владелец» — дни, когда вы работаете сами: смены сотрудников в этот день не оплачиваются</span>
-          </div>
-        </section>
-      )}
-
-      <section className={s.block} aria-label="Что осталось сделать">
+      <section className={s.block} style={{ marginTop: 16 }} aria-label="Что осталось сделать">
         <div className={s.blockHead}><h2>Что осталось сделать</h2></div>
         {todo.length === 0 ? (
           <p className={s.allClear}>До конца месяца все дни закрыты, замечаний нет.</p>
@@ -383,130 +229,54 @@ export function ScheduleTab({ docs, month, setMonth, go }: { docs: StaffDocs; mo
               <div key={t.key} className={`${s.todoItem} ${t.tone === 'red' ? s.todoRed : t.tone === 'warn' ? s.todoWarn : ''}`}>
                 <span className={s.dot} aria-hidden="true" />
                 <span>{t.text}</span>
-                <button type="button" onClick={() => go(t.go)}>{t.action}</button>
+                <button type="button" onClick={() => (t.day ? openDay(t.day) : t.go && go(t.go))}>{t.action}</button>
               </div>
             ))}
           </div>
         )}
       </section>
 
-      {editing && (
-        <ShiftDialog
-          docs={docs}
-          staffId={editing.id}
-          day={editing.day}
-          onClose={() => setEditing(null)}
-        />
+      {phone && (
+        <Modal open={sheet} onOpenChange={setSheet} sheet title="Смены дня" description="Выберите для каждого сотрудника, работает ли он в этот день.">
+          <DayPanel key={picked} docs={docs} day={picked} onDay={pick} />
+          <div className={s.dialogActions} style={{ marginTop: 16 }}><Button onClick={() => setSheet(false)}>Готово</Button></div>
+        </Modal>
       )}
     </>
   );
 }
 
-function hoursShare(h: Hours, d: ScheduleData): string {
-  const len = toMin(d.dayHours.to) - toMin(d.dayHours.from) || 720;
-  const mine = toMin(h.to) - toMin(h.from);
-  if (mine <= 0) return 'Время «до» должно быть позже «с».';
-  const share = Math.round((mine / len) * 100);
-  return `${unitsText(mine / 60)} ч из ${unitsText(len / 60)} — оплата ${share}% ставки.`;
-}
-
-type Todo = { key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go: GoTo };
+type Todo = { key: string; text: string; action: string; tone: 'red' | 'warn' | 'muted'; go?: GoTo; day?: string };
 
 function listDays(ds: string[]): string {
-  if (ds.length > 6) return `${ds.length} дней до конца месяца`;
+  if (ds.length > 6) return `${ds.length} дней`;
   const nums = ds.map(d => Number(d.slice(8)));
   const tail = dayMonth(ds[ds.length - 1]).replace(/^\d+ /, '');
   return nums.length === 1 ? `${nums[0]} ${tail}` : `${nums.slice(0, -1).join(', ')} и ${nums[nums.length - 1]} ${tail}`;
 }
 
-function useTodo(data: ScheduleData, staff: StaffEntry[], people: StaffEntry[], days: string[], today: string, month: string): Todo[] {
+function buildTodo(data: ScheduleData, staff: StaffEntry[], people: StaffEntry[], days: string[], today: string, month: string): Todo[] {
   const out: Todo[] = [];
+  if (!staff.length) return [{ key: 'nobody', tone: 'warn', action: 'Добавить сотрудников', go: { kind: 'template' }, text: 'В пункте нет сотрудников.' }];
   const future = days.filter(d => d >= today);
   const empty = future.filter(d => coverage(data, d) === 0);
-  if (empty.length) {
-    out.push({ key: 'empty', tone: 'red', action: 'Найти замену', go: { kind: 'replace', day: empty[0] }, text: `В пункте никого нет: ${listDays(empty)}. Поставьте смену сотруднику или закрасьте день в строке «Владелец», если выйдете сами.` });
+  if (empty.length && !data.closed[month]) {
+    out.push({ key: 'empty', tone: 'red', action: empty.length > 3 ? 'Заполнить по шаблону' : 'Открыть день', ...(empty.length > 3 ? { go: { kind: 'template' } as GoTo } : { day: empty[0] }), text: `В пункте никого нет: ${listDays(empty)}. Откройте день и выберите, кто выйдет, или отметьте, что работаете сами.` });
+  }
+  const crowded = future.filter(d => overLimit(data, d));
+  if (crowded.length) {
+    const limit = maxPerDay(data);
+    out.push({ key: 'crowded', tone: 'warn', action: 'Открыть день', day: crowded[0], text: `Людей больше, чем разрешено (${limit === 1 ? 'один человек' : `не больше ${limit}`} в день): ${listDays(crowded)}. Уберите лишнюю смену или разрешите больше людей в настройках.` });
   }
   for (const p of people) {
     if (paysShk(p)) continue;
-    const noRate = days.some(d => shiftOf(data, d, p.id) && !rateOn(p, d));
-    if (noRate) out.push({ key: `rate-${p.id}`, tone: 'warn', action: 'Указать ставку', go: { kind: 'people', personId: p.id }, text: `У сотрудника «${p.name}» не указана ставка, поэтому его смены пока не оплачиваются.` });
+    if (days.some(d => shiftOf(data, d, p.id) && !rateOn(p, d))) out.push({ key: `rate-${p.id}`, tone: 'warn', action: 'Указать ставку', go: { kind: 'people', personId: p.id }, text: `У сотрудника «${p.name}» не указана ставка, поэтому его смены пока не оплачиваются.` });
   }
   for (const p of people.filter(paysShk)) {
     const miss = days.filter(d => d <= today && shiftOf(data, d, p.id) && !shkCountOn(data, p.id, d));
-    if (miss.length) out.push({ key: `goods-${p.id}`, tone: 'warn', action: 'Ввести товары', go: { kind: 'goods' }, text: `У сотрудника «${p.name}» не введены принятые товары: ${listDays(miss).replace(' до конца месяца', '')}.` });
+    if (miss.length) out.push({ key: `goods-${p.id}`, tone: 'warn', action: 'Ввести товары', go: { kind: 'goods' }, text: `У сотрудника «${p.name}» не введены принятые товары: ${listDays(miss)}. Без них зарплата за эти дни не считается.` });
   }
   const open = undecided(data, month);
   if (open.length) out.push({ key: 'wb', tone: 'muted', action: 'Разобрать удержания', go: { kind: 'deductions' }, text: `Удержаний WB, не распределённых между сотрудниками: ${open.length}. Пока не решено, из зарплаты ничего не вычитается.` });
-  if (!staff.length) out.push({ key: 'nobody', tone: 'warn', action: 'Добавить сотрудников', go: { kind: 'template' }, text: 'В пункте нет сотрудников.' });
   return out;
-}
-
-// ── телефон: неделя полоской и выбранный день ──
-
-function PhoneDay({ docs, days, people, staff, today }: { docs: StaffDocs; days: string[]; people: StaffEntry[]; staff: StaffEntry[]; today: string }) {
-  const data = docs.snap!.schedule;
-  const initial = days.includes(today) ? today : days[0];
-  const [day, setDay] = useState(initial);
-  useEffect(() => { if (!days.includes(day)) setDay(days.includes(today) ? today : days[0]); }, [days, day, today]);
-  const ws = weekStart(day);
-  const week = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
-  const locked = isClosedDay(data, day);
-  const owner = isOwnerDay(data, day);
-  const n = coverage(data, day);
-  const set = (id: string, brush: Brush) => docs.update(sn => ({ ...sn, schedule: paintCell(sn.schedule, id, day, brush) }));
-  const nameOf = (id: string) => staff.find(p => p.id === id)?.name || 'сотрудник';
-
-  return (
-    <section className={s.block} aria-label="График по дням">
-      <div className={s.monthNav} style={{ marginBottom: 10 }}>
-        <button type="button" className={s.iconBtn} aria-label="Предыдущая неделя" onClick={() => setDay(addDays(day, -7))}><ChevronLeft size={16} /></button>
-        <div className={s.monthTitle} style={{ flex: 1 }}>{dayMonth(week[0])} – {dayMonth(week[6])}</div>
-        <button type="button" className={s.iconBtn} aria-label="Следующая неделя" onClick={() => setDay(addDays(day, 7))}><ChevronRight size={16} /></button>
-      </div>
-      <div className={s.strip} role="group" aria-label="День недели">
-        {week.map(d => {
-          const c = coverage(data, d);
-          return (
-            <button key={d} type="button" className={`${s.stripDay} ${d === day ? s.stripOn : ''}`} aria-pressed={d === day} aria-label={`${dayMonth(d)}, в пункте ${c}`} onClick={() => setDay(d)}>
-              <small>{WEEKDAYS[weekday(d)].toLowerCase()}</small>
-              <b>{Number(d.slice(8))}</b>
-              <i className={c ? '' : s.coverZero}>{c}</i>
-            </button>
-          );
-        })}
-      </div>
-      <h3 style={{ margin: '4px 0 8px', fontSize: 17 }}>{WEEKDAYS[weekday(day)]}, {dayMonth(day)}</h3>
-      {!n && <p className={`${s.note} ${s.noteWarn}`}>В пункте никого нет.</p>}
-      {locked && <p className={s.note}>Месяц закрыт — изменения недоступны.</p>}
-      <div>
-        {people.filter(isActive).map(p => {
-          const sh = shiftOf(data, day, p.id);
-          const kind = brushOf(sh, data);
-          const choose = (b: Brush) => set(p.id, b);
-          return (
-            <div key={p.id} className={s.feedPerson}>
-              <div className={s.feedHead}>
-                <Avatar person={p} index={staff.indexOf(p)} size={26} />
-                {p.name}
-                <small>{sh ? describeShift(sh, data, nameOf) : ''}</small>
-              </div>
-              <div className={s.choice} role="group" aria-label={`Смена ${dayMonth(day)}: ${p.name}`}>
-                <button type="button" aria-pressed={!sh} disabled={locked} onClick={() => choose('erase')}>Нет</button>
-                <button type="button" aria-pressed={kind === 'full'} disabled={locked} onClick={() => choose('full')}>Смена</button>
-                <button type="button" aria-pressed={kind === 'am'} disabled={locked} onClick={() => choose('am')}>Утро</button>
-                <button type="button" aria-pressed={kind === 'pm'} disabled={locked} onClick={() => choose('pm')}>Вечер</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
-        <input id="st-owner-day" type="checkbox" checked={owner} disabled={locked} onChange={e => docs.update(sn => ({ ...sn, schedule: setOwnerDay(sn.schedule, day, e.target.checked) }))} style={{ width: 22, height: 22, accentColor: 'var(--accent)' }} />
-        <label htmlFor="st-owner-day" style={{ fontSize: 14 }}>В этот день работаю сам (смены сотрудников не оплачиваются)</label>
-      </div>
-      <div className={s.btnRow} style={{ marginTop: 12 }}>
-        <Button size="sm" variant="secondary" disabled={!docs.canUndo} onClick={docs.undo}><Undo2 size={16} />Отменить</Button>
-      </div>
-    </section>
-  );
 }
