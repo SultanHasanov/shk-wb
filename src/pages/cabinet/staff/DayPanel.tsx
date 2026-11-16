@@ -175,7 +175,10 @@ export function DayPanel({ docs, day, onDay, quick = false }: { docs: StaffDocs;
           const free = staff.filter(x => x.id !== p.id && isActive(x) && !shiftOf(data, day, x.id));
           const typed = hours[p.id] ?? (sh?.kind === 'custom' ? { from: clock(sh.from ?? ''), to: clock(sh.to ?? '') } : { from: '10:00', to: '18:00' });
           const goods = shkCountOn(data, p.id, day)?.n;
-          const mark = sh ? paid[p.id]?.state[day] : undefined;
+          // «ещё не оплачено» пишем только тем, кому выплаты уже записывали: кто их не ведёт, иначе увидел бы это в каждом дне
+          const tracked = (data.payments ?? []).some(x => x.staffId === p.id && !x.cancelled);
+          const state = sh ? paid[p.id]?.state[day] : undefined;
+          const mark = state === 'due' && !tracked ? undefined : state;
           const unpaid = paid[p.id]?.unpaid[day];
           return (
             <div key={p.id} className={s.dayRow}>
