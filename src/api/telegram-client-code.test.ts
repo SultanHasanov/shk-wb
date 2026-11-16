@@ -38,6 +38,7 @@ type World = {
   ent: Record<string, unknown>;
   balance: number;
   photoFails: boolean;
+  photoTimeout?: boolean;
   refundFails: boolean;
   approval: Record<string, unknown> | null;
   pending: Array<Record<string, unknown>>;
@@ -78,6 +79,7 @@ beforeEach(() => {
       const method = address.split('/').pop() || '';
       sent.push({ method, body: body || {} });
       if (method === 'getFile') return json({ ok: true, result: { file_path: 'photos/label.jpg', file_size: 100 } });
+      if (method === 'sendPhoto' && world.photoTimeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
       if (method === 'sendPhoto' && world.photoFails) return json({ ok: false, description: 'Bad Request: wrong file identifier' }, 400);
       return json({ ok: true, result: { message_id: 88 } });
     }
@@ -256,6 +258,15 @@ describe('QR не отправился', () => {
     expect(rpc('admin_wallet_adjust')).toHaveLength(1);
     expect(lastScreen().body.text).toContain('50 ₽ вернулись на баланс');
     expect(buttons()[0]).toMatchObject({ callback_data: 'code:qr:191607973' });
+  });
+
+  it('Telegram не ответил вовремя — «QR мог прийти выше», а не «не принял»', async () => {
+    world.photoTimeout = true;
+    await bot.processUpdate(message('Код 191607973'));
+    const text = String(lastScreen().body.text);
+    expect(text).toContain('Telegram долго не отвечал — QR мог всё же прийти выше');
+    expect(text).not.toContain('не принял картинку');
+    expect(text).toContain('50 ₽ вернулись на баланс');
   });
 
   it('возврат не прошёл — честно и с кодом для поддержки', async () => {

@@ -9,6 +9,11 @@ function botToken() {
 // Методы, которые безопасно повторить после обрыва сети: при дубле ничего не задваивается.
 // sendMessage/sendPhoto/sendDocument/sendMediaGroup не повторяем — второе сообщение хуже, чем его отсутствие.
 const RETRY_SAFE_METHODS = new Set(['answerCallbackQuery', 'editMessageText', 'editMessageReplyMarkup', 'editMessageCaption', 'deleteMessage', 'sendChatAction', 'getFile', 'getMe', 'getWebhookInfo', 'setMyCommands']);
+// Картинку или файл по ссылке Telegram скачивает сам, пока держит наш запрос: бывает дольше 10 с. Обрыв по таймауту
+// при этом не отменяет отправку — фото приходит, а бот уже написал «не получилось» (16.11.2026, QR клиента).
+// Обработка апдейтов идёт в фоне, поэтому ждать дольше безопасно.
+const MEDIA_METHODS = new Set(['sendPhoto', 'sendDocument', 'sendMediaGroup']);
+const MEDIA_TIMEOUT_MS = 45_000;
 
 /**
  * options.apiBase — релей вместо TELEGRAM_API_BASE (запасной канал для алертов о здоровье бота);
@@ -28,7 +33,11 @@ async function telegramRequest(method, body, options = {}) {
       ...(relayBase ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(proxiedBody),
-  }, { retries: options.retries ?? (RETRY_SAFE_METHODS.has(method) ? 1 : 0), timeoutMs: options.timeoutMs, label: `telegram ${method}` });
+  }, {
+    retries: options.retries ?? (RETRY_SAFE_METHODS.has(method) ? 1 : 0),
+    timeoutMs: options.timeoutMs ?? (MEDIA_METHODS.has(method) ? MEDIA_TIMEOUT_MS : undefined),
+    label: `telegram ${method}`,
+  });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.ok !== true) {
     const error = new Error(data.description || `Telegram API error (${response.status})`);

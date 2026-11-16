@@ -1024,10 +1024,21 @@ function safeCell(cell) {
   return /^[0-9A-Za-zА-Яа-я-]{1,10}$/u.test(value) ? value : '';
 }
 
-/** QR не отправился: что с деньгами — по факту, без общей «внутренней ошибки». */
-function clientQrFailedView(lines, retry) {
+/** Наш запрос оборвался по таймауту: Telegram мог всё же доставить фото — исход неизвестен. */
+function isTimeoutError(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError' || /aborted due to timeout/i.test(String(error?.message || ''));
+}
+
+/**
+ * QR не отправился: что с деньгами — по факту, без общей «внутренней ошибки». timedOut — Telegram не ответил вовремя:
+ * фото могло прийти, поэтому не «не принял», а «проверьте выше».
+ */
+function clientQrFailedView(lines, retry, { timedOut = false } = {}) {
+  const head = timedOut
+    ? '⚠️ Telegram долго не отвечал — QR мог всё же прийти выше. Если его нет, отправьте ещё раз.'
+    : '⚠️ Не получилось отправить QR — Telegram не принял картинку.';
   return {
-    text: ['⚠️ Не получилось отправить QR — Telegram не принял картинку.', ...lines].join('\n'),
+    text: [head, ...lines].join('\n'),
     reply_markup: choiceKeyboard([...(retry ? [[retry]] : []), [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]),
   };
 }
@@ -1054,7 +1065,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
     } catch (error) {
       console.warn('Client QR photo failed (free)', error.message);
       reportUserError({ where: 'Бот: QR кода клиента не отправился (безлимит)', message: errorText(error), from });
-      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` });
+      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` }, { timedOut: isTimeoutError(error) });
       await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
       return 'not_sent';
     }
@@ -1085,9 +1096,9 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
       // Код уже списан: повтор по тому же id списания отправит этот же QR и второй раз не спишет.
       const resend = !free && clientQrResendData(sid, chargeId);
       const view = free
-        ? clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` })
+        ? clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}` }, { timedOut: isTimeoutError(error) })
         : clientQrFailedView([resend ? 'Код уже списан — повторная отправка бесплатна.' : 'Код уже списан. Напишите в поддержку — разберёмся.'],
-          resend ? { text: '🔁 Отправить ещё раз', callback_data: resend } : null);
+          resend ? { text: '🔁 Отправить ещё раз', callback_data: resend } : null, { timedOut: isTimeoutError(error) });
       await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
       return free ? 'not_sent' : 'charged_unsent';
     }
@@ -1115,7 +1126,7 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
     console.warn('Client QR photo failed (wallet)', error.message);
     reportUserError({ where: 'Бот: QR кода клиента не отправился', message: errorText(error), from, extra: [duplicate ? 'Повтор, не списано' : `Списано ${price} ₽, пробую вернуть`] });
     if (duplicate) {
-      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` });
+      const view = clientQrFailedView(['Ничего не списано. Попробуйте ещё раз через минуту.'], { text: '🔁 Попробовать ещё раз', callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` }, { timedOut: isTimeoutError(error) });
       await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
       return 'not_sent';
     }
@@ -1125,12 +1136,12 @@ async function handleClientCode(from, chatId, sid, { cell = '', requestId = null
     if (refund) {
       const back = Number.isFinite(Number(refund.balance)) ? `, на балансе ${wallet.formatRub(Number(refund.balance) / 100)}` : '';
       view = clientQrFailedView([`Ничего не списано: ${wallet.formatRub(price)} вернулись на баланс${back}. Попробуйте ещё раз через минуту.`],
-        { text: `🔁 Попробовать ещё раз — ${wallet.formatRub(price)}`, callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` });
+        { text: `🔁 Попробовать ещё раз — ${wallet.formatRub(price)}`, callback_data: `code:qr:${sid}${cell ? `:${cell}` : ''}` }, { timedOut: isTimeoutError(error) });
     } else {
       const incident = crypto.randomBytes(3).toString('hex');
       console.error(`Client QR refund not done [${incident}]`, userId, price, qrText);
       sendToAdmins(`⚠️ QR клиента: списано ${wallet.formatRub(price)}, фото не ушло, возврат не прошёл.\nTelegram ${Number(from.id)}, код ${incident}. Верните деньги вручную.`).catch(() => {});
-      view = clientQrFailedView([`${wallet.formatRub(price)} списаны, а вернуть их автоматически не получилось. Напишите в поддержку и назовите код: <code>${incident}</code> — вернём вручную.`], null);
+      view = clientQrFailedView([`${wallet.formatRub(price)} списаны, а вернуть их автоматически не получилось. Напишите в поддержку и назовите код: <code>${incident}</code> — вернём вручную.`], null, { timedOut: isTimeoutError(error) });
     }
     await sendMessage(chatId, view.text, { reply_markup: view.reply_markup });
     return refund ? 'not_sent' : 'charged_unsent';
