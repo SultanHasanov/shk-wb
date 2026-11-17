@@ -362,7 +362,7 @@ const WB_CODE_KEYBOARD = { inline_keyboard: [
 function mainMenuKeyboard() {
   // По две кнопки в ряд с короткими подписями — меню не растягивается.
   return choiceKeyboard([
-    [{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }],
+    [appButton('sticker', 'Стикеры и QR коробок', { callback_data: 'menu:stickers' })],
     [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
     [appButton('helper', 'Помощник ПВЗ', { callback_data: 'menu:helper' }), appButton('cellprint', 'ПВЗ Принт', { callback_data: 'menu:cellprint' })],
     // Аккаунт создаётся сам при первом действии — кнопки «Войти» нет. Сайта в меню тоже нет: бот работает
@@ -1520,7 +1520,7 @@ function wizardView(state, draft) {
   const noun = kindNoun(draft.category);
   if (state === 'choose_kind') {
     return { text: `${error}<b>Что нужно создать?</b>`, rows: [
-      [{ text: KIND_TITLES.product, callback_data: 'gen:kind:product' }],
+      [appButton('sticker', 'Стикеры товаров', { callback_data: 'gen:kind:product' })],
       [{ text: KIND_TITLES.box, callback_data: 'gen:kind:box' }],
       [{ text: '⬅️ Меню', callback_data: 'menu:home' }],
     ] };
@@ -2395,7 +2395,7 @@ async function acceptLoosePhoto(from, chatId, image) {
   const status = await sendMessage(chatId, '🔍 Читаю номер ШК с фото…');
   const codes = await shkFromImage(image, 11);
   if (!codes?.length) {
-    await showScreen(chatId, status?.message_id, photoFailText(codes, 11), { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    await showScreen(chatId, status?.message_id, photoFailText(codes, 11), { reply_markup: choiceKeyboard([[appButton('sticker', 'Стикеры и QR', { callback_data: 'menu:stickers' })], MENU_ROW]) });
     return;
   }
   const text = codes.length === 1
@@ -3737,7 +3737,7 @@ async function showShop(from, chatId, messageId, parts) {
     const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
       [appButton('helper', 'Подписка «Помощник ПВЗ»', { callback_data: 'shop:helper' })],
       [appButton('cellprint', 'Ключ «ПВЗ Принт»', { callback_data: 'shop:cp' })],
-      [{ text: '🏷 Пакеты стикеров по номеру', callback_data: 'shop:gen' }],
+      [appButton('sticker', 'Пакеты стикеров по номеру', { callback_data: 'shop:gen' })],
       [{ text: '🔑 Пакет кодов клиента', callback_data: 'shop:wbpk' }],
       [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
       [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
@@ -3988,7 +3988,7 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
       ];
     }
   }
-  if (item.returnToGenerator) rows = [[{ text: '🏷 Создать стикер', callback_data: 'gen:return-mode' }], MENU_ROW];
+  if (item.returnToGenerator) rows = [[appButton('sticker', 'Создать стикер', { callback_data: 'gen:return-mode' })], MENU_ROW];
   await showScreen(chatId, screenId, `<b>Готово ✅</b> ${done}\n${balanceLine}`, { reply_markup: choiceKeyboard(rows) });
 }
 
@@ -4282,7 +4282,7 @@ async function afterWalletTopup(order, noticeId = null) {
     if (session?.state !== 'confirm' || !session.draft?.mode || session.draft.accessCode) {
       // Выбор успел сброситься (ушли в другой раздел, истекло время): говорим прямо и ведём в мастер.
       const text = '<b>Баланс пополнен ✅</b>\nСтикер не создан: выбор успел сброситься. Деньги на балансе, платить второй раз не нужно — нажмите «🏷 Стикеры и QR коробок» и повторите.';
-      const keyboard = { reply_markup: choiceKeyboard([[{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }], MENU_ROW]) };
+      const keyboard = { reply_markup: choiceKeyboard([[appButton('sticker', 'Стикеры и QR коробок', { callback_data: 'menu:stickers' })], MENU_ROW]) };
       if (noticeId) await showScreen(chatId, noticeId, text, keyboard);
       else await sendMessage(chatId, text, keyboard);
       return true;
@@ -4519,7 +4519,7 @@ async function finishBonus(from, chatId, messageId, action, nonce) {
 
 const STALE_ACTION_TEXT = 'Это действие уже завершено или отменено. Начните заново кнопкой ниже.';
 const RESULT_GONE_TEXT = 'Этот файл больше не хранится. Создайте стикер заново.';
-const RESULT_GONE_KEYBOARD = choiceKeyboard([[{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }], MENU_ROW]);
+const RESULT_GONE_KEYBOARD = choiceKeyboard([[appButton('sticker', 'Стикеры и QR коробок', { callback_data: 'menu:stickers' })], MENU_ROW]);
 
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
@@ -4716,7 +4716,7 @@ async function handleCallback(callback) {
   if (orderPay) { answerCallbackQuery(callback.id, 'Готовлю оплату…').catch(() => {}); await payIndividualOrder(from, chatId, messageId, orderPay[1].toLowerCase()); return; }
   if (data === 'gen:cancel') {
     answerCallbackQuery(callback.id).catch(() => {}); await clearSession(from.id);
-    await showScreen(chatId, messageId, 'Создание стикера отменено. Деньги не списаны.', { reply_markup: choiceKeyboard([[{ text: '🏷 Начать заново', callback_data: 'menu:stickers' }], MENU_ROW]) });
+    await showScreen(chatId, messageId, 'Создание стикера отменено. Деньги не списаны.', { reply_markup: choiceKeyboard([[appButton('sticker', 'Начать заново', { callback_data: 'menu:stickers' })], MENU_ROW]) });
     return;
   }
   if (data === 'code:find') { answerCallbackQuery(callback.id).catch(() => {}); await startClientSearch(from, chatId, messageId); return; }

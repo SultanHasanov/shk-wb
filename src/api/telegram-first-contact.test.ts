@@ -129,12 +129,13 @@ describe('приветствие и главное меню', () => {
     expect(text).toContain('Оплата — с баланса бота, пополнение от 25 ₽.');
     expect(text).toContain('кнопкой ниже');
     expect(lastScreen().body.reply_markup.inline_keyboard.map((row: any[]) => row.map(button => button.text))).toEqual([
-      ['🏷 Стикеры и QR коробок'],
+      ['Стикеры и QR коробок'],
       ['🔑 Код клиента', '⭐ Отзывы ПВЗ'],
       ['Помощник ПВЗ', 'ПВЗ Принт'],
       ['👤 Профиль и баланс', '🆘 Помощь'],
       ['👥 Пригласить коллегу'],
     ]);
+    expect(lastScreen().body.reply_markup.inline_keyboard[0][0].icon_custom_emoji_id).toBe('5467730836549842352');
     // У программ — их иконки (свои эмодзи), а не обычные 💻/🖨.
     expect(lastScreen().body.reply_markup.inline_keyboard[2].map((button: any) => button.icon_custom_emoji_id)).toEqual(['5469821325981821893', '5469891870819659663']);
   });

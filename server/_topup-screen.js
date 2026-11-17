@@ -1,7 +1,9 @@
 // Экран оплаты пополнения в Telegram-боте и что с ним становится потом. Экран рисует бот (узел BOT_ROLE=bot),
 // а правят его и сайт (вебхук ЮKassa, notifyCompleted в server/_payments.js), и бот (кнопка «🔄 Проверить оплату»),
 // кнопки обрабатывает узел бота — поэтому тексты и callback_data собираются здесь, в одном месте.
-// Модуль без зависимостей: его подключает server/_payments.js, а _wallet.js сам зависит от _payments.
+// Из зависимостей — только _bot-app-icons (сам без зависимостей): его подключает server/_payments.js, а _wallet.js сам зависит от _payments.
+
+const { appButton } = require('./_bot-app-icons');
 
 const CALLBACK_LIMIT = 64; // лимит callback_data у Telegram, байт
 const MENU_ROW = Object.freeze([{ text: '☰ Меню', callback_data: 'menu:home' }]);
@@ -92,7 +94,7 @@ function canceledScreen({ amount, then = '', reason = '' }) {
  */
 function purchaseRetry(then) {
   const value = String(then || '');
-  if (value === 'gen') return { lead: 'стикер не создался', note: 'Номер придётся ввести заново.', button: { text: '🏷 Создать стикер', callback_data: 'menu:stickers' } };
+  if (value === 'gen') return { lead: 'стикер не создался', note: 'Номер придётся ввести заново.', button: appButton('sticker', 'Создать стикер', { callback_data: 'menu:stickers' }) };
   if (value.startsWith('rv:')) return { lead: 'автор оценки не открылся', note: '', button: { text: '⭐ К отзывам', callback_data: 'rv:filters' } };
   const qr = /^qr:(\d{7,12})$/.exec(value);
   if (qr) return { lead: 'QR-код клиента не выдан', note: '', button: { text: '🔑 Получить QR', callback_data: `code:ask:${qr[1]}` } };
