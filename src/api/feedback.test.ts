@@ -310,7 +310,7 @@ describe('QR-отзывы: общие правила', () => {
     for (const path of ['/o/:slug', '/api/feedback/public/:slug', '/api/feedback/public/:slug/photo', '/api/feedback/public/:slug/submit', '/api/feedback/photo/:id', '/api/cabinet/feedback/boards', '/api/cabinet/feedback/boards/:id', '/api/cabinet/feedback/entries']) {
       expect(sources).toContain(path);
     }
-    expect(JSON.stringify(config.headers)).toMatch(/\|r\|o\)/);
+    expect(JSON.stringify(config.headers)).toMatch(/\|r\|o[|)]/);
   });
 
   it('миграция: RLS и закрытые права', () => {

@@ -1,9 +1,15 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WhatsNew } from './WhatsNew';
 import { WHATS_NEW, readWhatsNewState, type WhatsNewEntry } from '../lib/whats-new';
+
+// Окно проверяется на одной новости: новые записи в списке тест не ломают.
+vi.mock('../lib/whats-new', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/whats-new')>();
+  return { ...actual, WHATS_NEW: actual.WHATS_NEW.filter((n) => n.id === '2026-11-staff-quick') };
+});
 
 const OLD_ACCOUNT = '2026-08-01T10:00:00Z';
 const first = WHATS_NEW[0];

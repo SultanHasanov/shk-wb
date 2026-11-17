@@ -7,6 +7,21 @@ import { CabinetShell } from './CabinetShell';
 import { rootStore } from '../stores/root-store';
 import { WHATS_NEW, readWhatsNewState } from '../lib/whats-new';
 
+// Механика окна и метки проверяется на одной новости про «Сотрудников»: новые записи в списке тест не ломают.
+vi.mock('../lib/whats-new', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/whats-new')>();
+  const list = actual.WHATS_NEW.filter((n) => n.id === '2026-11-staff-quick');
+  // функции модуля берут список по умолчанию изнутри — подставляем его явно
+  return {
+    ...actual,
+    WHATS_NEW: list,
+    entriesForAccount: (c: string | null | undefined, e = list) => actual.entriesForAccount(c, e),
+    unseenEntries: (s: Parameters<typeof actual.unseenEntries>[0], c: string | null, e = list) => actual.unseenEntries(s, c, e),
+    newSections: (s: Parameters<typeof actual.newSections>[0], now: Date, e = list) => actual.newSections(s, now, e),
+    markOpened: (s: Parameters<typeof actual.markOpened>[0], p: string, e = list) => actual.markOpened(s, p, e),
+  };
+});
+
 const news = WHATS_NEW[0];
 const bootstrap = {
   profile: { userId: 'u-old', email: 'user@example.com', displayName: 'Иван' },

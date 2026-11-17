@@ -19,7 +19,7 @@ const permissionGroups = (t: T) => [
   { id: 'goods', title: t('Товары', 'Тауарлар'), keys: ['expensive', 'way', 'boxes', 'goods', 'video'] },
   { id: 'clients', title: t('Клиенты', 'Клиенттер'), keys: ['search', 'dossier', 'reviews', 'act.archive_view'] },
   { id: 'staff', title: t('Сотрудники и стикеры', 'Қызметкерлер мен стикерлер'), keys: ['staff', 'act.payroll', 'act.staff_edit', 'stickers', 'act.stickers_generate', 'cellprint'] },
-  { id: 'admin', title: t('Настройки, оплаты и аккаунт', 'Баптаулар, төлемдер және аккаунт'), keys: ['telegram', 'settings', 'act.video_settings', 'act.load_pc', 'act.pay', 'act.account'] },
+  { id: 'admin', title: t('Настройки, оплаты и аккаунт', 'Баптаулар, төлемдер және аккаунт'), keys: ['telegram', 'settings', 'act.video_settings', 'act.load_pc', 'act.phone_files', 'act.pay', 'act.account'] },
 ];
 
 function groupDevices(account: AppAccount) {

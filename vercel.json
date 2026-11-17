@@ -64,6 +64,8 @@
     { "source": "/api/app/mirror/push", "destination": "/api/app?action=mirror-push" },
     { "source": "/api/app/mirror/pull", "destination": "/api/app?action=mirror-pull" },
     { "source": "/api/app/relay/:action(inbox|peers|ask|put|get|ack)", "destination": "/api/app?action=relay-:action" },
+    { "source": "/api/app/phone/:action(start|pull|close)", "destination": "/api/app?action=phone-:action" },
+    { "source": "/api/phone/:token/:op(open|state|file|chunk|cancel)", "destination": "/api/app?action=phone-public&token=:token&op=:op" },
     { "source": "/api/app/:action(plans|login|refresh|register-device|me|consume|usage|claim-key|site-link|logout|update|lease|pay|pay-status|signup|points|point-purge|docs|secrets|logout-others|security-log|client-qr|crack-code|qr-image|wallet|orders|assets|referrals|cell-print-prices|code-request|code-request-status|code-request-cancel|telegram-link|client-error|device-key|messages|messages-ack|device-settings)", "destination": "/api/app?action=:action" },
     { "source": "/api/admin/cabinet/withdrawals", "destination": "/api/admin/data?cabinet=withdrawals" },
     { "source": "/api/admin/cabinet/withdrawal", "destination": "/api/admin/data?cabinet=withdrawal" },
@@ -113,6 +115,7 @@
     ,{ "source": "/r/:code", "destination": "/" }
     ,{ "source": "/o/:slug", "destination": "/" }
     ,{ "source": "/grafik/:token", "destination": "/" }
+    ,{ "source": "/t/:token", "destination": "/" }
     ,{ "source": "/cabinet/:path*", "destination": "/" }
     ,{ "source": "/cabinet", "destination": "/" }
     ,{ "source": "/panel/:path*", "destination": "/" }
@@ -149,7 +152,7 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }]
     },
     {
-      "source": "/:section(cabinet|app-login|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r|o)/:path*",
+      "source": "/:section(cabinet|app-login|login|register|forgot-password|reset-password|payment-result|bot-checkout|telegram-account|r|o|t)/:path*",
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     }
   ]

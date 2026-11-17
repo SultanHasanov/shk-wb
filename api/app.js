@@ -12,6 +12,7 @@ const QRCode = require('qrcode');
 const sync = require('../server/_app-sync');
 const relay = require('../server/_app-relay');
 const messages = require('../server/_app-messages');
+const phoneDrop = require('../server/_phone-drop');
 const { appFreeMode } = require('../server/_app-free');
 const { crackFallbackEnabled, codeViaBotEnabled, codeViaBotEnabledFor } = require('../server/_app-flags');
 const { buildClientQr } = require('../server/_wb-code');
@@ -116,9 +117,53 @@ async function deviceActions(req, res, action, userId, device) {
   if (action === 'relay-put' && req.method === 'POST') return res.status(200).json(relay.put(userId, device, req.query, req.body));
   if (action === 'messages-ack' && req.method === 'POST') return res.status(200).json(await messages.ack(userId, device, body(req)));
   if (action === 'device-settings' && req.method === 'POST') return res.status(200).json(await account.setAlertSound(userId, device.id, body(req).alertSound));
+  if (action.startsWith('phone-')) return phoneActions(req, res, action, userId, device);
   return res.status(405).json({ error: 'Method not allowed' });
 }
-const KEYED_ACTIONS = new Set(['relay-inbox', 'relay-put', 'messages-ack', 'device-settings']);
+
+// «С телефона» (server/_phone-drop.js): ПК открывает приём, держит долгий запрос и забирает куски.
+async function phoneActions(req, res, action, userId, device) {
+  if (permissions.isDenied(device, 'act.phone_files')) {
+    return res.status(403).json({ error: 'Владелец закрыл приём файлов с телефона на этом компьютере', code: 'DENIED_BY_OWNER', key: 'act.phone_files' });
+  }
+  if (action === 'phone-start' && req.method === 'POST') {
+    if (!await enforceRateLimit(req, res, { scope: 'app-phone-start', limit: 30, windowSeconds: 600, key: device.id })) return;
+    return res.status(200).json(phoneDrop.start(userId, device, publicOrigin(req)));
+  }
+  if (action === 'phone-close' && req.method === 'POST') return res.status(200).json(phoneDrop.close(userId, device, req.query));
+  if (action === 'phone-pull' && req.method === 'GET') {
+    const out = await phoneDrop.pull(userId, device, req.query);
+    if (!out.chunk) return res.status(200).json(out);
+    const c = out.chunk;
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Phone-File', c.file);
+    res.setHeader('X-Phone-Idx', String(c.idx));
+    res.setHeader('X-Phone-Last', c.last ? '1' : '0');
+    res.setHeader('X-Phone-Name', encodeURIComponent(c.name));
+    res.setHeader('X-Phone-Size', String(c.size));
+    res.setHeader('X-Phone-Mime', c.mime || '');
+    res.setHeader('X-Phone-Chunk', String(c.chunkBytes));
+    return res.status(200).end(c.bytes);
+  }
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+
+// Страница телефона /t/<токен> (без входа): /api/phone/<токен>/<op>. Секрет привязки — заголовок X-Phone-Secret.
+async function phonePublic(req, res) {
+  const op = String(req.query.op || '');
+  const token = String(req.query.token || '');
+  const secret = String(req.headers['x-phone-secret'] || '');
+  // кусков у одного файла сотни — потолок щедрый, но в памяти (без Supabase)
+  if (!await enforceRateLimit(req, res, { scope: 'phone-public', limit: op === 'chunk' ? 3000 : 300, windowSeconds: 600 })) return;
+  res.setHeader('Cache-Control', 'no-store');
+  if (op === 'open' && req.method === 'POST') return res.status(200).json(phoneDrop.open(token, body(req)));
+  if (op === 'state' && req.method === 'GET') return res.status(200).json(phoneDrop.phoneState(token, secret));
+  if (op === 'file' && req.method === 'POST') return res.status(200).json(phoneDrop.fileStart(token, secret, body(req)));
+  if (op === 'chunk' && req.method === 'POST') return res.status(200).json(await phoneDrop.chunk(token, secret, req.query, req.body));
+  if (op === 'cancel' && req.method === 'POST') return res.status(200).json(phoneDrop.cancelFile(token, secret, req.query));
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+const KEYED_ACTIONS = new Set(['relay-inbox', 'relay-put', 'messages-ack', 'device-settings', 'phone-start', 'phone-pull', 'phone-close']);
 // Что программа может и при ограничении «Программа» из админки (server/_user-controls.js): сводка с причиной,
 // фоновая работа по передатчику и сообщениям, ключ устройства и выход. Остальное — 403 ACCOUNT_RESTRICTED
 // (никогда не 401 и не DEVICE_REVOKED: иначе программа сотрёт сессию или ключ ПК).
@@ -144,6 +189,8 @@ module.exports = async function handler(req, res) {
   const action = String(req.query?.action || '');
   try {
     if (action === 'trial') return await legacyTrial(req, res);
+
+    if (action === 'phone-public') return await phonePublic(req, res);
 
     if (action === 'plans' && req.method === 'GET') {
       // Короткий кэш: freeMode переключается из админки и должен доехать быстро.
@@ -459,6 +506,10 @@ module.exports = async function handler(req, res) {
     if ((action === 'messages-ack' || action === 'device-settings') && req.method === 'POST') {
       if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
       return await deviceActions(req, res, action, user.id, device);
+    }
+    if (action.startsWith('phone-')) {
+      if (!await enforceRateLimit(req, res, { scope: 'app-relay', limit: 3000, windowSeconds: 600, key: user.id })) return;
+      return await phoneActions(req, res, action, user.id, device);
     }
 
     // --- Код клиента с подтверждением владельца в Telegram (server/_code-approvals.js) ---

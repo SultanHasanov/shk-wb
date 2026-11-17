@@ -1,0 +1,273 @@
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #8f17c9 0, #cb11ab 160px, #f6f5f9 160px);
+  color: #1d1a29;
+  font-family: var(--font-sans);
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 28px 14px 0;
+  box-sizing: border-box;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 22px;
+  box-shadow: 0 10px 30px rgba(60, 20, 80, 0.12);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.target {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.targetIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: #f6f1fb;
+  color: #8f17c9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.targetLabel {
+  font-size: 13px;
+  color: #6f6a82;
+}
+.targetName {
+  font-size: 18px;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 16px;
+  border-radius: 18px;
+  border: 1.5px dashed #c9a6e6;
+  background: #fbf7fe;
+  color: #8f17c9;
+  text-align: center;
+  cursor: pointer;
+}
+.pick:active {
+  background: #f3e9fb;
+}
+.pick:focus-within {
+  outline: 3px solid rgba(143, 23, 201, 0.35);
+}
+.pickTitle {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1d1a29;
+}
+.pickHint {
+  font-size: 13px;
+  color: #6f6a82;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #4a4560;
+}
+.summary > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summaryOk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #16794c;
+  font-weight: 700;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  background: #f8f7fa;
+}
+.rowBad {
+  background: #fdecef;
+}
+.rowIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #5f5a72;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.rowBody {
+  flex: 1;
+  min-width: 0;
+}
+.rowName {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rowMeta {
+  font-size: 12px;
+  color: #6f6a82;
+  margin-top: 2px;
+}
+.rowBad .rowMeta {
+  color: #9c1b33;
+}
+.bar {
+  height: 4px;
+  border-radius: 2px;
+  background: #e8e3ef;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.barFill {
+  height: 100%;
+  background: linear-gradient(90deg, #cb11ab, #8f17c9);
+  transition: width 0.2s ease;
+}
+.rowAction {
+  width: 36px;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.iconBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #e0dce8;
+  background: #ffffff;
+  color: #4a4560;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.okDot {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  background: #e3f6ec;
+  color: #16794c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6f6a82;
+}
+
+.secondary {
+  margin-top: 6px;
+  min-height: 46px;
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid #e0dce8;
+  background: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1a29;
+  cursor: pointer;
+}
+
+.stateCard {
+  align-items: center;
+  text-align: center;
+  padding: 40px 22px 30px;
+  gap: 12px;
+}
+.stateIcon {
+  width: 72px;
+  height: 72px;
+  border-radius: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ok {
+  background: #e3f6ec;
+  color: #16794c;
+}
+.warn {
+  background: #fff3d9;
+  color: #a86a00;
+}
+.muted {
+  background: #f0edf4;
+  color: #5f5a72;
+}
+.stateTitle {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+.stateText {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #4a4560;
+}
+
+.loading {
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 12px;
+  min-height: 140px;
+  color: #5f5a72;
+  font-size: 15px;
+}
+
+.footer {
+  padding: 20px 16px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: #6f6a82;
+}
+.footer a {
+  color: #a30d89;
+}

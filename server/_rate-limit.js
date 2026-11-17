@@ -7,7 +7,8 @@ const fallback = new Map();
 // запросов к Supabase, а сервер — один процесс. Рестарт обнуляет счётчик, для потолка в сотни запросов это не важно.
 // Лимиты входа, регистрации и оплат остаются в базе: их обнулять рестартом нельзя.
 // «Сотрудники» на сайте опрашивают график раз в ~45 с, пока страница открыта (server/_staff.js).
-const MEMORY_SCOPES = new Set(['app-relay', 'app-user', 'staff-owner', 'staff-public']);
+// «С телефона»: страница телефона шлёт сотни кусков подряд (server/_phone-drop.js).
+const MEMORY_SCOPES = new Set(['app-relay', 'app-user', 'staff-owner', 'staff-public', 'phone-public']);
 
 function clientAddress(req) {
   return String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')

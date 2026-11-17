@@ -35,6 +35,8 @@ const CabinetRoutes = lazy(() => import('./CabinetRoutes'));
 const FeedbackFormPage = lazy(() => import('../pages/FeedbackFormPage').then(m => ({ default: m.FeedbackFormPage })));
 // График пункта по ссылке для сотрудников (/grafik/<token>): без входа и без шапки сайта.
 const StaffPublicPage = lazy(() => import('../pages/StaffPublicPage').then(m => ({ default: m.StaffPublicPage })));
+// Отправка файлов с телефона в «Помощник ПВЗ» по одноразовому QR (/t/<token>): без входа и без шапки сайта.
+const PhoneUploadPage = lazy(() => import('../pages/PhoneUploadPage').then(m => ({ default: m.PhoneUploadPage })));
 
 /** Публичные маршруты: монтируются дважды — на русском (/) и казахском (/kz). */
 const publicRoutes = (
@@ -110,6 +112,15 @@ export function App() {
           element={
             <Suspense fallback={null}>
               <StaffPublicPage />
+            </Suspense>
+          }
+        />
+
+        <Route
+          path="t/:token"
+          element={
+            <Suspense fallback={null}>
+              <PhoneUploadPage />
             </Suspense>
           }
         />
