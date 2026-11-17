@@ -439,7 +439,7 @@ describe('голые цифры и код доступа', () => {
   it('11 цифр — стикер товара и QR клиента', async () => {
     await bot.processUpdate(message('47671114039'));
     expect(buttons().map(button => button.callback_data)).toEqual(['gen:num:47671114039', 'code:ask:47671114039', 'menu:home']);
-    expect(buttons()[0].text).toBe('🏷 Стикер товара — 7,50 ₽');
+    expect(buttons()[0].text).toBe('Стикер товара — 7,50 ₽');
   });
 
   it('покупка пакета не докладывается на месячный код «Про» — он выключится в конце окна', async () => {
@@ -451,7 +451,7 @@ describe('голые цифры и код доступа', () => {
   it('голые цифры: цена стикера — как в мастере (пакет — «из пакета»)', async () => {
     world.codes = [{ generation_limit: 30, generation_used: 0, generation_mode: 'custom' }];
     await bot.processUpdate(message('47671114039'));
-    expect(buttons()[0].text).toBe('🏷 Стикер товара — из пакета');
+    expect(buttons()[0].text).toBe('Стикер товара — из пакета');
     expect(lastScreen().body.text).toContain('если это ШК товара (11 цифр), из пакета');
   });
 

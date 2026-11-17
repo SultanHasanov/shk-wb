@@ -261,7 +261,7 @@ describe('ключ «ПВЗ Принт»', () => {
     expect(text).toContain('💰 На балансе: <b>120 ₽</b>');
     expect(text).toContain('🔑 Коды клиента в пакете: 3');
     expect(text).toContain('<b>Программы для компьютера</b>');
-    expect(text).toContain('🖨 ПВЗ Принт (печать ячеек): до 01.12');
+    expect(text).toContain('<tg-emoji emoji-id="5469891870819659663">🖨</tg-emoji> ПВЗ Принт (печать ячеек): до 01.12');
     expect(text).toContain('<code>CP-PAID</code> — до 01.12.2026 · 1 компьютер · Wildberries');
     expect(text).not.toContain('Печать ячеек');
   });

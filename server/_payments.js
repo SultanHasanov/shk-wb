@@ -3,6 +3,7 @@ const { supabaseFetch } = require('./_supabase');
 const { createNotification, sendEmail } = require('./_notifications');
 const { editMessageText, sendMessage } = require('./_telegram-api');
 const topupScreen = require('./_topup-screen');
+const { appButton } = require('./_bot-app-icons');
 // Кнопки под уведомлениями — n:<callback>: бот откроет экран новым сообщением, уведомление останется (server/_bot-notice.js).
 const { noticeMarkup } = require('./_bot-notice');
 // Тексты, общие с ботом (вознаграждение за приглашение, проценты) — server/_bot-texts.js.
@@ -219,14 +220,14 @@ async function notifyCompleted(order){
     // Экран оплаты в боте (если он есть и не занят более новой оплатой) — без мёртвой кнопки «Перейти к оплате».
     await editTopupScreen(order,telegramId,topupScreen.paidScreenText(amounts.paid),{reply_markup:{inline_keyboard:[]}});
     const balanceLine=balanceRub!=null?`\n💰 На балансе: <b>${topupScreen.formatRub(balanceRub)}</b>`:'';
-    await sendMessage(telegramId,`${head}${balanceLine}`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Стикеры и QR',callback_data:'menu:stickers'},{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'},{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
+    await sendMessage(telegramId,`${head}${balanceLine}`,{reply_markup:noticeMarkup({inline_keyboard:[[appButton('sticker','Стикеры и QR',{callback_data:'menu:stickers'}),{text:'🛒 Купить с баланса',callback_data:'shop:home'}],[{text:'👤 Профиль',callback_data:'menu:profile'},{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
   }else if(order.product_kind==='stickers'){
     const identities=await supabaseFetch(`user_telegram_identities?user_id=eq.${encodeURIComponent(order.user_id)}&select=telegram_user_id&limit=1`).catch(()=>[]);
     const telegramId=identities[0]?.telegram_user_id;
     if(telegramId){
       const quantity=Number(order.range_quantity||0)+Number(order.custom_quantity||0);
       const codeLine=order.access_code?`\nКод доступа: <code>${order.access_code}</code>\n`:'';
-      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно создавать стикеры.`,{reply_markup:noticeMarkup({inline_keyboard:[[{text:'🏷 Создать стикер',callback_data:'menu:stickers'}],[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
+      await sendMessage(telegramId,`<b>Оплата прошла ✅</b>\n\nПакет на ${quantity} шт. зачислен.${codeLine}\nМожно создавать стикеры.`,{reply_markup:noticeMarkup({inline_keyboard:[[appButton('sticker','Создать стикер',{callback_data:'menu:stickers'})],[{text:'☰ Меню',callback_data:'menu:home'}]]})}).catch(()=>{});
     }
   }
 }

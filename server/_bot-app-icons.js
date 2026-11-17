@@ -1,4 +1,4 @@
-// Иконки программ на кнопках бота: свои эмодзи из набора t.me/addemoji/shkwb_apps_by_shkwb_bot
+// Иконки программ на кнопках и в текстах бота: свои эмодзи из набора t.me/addemoji/shkwb_apps_by_shkwb_bot
 // (создан ботом 17.11.2026 из icon.png программ, 100×100). Telegram показывает их на кнопках только
 // пока у владельца бота есть Telegram Premium. Если Premium закончится или кнопки начнут ломаться —
 // BOT_APP_ICONS=0 в .env обоих серверов, и кнопки вернутся к обычным эмодзи 💻/🖨/🏷.
@@ -20,4 +20,11 @@ function appButton(app, text, action) {
   return { text, icon_custom_emoji_id: icon.id, ...action };
 }
 
-module.exports = { appButton };
+/** Иконка в тексте сообщения (parse_mode HTML): `${appEmoji('helper')} Помощник ПВЗ`. */
+function appEmoji(app) {
+  const icon = ICONS[app];
+  if (!icon) return '';
+  return iconsEnabled() ? `<tg-emoji emoji-id="${icon.id}">${icon.fallback}</tg-emoji>` : icon.fallback;
+}
+
+module.exports = { appButton, appEmoji };

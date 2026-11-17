@@ -26,7 +26,7 @@ const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 const { newStickerSvg, stickerSvg } = require('./_stickers');
 // Ограничения аккаунтов из админки (снимок в памяти, на узле бота обновляется раз в 60 с или по invalidateUserControls)
 const controls = require('./_user-controls');
-const { appButton } = require('./_bot-app-icons');
+const { appButton, appEmoji } = require('./_bot-app-icons');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -446,7 +446,7 @@ async function greetingLines(from, { fromClub = false } = {}) {
     ...clubStatusLines(club, { fromClub, menu: true }),
     'Я бот для сотрудников ПВЗ Wildberries. Что умею:',
     '',
-    `🏷 Стикер с ШК товара (номер из 11 цифр) — ${custom}, пачка из ${BATCH_QUANTITY} новых — ${batch}. Можно просто прислать сюда фото или скриншот с номером.`,
+    `${appEmoji('sticker')} Стикер с ШК товара (номер из 11 цифр) — ${custom}, пачка из ${BATCH_QUANTITY} новых — ${batch}. Можно просто прислать сюда фото или скриншот с номером.`,
     `📦 QR возвратной коробки — по тем же ценам.`,
     `🔑 QR-код клиента по его ID — ${wallet.formatRub(withClub(CLIENT_CODE_PRICE))} или 1 код из тарифа «Помощника ПВЗ».`,
     `⭐ Отзывы вашего ПВЗ — смотреть бесплатно, узнать, кто поставил оценку, — ${wallet.formatRub(withClub(REVIEW_PRICE))}.`,
@@ -519,7 +519,7 @@ async function showClientCode(chatId, messageId, from, { notice = '' } = {}) {
   await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
     ...pending.rows,
     [{ text: '🔎 Найти клиента по ячейке, телефону или ШК', callback_data: 'code:find' }],
-    [{ text: '🖥 Найти ID клиента в Помощнике ПВЗ', callback_data: 'code:app' }],
+    [appButton('helper', 'Найти ID клиента в Помощнике ПВЗ', { callback_data: 'code:app' })],
     ...(short ? [[{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }]] : []),
     MENU_ROW,
   ]) });
@@ -542,7 +542,7 @@ async function showClientIdInHelper(chatId, messageId, from) {
     ? `поиск клиента и ${PLANS[id].codes} QR клиента в месяц включено`
     : 'поиск клиента по ячейке и телефону; QR — из пакета кодов клиента или здесь, в боте'}.`);
   const text = [
-    '<b>🖥 ID клиента в «Помощнике ПВЗ»</b>',
+    `<b>${appEmoji('helper')} ID клиента в «Помощнике ПВЗ»</b>`,
     'Программа для компьютера пункта сама находит клиента по номеру ячейки или последним 4 цифрам телефона — по базе пункта на этом компьютере.',
     '',
     `Ваша подписка: ${helperStatusLine(ent, free)}`,
@@ -854,7 +854,7 @@ async function handleLoginStart(from, chatId, rawCode) {
   if (restriction) return sendMessage(chatId, loginRestrictedText(program, restriction), { reply_markup: supportKeyboard() });
   const losing = program.scope === 'cell_print' ? 'ваш профиль, баланс и ключи' : 'ваш профиль, баланс и данные пункта';
   return sendMessage(chatId, [
-    `🖥 <b>Вход в «${program.name}»</b>`,
+    `${appEmoji(program.scope === 'cell_print' ? 'cellprint' : 'helper')} <b>Вход в «${program.name}»</b>`,
     `Компьютер: «${escapeHtml(row.device_name || 'Компьютер')}» · запрошен ${minutesAgoText(row.created_at)}`,
     `Код входа: <code>${loginCodeLabel(code)}</code>`,
     '',
@@ -1387,7 +1387,7 @@ async function runClientSearch(from, chatId, query, { photoCodes = null, statusI
 async function showHelperInfo(chatId, messageId) {
   const free = await helperFreeText();
   const text = [
-    '<b>🖥 Помощник ПВЗ</b>',
+    `<b>${appEmoji('helper')} Помощник ПВЗ</b>`,
     'Программа для ПК пункта: код клиента, ячейки, отзывы с авторами, досье клиентов, график и зарплата сотрудников.',
     '',
     ...SALE_PLANS.map(id => `${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес (у аналогов ${PLANS[id].compare[1]} ₽)`),
@@ -1406,7 +1406,7 @@ async function showHelperInfo(chatId, messageId) {
 // ключа (api/cell-print.js, маршрут trial) — поэтому не «первые 7 дней бесплатно», а «можно включить».
 async function showCellPrintInfo(chatId, messageId) {
   const text = [
-    '<b>🖨 ПВЗ Принт — печать ячеек</b>',
+    `<b>${appEmoji('cellprint')} ПВЗ Принт — печать ячеек</b>`,
     'Сканируете товар — номер ячейки сразу печатается на термопринтере. Этикетки без лимита.',
     '',
     'В программе можно включить 7 дней бесплатно — один раз, до покупки ключа.',
@@ -2401,7 +2401,7 @@ async function acceptLoosePhoto(from, chatId, image) {
   const text = codes.length === 1
     ? `Нашёл ШК <code>${codes[0]}</code>. Сделать стикер?`
     : '<b>На фото несколько номеров ШК</b>\nДля какого сделать стикер?';
-  const rows = codes.map(code => [{ text: `🏷 Стикер ${code}`, callback_data: `gen:num:${code}` }]);
+  const rows = codes.map(code => [appButton('sticker', `Стикер ${code}`, { callback_data: `gen:num:${code}` })]);
   rows.push(MENU_ROW);
   await showScreen(chatId, status?.message_id, text, { reply_markup: choiceKeyboard(rows) });
 }
@@ -2454,8 +2454,8 @@ async function offerForNumber(from, chatId, digits) {
   const qr = approvals.chargeLabel(charge);
   const rows = [], lines = [`Вы прислали номер <code>${digits}</code>. Что с ним сделать?`];
   if (digits.length === 11) {
-    rows.push([{ text: `🏷 Стикер товара — ${sticker}`, callback_data: `gen:num:${digits}` }]);
-    lines.push(`🏷 Стикер товара — если это ШК товара (11 цифр), ${sticker}`);
+    rows.push([appButton('sticker', `Стикер товара — ${sticker}`, { callback_data: `gen:num:${digits}` })]);
+    lines.push(`${appEmoji('sticker')} Стикер товара — если это ШК товара (11 цифр), ${sticker}`);
   }
   if (digits.length === 10) {
     rows.push([{ text: `📦 QR коробки — ${sticker}`, callback_data: `gen:box:${digits}` }]);
@@ -2606,12 +2606,12 @@ async function showProfile(from, chatId, messageId) {
     '<b>👤 Профиль</b>',
     `💰 На балансе: <b>${wallet.formatRub(balance)}</b>`,
     // Остатки пакетов — только если есть: кто работает в боте, обходится балансом.
-    ...(stickers ? [`🏷 Стикеры в пакете: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
+    ...(stickers ? [`${appEmoji('sticker')} Стикеры в пакете: ${stickers.toLocaleString('ru-RU')} шт.`] : []),
     ...(clientCodes > 0 ? [`🔑 Коды клиента в пакете: ${clientCodes.toLocaleString('ru-RU')}`] : []),
     '',
     '<b>Программы для компьютера</b>',
-    `🖥 Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
-    `🖨 ПВЗ Принт (печать ячеек): ${cellPrintStatusLine(cellKeys)}`,
+    `${appEmoji('helper')} Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
+    `${appEmoji('cellprint')} ПВЗ Принт (печать ячеек): ${cellPrintStatusLine(cellKeys)}`,
     // Ключ виден здесь всегда — сообщение с покупкой могло потеряться; нажатие на <code> копирует ключ.
     ...cellKeys.slice(0, 3).map(key => `   ${cellKeyLine(key)}`),
     '',
@@ -2634,7 +2634,7 @@ async function helpText(from) {
   return [
     '<b>🆘 Помощь и поддержка</b>',
     '',
-    `🏷 <b>Стикеры.</b> «По номеру» — стикер для вашего ШК (11 цифр с этикетки товара), ${custom}: пришлите номер или фото/скриншот, где он виден. «Пачка ${BATCH_QUANTITY}» — ${BATCH_QUANTITY} новых стикеров одним PDF, ${batch}.`,
+    `${appEmoji('sticker')} <b>Стикеры.</b> «По номеру» — стикер для вашего ШК (11 цифр с этикетки товара), ${custom}: пришлите номер или фото/скриншот, где он виден. «Пачка ${BATCH_QUANTITY}» — ${BATCH_QUANTITY} новых стикеров одним PDF, ${batch}.`,
     '📦 <b>QR коробки</b> — те же цены, номер коробки — 10 цифр.',
     `🔑 <b>Код клиента.</b> Напишите «Код» и ID клиента, например <code>Код 191607973</code>, — пришлю QR. Спишется 1 код из тарифа «Помощника ПВЗ», а без него — ${wallet.formatRub(codePrice)}. Не знаете ID — найду клиента по ячейке, телефону или ШК товара (нужен вход в WB по номеру телефона).`,
     `⭐ <b>Отзывы ПВЗ.</b> После входа в WB смотреть бесплатно. «Кто поставил оценку» — ${wallet.formatRub(authorPrice)}, того же клиента повторно — бесплатно.`,
@@ -3655,7 +3655,7 @@ async function resolveShopItem(userId, parts) {
     if (!price || count <= 1) return { error: 'Такого пакета нет.' };
     const target = await ownTopupCode(userId);
     return {
-      title: `<b>🏷 Пакет: ${count} стикеров по номеру</b>\nПо ${wallet.formatRub(price / count)} за штуку`,
+      title: `<b>${appEmoji('sticker')} Пакет: ${count} стикеров по номеру</b>\nПо ${wallet.formatRub(price / count)} за штуку`,
       priceRub: price, productKind: 'stickers', back: b === 'wizard' ? 'shop:gen:wizard' : 'shop:gen', returnToGenerator: b === 'wizard',
       fields: { custom_quantity: count, ...(target ? { renewal_target_key: target } : {}) },
       snapshot: { packs: [{ quantity: count, unit: price / count, total: price }], units: count, total: price },
@@ -3665,7 +3665,7 @@ async function resolveShopItem(userId, parts) {
     const months = Number(b), snap = isSalePlan(a) ? orderSnapshot(a, months) : null;
     if (!snap) return { error: 'Такого тарифа нет.' };
     return {
-      title: `<b>🖥 «${PLANS[a].title}» на ${monthsLabel(months)}</b>`,
+      title: `<b>${appEmoji('helper')} «${PLANS[a].title}» на ${monthsLabel(months)}</b>`,
       priceRub: snap.total, productKind: 'app_subscription', back: `shop:helper:${a}`,
       fields: { app_plan: a, app_term_months: months }, snapshot: snap,
     };
@@ -3695,7 +3695,7 @@ async function resolveShopItem(userId, parts) {
     const price = CP_SCOPES[scope] ? cellPrintPrice(days, devices, scope) : null;
     if (!CP_DAYS.includes(days) || price == null) return { error: 'Такого варианта нет.' };
     return {
-      title: `<b>🖨 Ключ «ПВЗ Принт»: ${days} дней, ${devicesLabel(devices)}, ${CP_SCOPES[scope]}</b>`,
+      title: `<b>${appEmoji('cellprint')} Ключ «ПВЗ Принт»: ${days} дней, ${devicesLabel(devices)}, ${CP_SCOPES[scope]}</b>`,
       priceRub: price, productKind: 'cell_print_license', back: `shop:cp:n:${days}:${devices}`,
       fields: { cell_print_duration_days: days, cell_print_device_limit: devices, cell_print_marketplace_scope: scope },
       snapshot: { cellPrint: { durationDays: days, deviceLimit: devices, program: false, bonusDays: 0 }, total: price },
@@ -3729,9 +3729,9 @@ async function showShop(from, chatId, messageId, parts) {
       '<b>🛒 Купить с баланса</b>',
       balanceLine,
       '',
-      '🖥 Подписка «Помощник ПВЗ» — программа для компьютера пункта',
-      '🖨 Ключ «ПВЗ Принт» (печать ячеек) — номер ячейки на термопринтере при сканировании',
-      '🏷 Пакет стикеров по номеру — дешевле, чем по одному',
+      `${appEmoji('helper')} Подписка «Помощник ПВЗ» — программа для компьютера пункта`,
+      `${appEmoji('cellprint')} Ключ «ПВЗ Принт» (печать ячеек) — номер ячейки на термопринтере при сканировании`,
+      `${appEmoji('sticker')} Пакет стикеров по номеру — дешевле, чем по одному`,
       '🔑 Пакет кодов клиента — QR клиента в боте и в «Помощнике ПВЗ»',
     ].join('\n');
     const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
@@ -3756,7 +3756,7 @@ async function showShop(from, chatId, messageId, parts) {
       .map(([count, price]) => `${count} шт. — ${price} ₽ (${wallet.formatRub(price / count)} за штуку)`)
       .join('\n');
     const lines = [
-      '<b>🏷 Пакеты стикеров по номеру</b>',
+      `<b>${appEmoji('sticker')} Пакеты стикеров по номеру</b>`,
       table,
       `Без пакета один стикер по номеру стоит ${wallet.formatRub(GENERATION_PRICES.custom / 100)}.`,
       'Пакет тратится сам: каждый следующий стикер или QR коробки по номеру спишется из него, а не с баланса. На «Пачку 50» купленный пакет не действует (месячные стикеры тарифа «Про» — действуют).',
@@ -3779,7 +3779,7 @@ async function showShop(from, chatId, messageId, parts) {
     const freeNote = free ? '\nОплата начнёт действовать после бесплатного периода.' : '';
     const plans = SALE_PLANS.map(id => `<b>${PLANS[id].title} — ${PLANS[id].monthlyPrice} ₽/мес</b>: ${lowerFirst(PLANS[id].summary)}. ${upperFirst(planLimitsLine(id))}.`);
     const text = [
-      '<b>🖥 Подписка «Помощник ПВЗ»</b>',
+      `<b>${appEmoji('helper')} Подписка «Помощник ПВЗ»</b>`,
       `Сейчас: ${helperStatusLine(ent, free)}${freeNote}`,
       '',
       ...plans,
@@ -3795,7 +3795,7 @@ async function showShop(from, chatId, messageId, parts) {
     if (!isSalePlan(a)) return showShop(from, chatId, messageId, ['helper']);
     const ent = await supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null);
     const text = [
-      `<b>🖥 «${PLANS[a].title}»</b> — ${lowerFirst(PLANS[a].summary)}.`,
+      `<b>${appEmoji('helper')} «${PLANS[a].title}»</b> — ${lowerFirst(PLANS[a].summary)}.`,
       `${upperFirst(planLimitsLine(a))}.`,
       subscriptionChangeLine(ent, a),
       balanceLine,
@@ -3817,7 +3817,7 @@ async function showShop(from, chatId, messageId, parts) {
     const renewable = keys.filter(key => !isTrialKey(key));
     const trial = keys.find(isTrialKey);
     const text = [
-      '<b>🖨 Ключ «ПВЗ Принт» (печать ячеек)</b>',
+      `<b>${appEmoji('cellprint')} Ключ «ПВЗ Принт» (печать ячеек)</b>`,
       ...(keys.length ? ['Ваши ключи (нажмите, чтобы скопировать):', ...keys.map(cellKeyLine)] : ['Ключей пока нет.']),
       ...(trial && !renewable.length ? ['', `Пробный период${trial.expires_at ? ` до ${dayMonthShort(trial.expires_at)}` : ''}. Чтобы печать не остановилась, купите ключ — выберете срок, число компьютеров и площадку.`] : []),
       '',
@@ -3996,7 +3996,7 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
 function cellKeyMessage(key, fields) {
   const scope = CP_SCOPES[fields.cell_print_marketplace_scope];
   return [
-    '<b>🖨 Ваш ключ «ПВЗ Принт»</b> (нажмите, чтобы скопировать):',
+    `<b>${appEmoji('cellprint')} Ваш ключ «ПВЗ Принт»</b> (нажмите, чтобы скопировать):`,
     `<code>${escapeHtml(key)}</code>`,
     `${fields.cell_print_duration_days} дней · ${devicesLabel(Number(fields.cell_print_device_limit) || 1)}${scope ? ` · ${scope}` : ''}. Срок начнётся, когда вы первый раз включите ключ в программе.`,
     '',
