@@ -166,6 +166,7 @@ function start(userId, device, origin) {
     closed: null,
     pcWaiters: new Set(),
     phoneWaiters: new Set(),
+    pcSeenAt: now,
   };
   sessions.set(s.token, s);
   return { token: s.token, url: `${origin}/t/${s.token}`, expiresAt: new Date(now + OPEN_TTL_MS).toISOString(), limits: LIMITS };
@@ -188,6 +189,7 @@ function close(userId, device, query) {
 async function pull(userId, device, query, { waitMs = WAIT_MS } = {}) {
   // без touch(): ПК держит запрос постоянно — сеанс истекает по бездействию телефона
   const s = ownSession(userId, device, query.token);
+  s.pcSeenAt = Date.now();
   const ack = String(query.ack || '');
   if (ack) {
     const [fid, rawIdx] = ack.split(':');
@@ -255,8 +257,11 @@ function phoneSession(token, secret, { allowUnopened = false } = {}) {
   return s;
 }
 
+// ПК на связи: держит долгий запрос прямо сейчас или спрашивал недавно (между запросами — секунды).
+const PC_ONLINE_MS = 40_000;
 function phoneInfo(s) {
-  return { pcName: s.deviceName, limits: LIMITS, files: [...s.files.values()].map(fileView) };
+  const pcOnline = s.pcWaiters.size > 0 || Date.now() - (s.pcSeenAt || 0) < PC_ONLINE_MS;
+  return { pcName: s.deviceName, pcOnline, limits: LIMITS, files: [...s.files.values()].map(fileView) };
 }
 
 /** Первое открытие привязывает ссылку к телефону; повтор с тем же секретом — то же состояние. */

@@ -5,7 +5,7 @@ import { ApiError } from './client';
 
 export type PhoneLimits = { chunkBytes: number; fileBytes: number; sessionBytes: number; sessionFiles: number };
 export type PhoneFileState = { id: string; name: string; size: number; chunks: number; received: number; delivered: number; done: boolean; canceled: boolean };
-export type PhoneInfo = { pcName: string; limits: PhoneLimits; files: PhoneFileState[]; secret?: string };
+export type PhoneInfo = { pcName: string; pcOnline?: boolean; limits: PhoneLimits; files: PhoneFileState[]; secret?: string };
 
 async function request<T>(token: string, op: string, init: RequestInit & { secret?: string; query?: string } = {}): Promise<T> {
   const { secret, query, headers, ...rest } = init;

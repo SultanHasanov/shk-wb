@@ -157,6 +157,16 @@ describe('файлы с телефона', () => {
     expect(gone.body.code).toBe('LINK_GONE');
   });
 
+  it('телефон видит, что компьютер перестал забирать файлы (pcOnline)', async () => {
+    const { token } = await started();
+    const { secret } = (await phone(token, 'open', { body: {} })).body;
+    expect((await phone(token, 'state', { method: 'GET', secret })).body.pcOnline).toBe(true);
+    vi.setSystemTime(Date.now() + 60_000);
+    expect((await phone(token, 'state', { method: 'GET', secret })).body.pcOnline).toBe(false);
+    await pc('phone-pull', HOME, { query: { token } });
+    expect((await phone(token, 'state', { method: 'GET', secret })).body.pcOnline).toBe(true);
+  });
+
   it('владелец закрыл приём на ПК — 403', async () => {
     denied = ['act.phone_files'];
     mockSupabase();

@@ -61,6 +61,8 @@ export function PhoneUploadPage() {
   const { token = '' } = useParams();
   const [gate, setGate] = useState<Gate>({ kind: 'loading' });
   const [items, setItems] = useState<Item[]>([]);
+  // компьютер на связи (забирает файлы); false — программа закрыта, без интернета или приём на ней сброшен
+  const [pcOnline, setPcOnline] = useState(true);
   const secretRef = useRef<string | null>(null);
   const runningRef = useRef(false);
   const itemsRef = useRef(items);
@@ -145,6 +147,7 @@ export function PhoneUploadPage() {
       while (!stop) {
         try {
           const info = await linkState(token, secretRef.current || '');
+          setPcOnline(info.pcOnline !== false);
           const done = new Set(info.files.filter(f => f.done).map(f => f.id));
           setItems(list => list.map(i => (i.status === 'sent' && i.fileId && done.has(i.fileId) ? { ...i, status: 'delivered' } : i)));
         } catch (error) {
@@ -229,6 +232,13 @@ export function PhoneUploadPage() {
           <div className={s.summary} aria-live="polite">
             {sending ? `Отправляем «${sending.file.name}»` : queued ? `В очереди: ${queued}` : ''}
             {delivered > 0 && <span className={s.summaryOk}><Check size={14} strokeWidth={3} aria-hidden="true" /> На компьютере: {delivered}</span>}
+          </div>
+        )}
+
+        {waitingPc && !pcOnline && (
+          <div className={s.warn} role="status">
+            Компьютер сейчас не забирает файлы. Они ждут на сервере до 30 минут: откройте на компьютере «Помощник ПВЗ» → «С телефона»
+            и проверьте интернет. Если там нет QR — нажмите «Показать QR», отсканируйте заново и отправьте файлы ещё раз.
           </div>
         )}
 
