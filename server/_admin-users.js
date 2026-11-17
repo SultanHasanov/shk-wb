@@ -8,6 +8,7 @@ const {
 } = require('./_admin-grants');
 const { ADDONS, PLANS, accountLimits, addonPrice, isAddon, isPlan, isTerm, mirrorLimit, orderSnapshot } = require('./_app-plans');
 const { setCodeViaBotOffForUser } = require('./_app-flags');
+const { appButton } = require('./_bot-app-icons');
 
 /**
  * Раздел «Пользователи» админки.
@@ -737,7 +738,7 @@ async function handler(req, res) {
       await notifyUser(userId, 'Вам выдан ключ «Печати ячеек»',
         `Ключ ${created.row.key} на ${created.row.duration_days} дней, устройств: ${created.row.device_limit}.`, '/cabinet/keys', {
           text: `🎁 <b>Вам выдан ключ «ПВЗ Принт» (печать ячеек)</b>\n<code>${escapeTelegramHtml(created.row.key)}</code> — ${created.row.duration_days} дн., компьютеров: ${created.row.device_limit}.\nВведите ключ в программе «ПВЗ Принт».`,
-          keyboard: botKeyboard({ text: '🖨 ПВЗ Принт', callback_data: 'menu:cellprint' }),
+          keyboard: botKeyboard(appButton('cellprint', 'ПВЗ Принт', { callback_data: 'menu:cellprint' })),
         });
       return res.status(201).json(RESOURCES.cellLicense.fromDb(created.row));
     }
@@ -758,7 +759,7 @@ async function handler(req, res) {
       await notifyUser(userId, 'Вам выдана подписка «Помощник ПВЗ»',
         `Тариф ${PLANS[plan].title} на ${months} мес. Программа готова к работе.`, '/cabinet/subscription', {
           text: `🎁 <b>Вам выдана подписка «Помощник ПВЗ»</b>\nТариф «${escapeTelegramHtml(PLANS[plan].title)}» на ${months} мес. Программа готова к работе.`,
-          keyboard: botKeyboard({ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }),
+          keyboard: botKeyboard(appButton('helper', 'Помощник ПВЗ', { callback_data: 'menu:helper' })),
         });
       return res.status(201).json({ ok: true });
     }
@@ -789,7 +790,7 @@ async function handler(req, res) {
         : `Срок — ${months} мес. Услуга работает вместе с тарифом «${PLANS[ADDONS[addon].minPlan].title}» или выше.`;
       await notifyUser(userId, addonTitle, addonBody, '/cabinet/subscription', {
         text: `🎁 <b>${escapeTelegramHtml(addonTitle)} («Помощник ПВЗ»)</b>\n${escapeTelegramHtml(addonBody)}`,
-        keyboard: botKeyboard({ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }),
+        keyboard: botKeyboard(appButton('helper', 'Помощник ПВЗ', { callback_data: 'menu:helper' })),
       });
       return res.status(201).json({ ok: true });
     }

@@ -131,10 +131,12 @@ describe('приветствие и главное меню', () => {
     expect(lastScreen().body.reply_markup.inline_keyboard.map((row: any[]) => row.map(button => button.text))).toEqual([
       ['🏷 Стикеры и QR коробок'],
       ['🔑 Код клиента', '⭐ Отзывы ПВЗ'],
-      ['💻 Помощник ПВЗ', '🖨 ПВЗ Принт'],
+      ['Помощник ПВЗ', 'ПВЗ Принт'],
       ['👤 Профиль и баланс', '🆘 Помощь'],
       ['👥 Пригласить коллегу'],
     ]);
+    // У программ — их иконки (свои эмодзи), а не обычные 💻/🖨.
+    expect(lastScreen().body.reply_markup.inline_keyboard[2].map((button: any) => button.icon_custom_emoji_id)).toEqual(['5469821325981821893', '5469891870819659663']);
   });
 
   it('«Помощь» — справка с ценами и поддержка на одном экране; канал и VPN — здесь', async () => {

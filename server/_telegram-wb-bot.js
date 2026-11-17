@@ -26,6 +26,7 @@ const { isAccessCode, normalizeAccessCode } = require('./_access-code');
 const { newStickerSvg, stickerSvg } = require('./_stickers');
 // Ограничения аккаунтов из админки (снимок в памяти, на узле бота обновляется раз в 60 с или по invalidateUserControls)
 const controls = require('./_user-controls');
+const { appButton } = require('./_bot-app-icons');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -363,7 +364,7 @@ function mainMenuKeyboard() {
   return choiceKeyboard([
     [{ text: '🏷 Стикеры и QR коробок', callback_data: 'menu:stickers' }],
     [{ text: '🔑 Код клиента', callback_data: 'menu:code' }, { text: '⭐ Отзывы ПВЗ', callback_data: 'menu:reviews' }],
-    [{ text: '💻 Помощник ПВЗ', callback_data: 'menu:helper' }, { text: '🖨 ПВЗ Принт', callback_data: 'menu:cellprint' }],
+    [appButton('helper', 'Помощник ПВЗ', { callback_data: 'menu:helper' }), appButton('cellprint', 'ПВЗ Принт', { callback_data: 'menu:cellprint' })],
     // Аккаунт создаётся сам при первом действии — кнопки «Войти» нет. Сайта в меню тоже нет: бот работает
     // сам по себе, связку с аккаунтом сайта делает поддержка. «Помощь» — справка и поддержка, там же канал и VPN.
     [{ text: '👤 Профиль и баланс', callback_data: 'menu:profile' }, { text: '🆘 Помощь', callback_data: 'menu:help' }],
@@ -3734,8 +3735,8 @@ async function showShop(from, chatId, messageId, parts) {
       '🔑 Пакет кодов клиента — QR клиента в боте и в «Помощнике ПВЗ»',
     ].join('\n');
     const id = await showScreen(chatId, messageId, text, { reply_markup: choiceKeyboard([
-      [{ text: '🖥 Подписка «Помощник ПВЗ»', callback_data: 'shop:helper' }],
-      [{ text: '🖨 Ключ «ПВЗ Принт»', callback_data: 'shop:cp' }],
+      [appButton('helper', 'Подписка «Помощник ПВЗ»', { callback_data: 'shop:helper' })],
+      [appButton('cellprint', 'Ключ «ПВЗ Принт»', { callback_data: 'shop:cp' })],
       [{ text: '🏷 Пакеты стикеров по номеру', callback_data: 'shop:gen' }],
       [{ text: '🔑 Пакет кодов клиента', callback_data: 'shop:wbpk' }],
       [{ text: '💰 Пополнить баланс', callback_data: 'topup:home' }],
@@ -3972,7 +3973,7 @@ async function payShopItem(from, chatId, messageId, nonce, parts, screenId = mes
         ? 'Ключ «ПВЗ Принт» куплен — он в сообщении ниже ⬇️ Там же — как его включить.'
         : `Ключ «ПВЗ Принт» куплен: <code>${escapeHtml(order.cell_print_license_key)}</code> (нажмите, чтобы скопировать). В программе вставьте его в блок «Ключ без аккаунта» и нажмите «Активировать». Ключ всегда виден в «👤 Профиль и баланс».`;
     }
-    rows = [[{ text: '🖨 Мои ключи', callback_data: 'shop:cp' }, { text: '👤 Профиль', callback_data: 'menu:profile' }], MENU_ROW];
+    rows = [[appButton('cellprint', 'Мои ключи', { callback_data: 'shop:cp' }), { text: '👤 Профиль', callback_data: 'menu:profile' }], MENU_ROW];
   } else if (item.productKind === 'stickers') {
     done = `Пакет куплен: ${item.fields.custom_quantity} стикеров по номеру. Вводить ничего не нужно — они спишутся сами при создании.`;
   } else {
