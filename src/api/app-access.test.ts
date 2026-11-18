@@ -178,17 +178,40 @@ describe('доступ сотрудников: сервер', () => {
     expect(calls.some(u => u.includes('app_doc_put'))).toBe(false);
   });
 
-  it('токен Ivideon не уходит на ПК, где закрыто «Видео по ШК»', async () => {
+  it('токен Ivideon и коды камер IPEYE не уходят на ПК, где закрыто «Видео по ШК»', async () => {
     mockSupabase(url => {
       if (url.includes('app_devices?user_id=')) return { body: [deviceRow(['video'])] };
     });
     const sync = require('../../server/_app-sync.js') as { docsGet: (...a: unknown[]) => Promise<Record<string, unknown>> };
-    vi.spyOn(sync, 'docsGet').mockResolvedValue({ ivideon: { version: 1, data: 'tok' }, telegram: { version: 1, data: 'tg' } });
+    vi.spyOn(sync, 'docsGet').mockResolvedValue({
+      ivideon: { version: 1, data: 'tok' },
+      ipeye: { version: 1, data: { cams: {} } },
+      telegram: { version: 1, data: 'tg' },
+    });
     const res = response();
     await handler(request('secrets'), res);
     expect(res.statusCode).toBe(200);
     expect((res.body as { docs: Record<string, unknown> }).docs).not.toHaveProperty('ivideon');
+    expect((res.body as { docs: Record<string, unknown> }).docs).not.toHaveProperty('ipeye');
     expect((res.body as { docs: Record<string, unknown> }).docs).toHaveProperty('telegram');
+  });
+
+  it('коды камер IPEYE принимаются в секреты пункта', () => {
+    const sync = require('../../server/_app-sync.js') as { SECRET_KEYS: Record<string, { scope: string }> };
+    expect(sync.SECRET_KEYS.ipeye).toEqual({ scope: 'point' });
+  });
+
+  it('коды камер IPEYE от ПК без права настройки камер не записываются', async () => {
+    const calls: string[] = [];
+    mockSupabase(url => {
+      calls.push(url);
+      if (url.includes('app_devices?user_id=')) return { body: [deviceRow(['act.video_settings'])] };
+    });
+    const res = response();
+    await handler(request('secrets', { method: 'PUT', body: { key: 'ipeye', point: '123', base: 3, data: { cams: {} } } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ ignored: true });
+    expect(calls.some(u => u.includes('app_doc_put'))).toBe(false);
   });
 });
 

@@ -178,8 +178,8 @@ function isBackgroundPoll(action, method) {
 const DOC_WRITE_PERMS = Object.freeze({
   notes: 'notes', settings: 'settings', staff: 'act.staff_edit', schedule: 'act.staff_edit', video: 'act.video_settings',
 });
-const SECRET_WRITE_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'act.video_settings' });
-const SECRET_READ_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'video' });
+const SECRET_WRITE_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'act.video_settings', ipeye: 'act.video_settings' });
+const SECRET_READ_PERMS = Object.freeze({ telegram: 'telegram', ivideon: 'video', ipeye: 'video' });
 const SITE_LINK_TARGETS = /^\/cabinet(\/[a-z-]+)?(\?[a-z0-9=&_-]{0,80})?$/i;
 // Компьютер сотрудника (app_devices.role = work): видит только себя, не загружает чужие базы,
 // не управляет аккаунтом и оплатами. Роль меняется с компьютера владельца или в кабинете.

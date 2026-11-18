@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 // Магазин бота (этап D): подписка «Помощника» — лимиты тарифа, что станет с текущей подпиской, «что дальше»
 // со входом через бота; ключ «ПВЗ Принт» — отдельным сообщением, строками на экране и в профиле, пробный не
@@ -229,12 +229,17 @@ describe('ключ «ПВЗ Принт»', () => {
   });
 
   it('экран ключей: ключи строками; пробный — без «Продлить», с советом купить ключ', async () => {
+    // пробный ключ в данных действует до 17.11.2026 — «сегодня» внутри него, иначе тест протухает с датой
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T12:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
     world.cellKeys = [
       { id: 7, key: 'CP-TRIAL', source: 'trial', duration_days: 7, device_limit: 1, marketplace_scope: 'both', activated_at: '2026-11-10T00:00:00Z', expires_at: '2026-11-17T00:00:00Z' },
     ];
     await bot.processUpdate(press('shop:cp'));
     let text = String(lastScreen().body.text);
-    expect(text).toContain('<b>🖨 Ключ «ПВЗ Принт» (печать ячеек)</b>');
+    // иконка программы — кастомный эмодзи с запасным 🖨 (server/_bot-app-icons.js)
+    expect(text).toMatch(/<b>(<tg-emoji emoji-id="\d+">🖨<\/tg-emoji>|🖨) Ключ «ПВЗ Принт» \(печать ячеек\)<\/b>/);
     expect(text).toContain('<code>CP-TRIAL</code> — пробный, до 17.11.2026 · 1 компьютер · WB + Ozon');
     expect(text).toContain('Пробный период до 17.11. Чтобы печать не остановилась, купите ключ');
     expect(datas()).toEqual(['shop:cp:n', 'shop:home', 'menu:home']);

@@ -30,6 +30,8 @@ const DOC_KEYS = Object.freeze({
 const SECRET_KEYS = Object.freeze({
   telegram: { scope: 'account' },
   ivideon: { scope: 'point' },
+  // коды камер IPEYE (Помощник 1.17+): ссылка на архив без входа, поэтому — секрет, как токен Ivideon
+  ipeye: { scope: 'point' },
 });
 
 function str(value, max) {
