@@ -325,7 +325,9 @@ async function handleBoxPool(req,res){
     }
     if(req.method==='POST'){
       const start=String(req.body?.start||'').trim(),end=String(req.body?.end||'').trim();
-      if(!/^\d{1,12}$/.test(start)||!/^\d{1,12}$/.test(end))return res.status(400).json({error:'Начало и конец должны содержать от 1 до 12 цифр'});
+      // номер коробки — префикс и ровно 10 цифр (как TRBX5084472647 у WB); 11-значный диапазон
+      // однажды уже загрузили сюда по ошибке — тот же, что у товарных стикеров
+      if(!/^\d{10}$/.test(start)||!/^\d{10}$/.test(end))return res.status(400).json({error:'Номер коробки — ровно 10 цифр: начало и конец диапазона должны быть 10-значными'});
       const first=BigInt(start),last=BigInt(end);if(last<first||last-first>100000n||last>1099511627775n)return res.status(400).json({error:'Диапазон должен содержать не более 100 001 номера'});
       const before=await poolRange('return_box_codes');
       const inserted=await supabaseFetch('rpc/add_return_box_range',{method:'POST',body:JSON.stringify({p_start:start,p_end:end})});

@@ -23,10 +23,11 @@ module.exports = async function handler(req, res) {
   const example = String(req.query?.example || '') === '1';
   const batch = String(req.query?.batch || '');
   const historyId = String(req.query?.history || '');
-  const code = example ? '69874145048' : String(req.query?.code || '');
+  let variant = String(req.query?.variant || '');
+  // пример: у товара 11 цифр, у коробки префикс и 10
+  const code = example ? (variant === 'box' ? '6987414504' : '69874145048') : String(req.query?.code || '');
   const token = String(req.query?.token || '');
   const expires = Number(req.query?.expires || 0);
-  let variant = String(req.query?.variant || '');
   const style = String(req.query?.style || '') === 'new' ? 'new' : 'old';
   let prefix = String(req.query?.prefix || 'TRBX').toUpperCase();
   // Режим «голый QR из подписанного текста» — код клиента для Telegram-бота.
