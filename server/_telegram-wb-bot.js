@@ -29,6 +29,8 @@ const controls = require('./_user-controls');
 const { appButton, appEmoji } = require('./_bot-app-icons');
 // Чат поддержки: модерация супергруппы SUPPORT_CHAT_ID (удаление ссылок, мата, спама; предупреждения владельцу)
 const supportChat = require('./_support-chat');
+// Разовая акция 20–22.11.2026: приглашение в общий чат после покупки или генерации (server/_chat-invite.js)
+const chatInvite = require('./_chat-invite');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -1083,7 +1085,14 @@ function clientQrResendData(sid, requestId) {
  * идемпотентна по нему: второй раз код не спишется).
  * → 'sent' | 'charged_unsent' (списано, фото не ушло, возврата нет) | 'not_sent' (ничего не списано: нехватка, возврат).
  */
-async function handleClientCode(from, chatId, sid, { cell = '', requestId = null } = {}) {
+/** QR кода клиента; после выдачи — приглашение в общий чат (акция, server/_chat-invite.js). */
+async function handleClientCode(from, chatId, sid, options = {}) {
+  const outcome = await handleClientCodeInner(from, chatId, sid, options);
+  if (outcome === 'sent') chatInvite.inviteAfterAction(from?.id);
+  return outcome;
+}
+
+async function handleClientCodeInner(from, chatId, sid, { cell = '', requestId = null } = {}) {
   cell = safeCell(cell);
   const { qrText: freeQr } = buildClientQr(sid);
   if (clientCodeFreeFor(from.id)) {
@@ -2314,6 +2323,7 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
   }
   // Экран мастера — в итог, а не вечное «⏳ Создаю…»: всё нужное (файл и кнопки) — ниже.
   await showScreen(chatId, screenId, `${lead}${wizardTrail(draft)}✅ Готово. Файл — ниже.`).catch(() => {});
+  chatInvite.inviteAfterAction(from.id);
   if (result.variant !== 'box') return;
   // Мягкая подсказка про «Код клиента» — не после каждого QR коробки, примерно после каждого третьего.
   if (Math.random() < 1 / 3) {
@@ -3281,6 +3291,7 @@ async function revealReviewAuthor(from, chatId, reviewOrUserId, userSid, then, r
     footer = spent.free ? 'Этого автора вы уже смотрели — бесплатно.' : `Списано ${wallet.formatRub(price)}${club ? CLUB_CHARGE_NOTE : ''} · на балансе ${wallet.formatRub(Number(spent.balance) / 100)}`;
   }
   await sendAuthorHistory(from, chatId, info, footer, reviewMessageId);
+  chatInvite.inviteAfterAction(from.id);
 }
 
 function reviewTag(review) {
@@ -4247,7 +4258,7 @@ async function showReferrals(from, chatId, messageId, notice, { restricted = fal
     ...(canTransfer ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
     // Вывод — через поддержку (сайт для этого не нужен); кнопка только когда сумма уже доступна к выводу.
     ...(canWithdraw ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_PRIVATE_URL }]] : []),
-    ...(restricted ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_PRIVATE_URL }]] : []),
+    ...(restricted ? [[{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }]] : []),
     [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
   ]) });
 }
@@ -5074,8 +5085,7 @@ function alertCallback(callbackId, text) {
 // с сайтом и программой, поэтому строку про поддержку добавляет только бот. Кнопка — ссылка: callback-кнопки
 // ограниченному всё равно не ответят.
 const RESTRICTED_SUPPORT_LINE = 'Если считаете, что это ошибка, напишите в поддержку.';
-// Ограничение — дело личное: кнопка в личку поддержки, не в общий чат.
-const RESTRICTED_KEYBOARD = choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_PRIVATE_URL }]]);
+const RESTRICTED_KEYBOARD = choiceKeyboard([[{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }]]);
 
 function restrictedText(message) {
   return `⛔ ${escapeHtml(message)}\n${RESTRICTED_SUPPORT_LINE}`;

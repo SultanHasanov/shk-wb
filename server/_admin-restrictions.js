@@ -316,7 +316,7 @@ function restrictionNotice({ scopes, until, publicMessage } = {}) {
       ...(custom ? [custom] : []),
       'Если считаете это ошибкой — напишите в поддержку.',
     ].join('\n'),
-    telegram: { keyboard: [[{ text: '✉️ Написать в поддержку', url: require('./_bot-texts').SUPPORT_PRIVATE_URL }]] },
+    telegram: { keyboard: [[{ text: require('./_bot-texts').SUPPORT_BUTTON_TEXT, url: require('./_bot-texts').SUPPORT_URL }]] },
   };
 }
 

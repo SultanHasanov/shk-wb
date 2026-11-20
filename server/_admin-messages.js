@@ -103,7 +103,8 @@ function personalKeyboard(link) {
   const url = absoluteLink(link);
   return [
     ...(url ? [[{ text: 'Открыть', url }]] : []),
-    [{ text: '✉️ Ответить в поддержку', url: require('./_bot-texts').SUPPORT_PRIVATE_URL }],
+    // Ответ — в общий чат (решение владельца 20.11.2026); без SUPPORT_CHAT_URL — в личку, как раньше.
+    [{ text: require('./_bot-texts').SUPPORT_CHAT_URL ? '💬 Чат поддержки' : '✉️ Ответить в поддержку', url: require('./_bot-texts').SUPPORT_URL }],
     [{ text: '☰ Меню', callback_data: 'menu:home' }],
   ];
 }

@@ -36,6 +36,7 @@ import {
 import { PROGRAM_DOWNLOAD_URL } from '../lib/downloads';
 import { LinuxInstall, PlatformCards } from '../components/LinuxInstall';
 import { useDocumentMeta } from '../lib/seo';
+import { SUPPORT_QUESTION_HANDLE } from '../lib/telegram';
 import s from './ProgramPage.module.css';
 import { useMoney } from '../lib/currency';
 import { RubChargeNote } from '../components/CurrencySwitch';
@@ -165,7 +166,7 @@ const faq = (t: T) => [
   },
   {
     q: t('Куда писать, если что-то не работает?', 'Бірдеңе жұмыс істемесе, қайда жазу керек?'),
-    a: t('В Telegram @roma_denosov — поможем с установкой, входом и оплатой.', 'Telegram-да @roma_denosov — орнатуға, кіруге және төлеуге көмектесеміз.'),
+    a: t(`В Telegram ${SUPPORT_QUESTION_HANDLE} — поможем с установкой, входом и оплатой.`, `Telegram-да ${SUPPORT_QUESTION_HANDLE} — орнатуға, кіруге және төлеуге көмектесеміз.`),
   },
 ];
 

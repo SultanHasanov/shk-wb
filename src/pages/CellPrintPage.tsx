@@ -51,7 +51,7 @@ import {
   getCellPrintSavingPercent,
 } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
-import { SUPPORT_QUESTION_URL } from '../lib/telegram';
+import { SUPPORT_QUESTION_HANDLE, SUPPORT_QUESTION_URL } from '../lib/telegram';
 import s from './CellPrintPage.module.css';
 import { useMoney } from '../lib/currency';
 import { RubChargeNote } from '../components/CurrencySwitch';
@@ -256,7 +256,7 @@ const faq = (t: T) => [
   },
   {
     q: t('Куда писать, если что-то не работает?', 'Бірдеңе жұмыс істемесе, қайда жазу керек?'),
-    a: t('В Telegram @roma_denosov — поможем с подключением принтера и активацией ключа.', 'Telegram-да @roma_denosov — принтерді қосуға және кілтті белсендіруге көмектесеміз.'),
+    a: t(`В Telegram ${SUPPORT_QUESTION_HANDLE} — поможем с подключением принтера и активацией ключа.`, `Telegram-да ${SUPPORT_QUESTION_HANDLE} — принтерді қосуға және кілтті белсендіруге көмектесеміз.`),
   },
 ];
 
@@ -640,7 +640,7 @@ export const CellPrintPage = observer(() => {
             'Более 20 компьютеров? Рассчитаем тариф для вашей сети и поможем подключить все пункты —',
             '20-дан көп компьютер ме? Желіңізге тариф есептеп, барлық пункттерді қосуға көмектесеміз —',
           )}{' '}
-          <a className="accent" href="https://t.me/roma_denosov" target="_blank" rel="noreferrer">
+          <a className="accent" href={SUPPORT_QUESTION_URL} target="_blank" rel="noreferrer">
             {t('напишите нам в Telegram', 'бізге Telegram-да жазыңыз')}
           </a>
           .

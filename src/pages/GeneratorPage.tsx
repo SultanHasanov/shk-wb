@@ -42,7 +42,7 @@ import {
 } from '../ui';
 import { MIN_PER_UNIT } from '../lib/pricing';
 import { PROGRAM_DOWNLOAD_URL, CELL_PRINT_DOWNLOAD_URL } from '../lib/downloads';
-import { SUPPORT_URL } from '../lib/telegram';
+import { SUPPORT_QUESTION_URL } from '../lib/telegram';
 import { useDocumentMeta } from '../lib/seo';
 import s from './GeneratorPage.module.css';
 import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
@@ -1196,7 +1196,7 @@ export const GeneratorPage = observer(() => {
                   'Telegram-ға кез келген уақытта жазыңыз — тірі адам жауап береді. Генерация, бағдарламаларды орнату мен принтерді баптауға көмектесеміз.',
                 )}
               </p>
-              <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
+              <a href={SUPPORT_QUESTION_URL} target="_blank" rel="noopener noreferrer">
                 <Button size="sm">{t('Написать в Telegram', 'Telegram-ға жазу')}</Button>
               </a>
             </div>

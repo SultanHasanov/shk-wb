@@ -9,7 +9,7 @@ import { Hero } from '../components/Hero';
 import { Alert, Button, Card, EmptyState, Skeleton, Spinner, useToast } from '../ui';
 import { formatTotal } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
-import { BOT_URL, SUPPORT_URL, SUPPORT_USERNAME } from '../lib/telegram';
+import { BOT_URL, SUPPORT_QUESTION_HANDLE, SUPPORT_QUESTION_URL } from '../lib/telegram';
 import { cabinetKey } from '../api/cabinet';
 import { forgetPendingOrder } from '../lib/pending-orders';
 import { type Text, useLocale, useLocalePath, useT } from '../i18n';
@@ -386,8 +386,8 @@ export const PaymentResultPage = observer(() => {
                           <Button>{t('Попробовать снова', 'Қайта көру')}</Button>
                         </Link>
                       )}
-                      <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer">
-                        <Button variant="secondary">{t('Написать в Telegram', 'Telegram-да жазу')} @{SUPPORT_USERNAME}</Button>
+                      <a href={SUPPORT_QUESTION_URL} target="_blank" rel="noopener noreferrer">
+                        <Button variant="secondary">{t('Написать в Telegram', 'Telegram-да жазу')} {SUPPORT_QUESTION_HANDLE}</Button>
                       </a>
                     </div>
                   </>

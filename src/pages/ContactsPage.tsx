@@ -185,19 +185,24 @@ export function ContactsPage() {
                 <h2>{t('Telegram — самый быстрый способ', 'Telegram — ең жылдам тәсіл')}</h2>
                 <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-14)' }}>
                   {t(
-                    'Пишите напрямую: поможем с установкой, активацией ключа и подключением принтера.',
-                    'Тікелей жазыңыз: орнатуға, кілтті белсендіруге және принтерді қосуға көмектесеміз.',
+                    SUPPORT_CHAT_URL
+                      ? 'Пишите в наш чат «WB Инструменты»: поможем с установкой, активацией ключа и подключением принтера, а коллеги из других ПВЗ подскажут по работе.'
+                      : 'Пишите напрямую: поможем с установкой, активацией ключа и подключением принтера.',
+                    SUPPORT_CHAT_URL
+                      ? '«WB Инструменты» чатына жазыңыз: орнатуға, кілтті белсендіруге және принтерді қосуға көмектесеміз.'
+                      : 'Тікелей жазыңыз: орнатуға, кілтті белсендіруге және принтерді қосуға көмектесеміз.',
                   )}
                 </p>
                 <div className="row">
-                  {SUPPORT_CHAT_URL && (
+                  {SUPPORT_CHAT_URL ? (
                     <a href={SUPPORT_CHAT_URL} target="_blank" rel="noopener noreferrer">
-                      <Button>{t('Чат поддержки', 'Қолдау чаты')}</Button>
+                      <Button>{t('Открыть чат поддержки', 'Қолдау чатын ашу')}</Button>
+                    </a>
+                  ) : (
+                    <a href="https://t.me/roma_denosov" target="_blank" rel="noopener noreferrer">
+                      <Button>{t('Написать @roma_denosov', '@roma_denosov-қа жазу')}</Button>
                     </a>
                   )}
-                  <a href="https://t.me/roma_denosov" target="_blank" rel="noopener noreferrer">
-                    <Button variant={SUPPORT_CHAT_URL ? 'secondary' : undefined}>{t('Написать @roma_denosov', '@roma_denosov-қа жазу')}</Button>
-                  </a>
                 </div>
               </div>
             </Card>

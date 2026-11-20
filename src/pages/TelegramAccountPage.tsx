@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { SUPPORT_URL } from '../lib/telegram';
+import { SUPPORT_QUESTION_URL } from '../lib/telegram';
 import { Alert, Button, Card } from '../ui';
 
 /**
@@ -17,8 +17,8 @@ export function TelegramAccountPage() {
 
   const openSupport = () => {
     const webApp = window.Telegram?.WebApp;
-    if (webApp?.openTelegramLink) webApp.openTelegramLink(SUPPORT_URL);
-    else window.open(SUPPORT_URL, '_blank', 'noopener,noreferrer');
+    if (webApp?.openTelegramLink) webApp.openTelegramLink(SUPPORT_QUESTION_URL);
+    else window.open(SUPPORT_QUESTION_URL, '_blank', 'noopener,noreferrer');
   };
   const inTelegram = Boolean(window.Telegram?.WebApp?.initData);
 

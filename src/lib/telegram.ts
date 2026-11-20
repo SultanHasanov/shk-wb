@@ -25,3 +25,6 @@ export const SUPPORT_CHAT_URL = /^https:\/\/t\.me\/[\w+]+$/.test(chatUrl) ? chat
 
 /** Куда писать с общим вопросом: в чат, если он есть, иначе в личку. */
 export const SUPPORT_QUESTION_URL = SUPPORT_CHAT_URL || SUPPORT_URL;
+
+/** Как назвать, куда писать, в тексте: «@wbtools_chat» (чат) или «@roma_denosov» (личка, если чата нет). */
+export const SUPPORT_QUESTION_HANDLE = `@${SUPPORT_QUESTION_URL.replace('https://t.me/', '')}`;
