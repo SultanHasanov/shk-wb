@@ -8,6 +8,6 @@ get() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
 TOKEN=$(get TELEGRAM_BOT_TOKEN); SECRET=$(get TELEGRAM_WEBHOOK_SECRET); BASE=$(get TELEGRAM_API_BASE)
 URL=${1:-$BASE/webhook}
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "{\"url\":\"$URL\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\",\"callback_query\"]}" \
+  -d "{\"url\":\"$URL\",\"secret_token\":\"$SECRET\",\"allowed_updates\":[\"message\",\"edited_message\",\"callback_query\",\"my_chat_member\"]}" \
   "$BASE/api/setWebhook"; echo
 curl -s -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/getWebhookInfo"; echo

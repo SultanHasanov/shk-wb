@@ -51,6 +51,7 @@ import {
   getCellPrintSavingPercent,
 } from '../lib/pricing';
 import { useDocumentMeta } from '../lib/seo';
+import { SUPPORT_QUESTION_URL } from '../lib/telegram';
 import s from './CellPrintPage.module.css';
 import { useMoney } from '../lib/currency';
 import { RubChargeNote } from '../components/CurrencySwitch';
@@ -528,7 +529,7 @@ export const CellPrintPage = observer(() => {
         <SpecList items={specs(t)} />
         <Alert tone="info">
           {t('Не уверены насчёт своей модели? Скачайте программу бесплатно или', 'Моделіңізге сенімді емессіз бе? Бағдарламаны тегін жүктеп алыңыз немесе')}{' '}
-          <a className="accent" href="https://t.me/roma_denosov" target="_blank" rel="noreferrer">
+          <a className="accent" href={SUPPORT_QUESTION_URL} target="_blank" rel="noreferrer">
             {t('напишите нам название принтера', 'бізге принтер атауын жазыңыз')}
           </a>{' '}
           {t('— поможем проверить совместимость.', '— үйлесімділігін тексеруге көмектесеміз.')}

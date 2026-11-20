@@ -15,3 +15,13 @@ export const CHANNEL_URL = 'https://t.me/wbtools_ru';
 /** Личный Telegram владельца — сюда пишут, когда не проходит оплата. */
 export const SUPPORT_USERNAME = 'roma_denosov';
 export const SUPPORT_URL = `https://t.me/${SUPPORT_USERNAME}`;
+
+/**
+ * Общий чат поддержки (вопросы по программам, боту и сайту) — VITE_SUPPORT_CHAT_URL при сборке, https://t.me/<имя>.
+ * Не задан — пусто, и страницы показывают только личку поддержки.
+ */
+const chatUrl = String(import.meta.env.VITE_SUPPORT_CHAT_URL || '').trim();
+export const SUPPORT_CHAT_URL = /^https:\/\/t\.me\/[\w+]+$/.test(chatUrl) ? chatUrl : '';
+
+/** Куда писать с общим вопросом: в чат, если он есть, иначе в личку. */
+export const SUPPORT_QUESTION_URL = SUPPORT_CHAT_URL || SUPPORT_URL;

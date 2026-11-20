@@ -3,8 +3,14 @@
 // за приглашение (вебхук оплаты). Без зависимостей: модуль подключают _payments.js и _admin-*.js, а _wallet.js
 // сам зависит от _payments.js — отсюда его не берём.
 
-// Личка поддержки — кнопки «Написать в поддержку» в боте и под сообщениями из админки.
-const SUPPORT_URL = 'https://t.me/roma_denosov';
+// Личка поддержки — личные вопросы: ответ на сообщение из админки, ограничение аккаунта, вывод денег на карту
+// (там присылают реквизиты — в общий чат им нельзя).
+const SUPPORT_PRIVATE_URL = 'https://t.me/roma_denosov';
+// Общий чат поддержки (SUPPORT_CHAT_URL = https://t.me/<имя> в .env сайта и узла бота) — остальные кнопки
+// «поддержка» в боте. Не задан — они ведут в личку, как раньше.
+const SUPPORT_CHAT_URL = /^https:\/\/t\.me\/[\w+]+$/.test(String(process.env.SUPPORT_CHAT_URL || '').trim()) ? String(process.env.SUPPORT_CHAT_URL).trim() : '';
+const SUPPORT_URL = SUPPORT_CHAT_URL || SUPPORT_PRIVATE_URL;
+const SUPPORT_BUTTON_TEXT = SUPPORT_CHAT_URL ? '💬 Чат поддержки' : '✉️ Написать в поддержку';
 
 // Приглашения: доля с каждой оплаты приглашённого = award_referral_order (0.10) в SQL — менять вместе.
 const REFERRAL_PERCENT = 10;
@@ -65,6 +71,7 @@ function referralRewardHtml({ rewardKopecks, availableKopecks = null }) {
 const REFERRAL_KEYBOARD = Object.freeze([[{ text: '👥 Пригласить коллегу', callback_data: 'menu:ref' }]]);
 
 module.exports = {
-  MONEY_KEYBOARD, REFERRAL_KEYBOARD, REFERRAL_PERCENT, REFERRAL_WITHDRAW_MIN_RUB, SUPPORT_URL,
+  MONEY_KEYBOARD, REFERRAL_KEYBOARD, REFERRAL_PERCENT, REFERRAL_WITHDRAW_MIN_RUB, SUPPORT_BUTTON_TEXT, SUPPORT_CHAT_URL,
+  SUPPORT_PRIVATE_URL, SUPPORT_URL,
   referralRewardHtml, supportMoneyNotice, supportMoneyNoticeHtml,
 };

@@ -27,6 +27,8 @@ const { newStickerSvg, stickerSvg } = require('./_stickers');
 // Ограничения аккаунтов из админки (снимок в памяти, на узле бота обновляется раз в 60 с или по invalidateUserControls)
 const controls = require('./_user-controls');
 const { appButton, appEmoji } = require('./_bot-app-icons');
+// Чат поддержки: модерация супергруппы SUPPORT_CHAT_ID (удаление ссылок, мата, спама; предупреждения владельцу)
+const supportChat = require('./_support-chat');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CONFIRM_TTL_MS = 3 * 60 * 60 * 1000;
@@ -74,7 +76,7 @@ const PROGRAM_URL = 'https://shk-wb.ru/program';
 const CELL_PRINT_URL = 'https://shk-wb.ru/cell-print';
 // Поддержка и проценты приглашений — общие с сообщениями сайта (оплаты, админка): server/_bot-texts.js.
 const botTexts = require('./_bot-texts');
-const { SUPPORT_URL, REFERRAL_PERCENT, REFERRAL_WITHDRAW_MIN_RUB } = botTexts;
+const { SUPPORT_BUTTON_TEXT, SUPPORT_PRIVATE_URL, SUPPORT_URL, REFERRAL_PERCENT, REFERRAL_WITHDRAW_MIN_RUB } = botTexts;
 // Скидка клуба — до текстов меню: строки о ней собираются из CLUB_DISCOUNT_PERCENT и CLUB_REF_MS при загрузке.
 const { CLUB_DISCOUNT_PERCENT, CLUB_REF_MS, applyClubDiscount, clubDiscountInfo, clubPrice, markClubRef } = require('./_club');
 const CHANNEL_URL = 'https://t.me/wbtools_ru';
@@ -94,9 +96,33 @@ const BOT_COMMANDS = [
   { command: 'cancel', description: 'Отменить текущее действие' },
 ];
 
+// В чате поддержки — свои команды: участникам /report и /rules, админам чата ещё модерация (server/_support-chat.js).
+const SUPPORT_CHAT_COMMANDS = [
+  { command: 'report', description: 'Пожаловаться на сообщение (ответом на него)' },
+  { command: 'rules', description: 'Правила чата' },
+];
+const SUPPORT_CHAT_ADMIN_COMMANDS = [
+  ...SUPPORT_CHAT_COMMANDS,
+  { command: 'who', description: 'Кто это: аккаунт и покупки (ответом, придёт в личку)' },
+  { command: 'warn', description: 'Предупреждение (ответом) [причина]' },
+  { command: 'mute', description: 'Запретить писать (ответом) [часы, по умолчанию 24]' },
+  { command: 'unmute', description: 'Снять запрет писать (ответом)' },
+  { command: 'ban', description: 'Удалить из чата (ответом)' },
+  { command: 'unban', description: 'Разрешить вернуться (ответом)' },
+  { command: 'warns', description: 'Журнал предупреждений (в личку)' },
+];
+
 /** Поставить список команд боту. Сбой Telegram не мешает запуску — вызывающий ловит ошибку и не ждёт. */
-function syncBotCommands() {
-  return telegramRequest('setMyCommands', { commands: BOT_COMMANDS });
+async function syncBotCommands() {
+  const result = await telegramRequest('setMyCommands', { commands: BOT_COMMANDS });
+  const chatId = supportChat.supportChatId();
+  if (chatId) {
+    await Promise.all([
+      telegramRequest('setMyCommands', { commands: SUPPORT_CHAT_COMMANDS, scope: { type: 'chat', chat_id: chatId } }),
+      telegramRequest('setMyCommands', { commands: SUPPORT_CHAT_ADMIN_COMMANDS, scope: { type: 'chat_administrators', chat_id: chatId } }),
+    ]).catch(error => console.warn('Команды чата поддержки не поставлены', error?.message || error));
+  }
+  return result;
 }
 
 function publicUrl(path) {
@@ -715,7 +741,7 @@ function sendLinkSupport(chatId, from, state) {
   return sendMessage(chatId, [
     LINK_SUPPORT_TEXT[state] || LINK_SUPPORT_TEXT.other,
     `Ваш ID: <code>${Number(from.id)}</code> — назовите его поддержке.`,
-  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]) });
+  ].join('\n'), { reply_markup: choiceKeyboard([[{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }], MENU_ROW]) });
 }
 
 // Отказы перепривязки, которые решает только поддержка (supabase/migrations/20261120_account_merge_full.sql).
@@ -816,7 +842,7 @@ const LOGIN_USED_TEXT = 'Этот код входа уже использова�
 function loginCodeLabel(code) { return `${code.slice(0, 4)}-${code.slice(4)}`; }
 
 function supportKeyboard() {
-  return choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]);
+  return choiceKeyboard([[{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }], MENU_ROW]);
 }
 
 // Запрос входа или null, если кода нет или он просрочен (остальные сбои — наверх, в общий ответ о сбое).
@@ -1040,7 +1066,7 @@ function clientQrFailedView(lines, retry, { timedOut = false } = {}) {
     : '⚠️ Не получилось отправить QR — Telegram не принял картинку.';
   return {
     text: [head, ...lines].join('\n'),
-    reply_markup: choiceKeyboard([...(retry ? [[retry]] : []), [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], MENU_ROW]),
+    reply_markup: choiceKeyboard([...(retry ? [[retry]] : []), [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }], MENU_ROW]),
   };
 }
 
@@ -1772,7 +1798,7 @@ function paymentErrorView(error) {
 function paymentErrorKeyboard(view, retryData) {
   return choiceKeyboard([
     ...(view.retry ? [[{ text: '🔄 Попробовать снова', callback_data: retryData }]] : []),
-    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+    [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }],
     MENU_ROW,
   ]);
 }
@@ -1889,7 +1915,7 @@ function claimErrorText(error) {
 const ACCESS_CODE_CANCEL = { text: '✖️ Отмена', callback_data: 'code:cancel' };
 const ACCESS_CODE_REPLY_KEYBOARD = choiceKeyboard([
   [ACCESS_CODE_CANCEL],
-  [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+  [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }],
 ]);
 
 /**
@@ -2265,7 +2291,7 @@ async function runGeneration(from, chatId, messageId, session, { onDuplicate = a
         : `Попробуйте ещё раз. Если повторится — напишите в поддержку, код ошибки: <code>${incident}</code>`;
     await showScreen(chatId, screenId, [`${lead}${wizardTrail(draft)}${reason}`, refundLine(bought.charge, refunded), next].join('\n'), { reply_markup: choiceKeyboard([
       [{ text: '🔄 Повторить', callback_data: 'gen:recheck' }],
-      [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+      [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }],
       MENU_ROW,
     ]) }).catch(() => {});
     return;
@@ -2649,7 +2675,7 @@ async function helpText(from) {
 
 async function showHelp(from, chatId, messageId) {
   await showScreen(chatId, messageId, await helpText(from), { reply_markup: choiceKeyboard([
-    [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }],
+    [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }],
     [{ text: '📣 Канал', url: CHANNEL_URL }, { text: '🛡 Наш VPN', url: VPN_URL }],
     MENU_ROW,
   ]) });
@@ -4042,7 +4068,7 @@ async function showShopFailure(from, chatId, screenId, userId, parts, item, erro
   reportUserError({ where: `Бот: покупка с баланса (${item.productKind})`, message: errorText(error), incident, from, extra: [`Деньги: ${error.walletOutcome || 'unknown'}`, error.orderId ? `Заказ ${error.orderId}` : null] });
   const balance = await walletRub(userId).catch(() => null);
   const balanceLine = balance != null ? `💰 На балансе: ${wallet.formatRub(balance)}` : '';
-  const support = [{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }];
+  const support = [{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }];
   if (error.walletOutcome === 'refund_failed') {
     sendToAdmins(`⚠️ Покупка с баланса: списано ${wallet.formatRub(item.priceRub)}, выдача не прошла, возврат не удался.\nTelegram ${Number(from.id)}, заказ ${error.orderId || '—'}, код ${incident}. Верните деньги вручную.`).catch(() => {});
     return showScreen(chatId, screenId, [
@@ -4220,8 +4246,8 @@ async function showReferrals(from, chatId, messageId, notice, { restricted = fal
     // Перевод — через подтверждение (ref:towallet → ref:towallet:yes): обратно на карту его уже не вывести.
     ...(canTransfer ? [[{ text: `💰 Перевести ${wallet.formatRub(available)} на баланс`, callback_data: 'ref:towallet' }]] : []),
     // Вывод — через поддержку (сайт для этого не нужен); кнопка только когда сумма уже доступна к выводу.
-    ...(canWithdraw ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_URL }]] : []),
-    ...(restricted ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]] : []),
+    ...(canWithdraw ? [[{ text: '🏦 Вывести на карту — через поддержку', url: SUPPORT_PRIVATE_URL }]] : []),
+    ...(restricted ? [[{ text: '✉️ Написать в поддержку', url: SUPPORT_PRIVATE_URL }]] : []),
     [{ text: '⬅️ Профиль', callback_data: 'menu:profile' }, ...MENU_ROW],
   ]) });
 }
@@ -4524,6 +4550,9 @@ const RESULT_GONE_KEYBOARD = choiceKeyboard([[appButton('sticker', 'Стикер
 async function handleCallback(callback) {
   const from = callback.from, chatId = callback.message?.chat?.id;
   if (!chatId) return;
+  // Кнопки владельца под предупреждениями чата поддержки (md:mute|ban|ok|…)
+  if (supportChat.isModerationCallback(callback.data)) { await supportChat.handleAdminCallback(callback); return; }
+  if (callback.message?.chat?.type && callback.message.chat.type !== 'private') { answerCallbackQuery(callback.id).catch(() => {}); return; }
   // «Последний визит» — в фоне: ответ человеку его не ждёт.
   touchSubscriber(from, chatId).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   let data = String(callback.data || '');
@@ -4847,7 +4876,8 @@ async function handleCallback(callback) {
 
 async function handleMessage(message) {
   const from = message.from, chatId = message.chat.id, text = String(message.text || '').trim();
-  if (message.chat.type !== 'private') return sendMessage(chatId, 'Используйте личный чат с ботом.');
+  // Группы обрабатывает supportChat (processUpdate); сюда они не доходят, а если дошли — молчим.
+  if (message.chat.type !== 'private') return;
   // «Последний визит» и уведомление о новичке — в фоне: ответ человеку их не ждёт.
   touchSubscriber(from, chatId, text).catch(error => console.warn('Подписчик бота: запись визита', error?.message || error));
   const startMatch = /^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i.exec(text);
@@ -4945,7 +4975,7 @@ async function handleMessage(message) {
     const parsed = parseWbPhone(text);
     if (!parsed.phone) {
       const keyboard = parsed.foreign
-        ? choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }], ...WB_LOGIN_KEYBOARD.inline_keyboard])
+        ? choiceKeyboard([[{ text: SUPPORT_BUTTON_TEXT, url: SUPPORT_URL }], ...WB_LOGIN_KEYBOARD.inline_keyboard])
         : WB_LOGIN_KEYBOARD;
       return sendMessage(chatId, parsed.error, { reply_markup: keyboard });
     }
@@ -5009,6 +5039,9 @@ function validWebhookSecret(req) {
 }
 
 function updateLabel(update) {
+  if (update.my_chat_member) return 'group member';
+  if (update.edited_message) return 'group edit';
+  if (update.message && update.message.chat?.type !== 'private') return `group ${update.message.text?.startsWith('/') ? update.message.text.split(/[\s@]/)[0] : 'message'}`;
   if (update.callback_query) return `callback ${String(update.callback_query.data || '').slice(0, 40)}`;
   const message = update.message || {};
   if (message.photo) return 'message photo';
@@ -5041,7 +5074,8 @@ function alertCallback(callbackId, text) {
 // с сайтом и программой, поэтому строку про поддержку добавляет только бот. Кнопка — ссылка: callback-кнопки
 // ограниченному всё равно не ответят.
 const RESTRICTED_SUPPORT_LINE = 'Если считаете, что это ошибка, напишите в поддержку.';
-const RESTRICTED_KEYBOARD = choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_URL }]]);
+// Ограничение — дело личное: кнопка в личку поддержки, не в общий чат.
+const RESTRICTED_KEYBOARD = choiceKeyboard([[{ text: '✉️ Написать в поддержку', url: SUPPORT_PRIVATE_URL }]]);
 
 function restrictedText(message) {
   return `⛔ ${escapeHtml(message)}\n${RESTRICTED_SUPPORT_LINE}`;
@@ -5081,8 +5115,26 @@ function failureText(incident) {
   ].join('\n');
 }
 
+/** Апдейт из группы: модерация чата поддержки. Сбой — только в лог: в общий чат ошибок не пишем. */
+async function processGroupUpdate(update, startedAt) {
+  try {
+    await supportChat.handleGroupUpdate(update);
+    const ms = Date.now() - startedAt;
+    console.log(`bot ${updateLabel(update)} ${ms} ms`);
+    botHealth.recordUpdate({ label: updateLabel(update), ms });
+  } catch (error) {
+    const incident = crypto.randomBytes(3).toString('hex');
+    const ms = Date.now() - startedAt;
+    console.error(`Support chat failed [${incident}] ${updateLabel(update)} ${ms} ms`, error?.message || error, error?.details ? JSON.stringify(error.details).slice(0, 500) : '');
+    botHealth.recordUpdate({ label: updateLabel(update), ms, failed: true, incident });
+  }
+}
+
 async function processUpdate(update) {
   const startedAt = Date.now();
+  if (supportChat.isGroupUpdate(update)) return processGroupUpdate(update, startedAt);
+  // Правка сообщения в личке боту не нужна
+  if (!update.message && !update.callback_query) return;
   try {
     if (await rejectRestricted(update)) {
       botHealth.recordUpdate({ label: updateLabel(update), ms: Date.now() - startedAt });
@@ -5133,6 +5185,31 @@ async function processUpdate(update) {
   }
 }
 
+/** /who в чате поддержки: аккаунт бота, баланс, программы и версии на ПК — владельцу в личку. */
+async function supportChatWho(user) {
+  const userId = await findUser(user.id).catch(() => null);
+  if (!userId) return 'Аккаунта в боте нет (бота не запускал).';
+  const id = encodeURIComponent(userId);
+  const [balance, ent, cellKeys, free, devices] = await Promise.all([
+    walletRub(userId).catch(() => null),
+    supabaseFetch('rpc/app_entitlements', { method: 'POST', body: JSON.stringify({ p_user: userId }) }).catch(() => null),
+    ownCellKeys(userId).catch(() => []),
+    helperFreeText().catch(() => ''),
+    supabaseFetch(`app_devices?user_id=eq.${id}&revoked_at=is.null&select=name,app_version,last_seen_at&order=last_seen_at.desc&limit=5`).catch(() => []),
+  ]);
+  return [
+    `Аккаунт: <code>${escapeHtml(userId)}</code>`,
+    ...(balance != null ? [`💰 Баланс: ${wallet.formatRub(balance)}`] : []),
+    `${appEmoji('helper')} Помощник ПВЗ: ${helperStatusLine(ent, free)}`,
+    `${appEmoji('cellprint')} ПВЗ Принт: ${cellPrintStatusLine(cellKeys)}`,
+    ...(Array.isArray(devices) && devices.length
+      ? ['<b>ПК с Помощником</b>', ...devices.map(device => `• ${escapeHtml(device.name)} — ${escapeHtml(device.app_version || 'версия ?')}, был ${dayMonthShort(device.last_seen_at)}`)]
+      : []),
+  ].join('\n');
+}
+
+supportChat.configure({ botUsername: async () => String(await botUsername() || ''), whoSummary: supportChatWho });
+
 /**
  * Вебхук. Telegram получает 200 сразу после того, как апдейт закреплён за нами (dedupe), а обработка идёт
  * в фоне: релей и Telegram не ждут Supabase и WB, повторов и дублей не бывает. Локальный polling
@@ -5143,7 +5220,11 @@ async function handleTelegramUpdate(req, res) {
   const update = req.body || {};
   if (!Number.isSafeInteger(Number(update.update_id))) return res.status(400).json({ ok: false });
   try {
-    if (!await claimUpdate(update.update_id)) return res.status(200).json({ ok: true, duplicate: true });
+    // Группа: каждая реплика чата — без записи в базу (Egress), повторы отсекает память процесса.
+    const fresh = supportChat.isGroupUpdate(update)
+      ? (process.env.TELEGRAM_LOCAL_POLLING === '1' || rememberUpdate(update.update_id))
+      : await claimUpdate(update.update_id);
+    if (!fresh) return res.status(200).json({ ok: true, duplicate: true });
   } catch (error) {
     // Не смогли закрепить апдейт (Supabase недоступен) — 502: Telegram пришлёт его ещё раз.
     console.error('Telegram update claim failed', error.message);
@@ -5160,4 +5241,4 @@ function forgetTelegramUser(telegramId) { userCache.forgetTelegramUser(telegramI
 /** Админка сняла/поставила ограничение или безлимит — сбросить снимок на узле бота (по RPC с сайта). */
 function invalidateUserControls() { controls.invalidate(); return true; }
 
-module.exports = { BOT_COMMANDS, LEGACY_BUTTONS, syncBotCommands, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, parseWizardNumber, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };
+module.exports = { BOT_COMMANDS, SUPPORT_CHAT_ADMIN_COMMANDS, SUPPORT_CHAT_COMMANDS, LEGACY_BUTTONS, syncBotCommands, dropLegacyKeyboard, afterWalletTopup, bindTelegramReferral, buyGenerationsWithWallet, claimErrorText, claimUpdate, clearSession, clientCodeEventKey, findClientsByQuery, findUser, forgetSiteUser, forgetTelegramUser, invalidateUserControls, freeUntilText, getSession, mainMenuKeyboard, profileKeyboard, saveSession, processUpdate, bonusNoticeText, isBonusAdmin, parseBonusCommand, topupAndBuyRow, topupPurchaseLines, topupRows, escapeHtml, findPickupEvents, formatPhone, isFreshSubscriber, newUserSource, formatReviewGoodsTime, handleTelegramUpdate, maskWbPhone, noPointsView, notifyAccountLinked, notifyMiniAppAuthorized, parseWizardNumber, publicUrl, reviewAuthorIds, reviewStars, reviewText, validWebhookSecret, wizardView };

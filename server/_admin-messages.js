@@ -103,7 +103,7 @@ function personalKeyboard(link) {
   const url = absoluteLink(link);
   return [
     ...(url ? [[{ text: 'Открыть', url }]] : []),
-    [{ text: '✉️ Ответить в поддержку', url: require('./_bot-texts').SUPPORT_URL }],
+    [{ text: '✉️ Ответить в поддержку', url: require('./_bot-texts').SUPPORT_PRIVATE_URL }],
     [{ text: '☰ Меню', callback_data: 'menu:home' }],
   ];
 }

@@ -8,6 +8,7 @@ import { Section } from '../components/Section';
 import { SpecList } from '../components/SpecList';
 import { Alert, Button, Card, Checkbox, Field, Input, Select, Textarea, useToast } from '../ui';
 import { useDocumentMeta } from '../lib/seo';
+import { SUPPORT_CHAT_URL } from '../lib/telegram';
 import { api } from '../api/client';
 import { type T, useLocalePath, useT } from '../i18n';
 import s from './ContactsPage.module.css';
@@ -189,8 +190,13 @@ export function ContactsPage() {
                   )}
                 </p>
                 <div className="row">
+                  {SUPPORT_CHAT_URL && (
+                    <a href={SUPPORT_CHAT_URL} target="_blank" rel="noopener noreferrer">
+                      <Button>{t('Чат поддержки', 'Қолдау чаты')}</Button>
+                    </a>
+                  )}
                   <a href="https://t.me/roma_denosov" target="_blank" rel="noopener noreferrer">
-                    <Button>{t('Написать @roma_denosov', '@roma_denosov-қа жазу')}</Button>
+                    <Button variant={SUPPORT_CHAT_URL ? 'secondary' : undefined}>{t('Написать @roma_denosov', '@roma_denosov-қа жазу')}</Button>
                   </a>
                 </div>
               </div>
