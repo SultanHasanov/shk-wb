@@ -178,7 +178,7 @@ const SPAM_PATTERNS = [
   [/(?:пиши|пишите|напиши|напишите)(?: мне)? в (?:личк|личные)|(?:^|[^a-zа-я])в лс(?:$|[^a-zа-я])/, 1],
   [/(?:^|[^а-яa-z])крипт/, 1], [/инвестиц/, 1], [/арбитраж/, 1],
   [/\d+\s*(?:\$|usd|долл|руб|р\.|т\.р|тыс|к)\S*\s*(?:в|за)\s*(?:день|неделю|сутки)/, 1],
-  [/(?:набира|ищ)\S* (?:людей|сотрудников|партн[её]р)/, 1], [/раскрутк|накрутк/, 1], [/подписыв[ае]йтесь|подпишись на/, 1],
+  [/(?:набира|ищ)\S* (?:людей|партн[её]р)/, 1], [/раскрутк|накрутк/, 1], [/подписыв[ае]йтесь|подпишись на/, 1],
   [/казино|ставк[аи] на спорт|букмекер/, 2], [/интим|эскорт/, 2],
 ];
 const SPAM_THRESHOLD = 2;
@@ -212,6 +212,27 @@ function findCardNumber(text) {
   return null;
 }
 
+// Телефон: только то, что видно, что телефон, — ШК тоже 11 цифр, поэтому голые 11 цифр без слова рядом не трогаем.
+const PHONE_TAIL = /[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)/.source;
+const PHONE_WORDS = /(?:телефон|(?:^|[^а-я])тел[.:\s]|номер телефона|мой номер|звоните|позвоните|позвонить|whats ?app|ватсап|вотсап|вацап)[^\d+]{0,15}(?:\+?[78])?/.source;
+const PHONE_PATTERNS = [
+  new RegExp(/\+\s*7/.source + PHONE_TAIL), // +7 999 123-45-67, +79991234567
+  /(?:^|[^\d+])8\s*(?:\(\d{3}\)\s*\d{3}|[\s-]\d{3}[\s-]\d{3})[\s-]\d{2}[\s-]\d{2}(?!\d)/, // 8 (999) 123-45-67, 8-999-123-45-67
+  new RegExp(PHONE_WORDS + PHONE_TAIL), // «мой номер 89991234567», «тел. 9991234567», «ватсап …»
+];
+
+/** Номер телефона («+7 999 ••• •• 67») или null. */
+function findPhone(text) {
+  const value = String(text || '').toLowerCase();
+  for (const pattern of PHONE_PATTERNS) {
+    const match = value.match(pattern);
+    if (!match) continue;
+    const digits = match[0].replace(/\D/g, '').slice(-10);
+    if (digits.length === 10) return `+7 ${digits.slice(0, 3)} ••• •• ${digits.slice(-2)}`;
+  }
+  return null;
+}
+
 // --- Итог проверки -----------------------------------------------------------------------------------------
 
 // Причина — в чате, человеку (после «сообщение удалено: »); подпись — владельцу в личку.
@@ -222,6 +243,8 @@ const RULES = {
   link: { label: 'Сторонняя ссылка', reason: 'ссылки на сторонние сайты и чаты запрещены — в целях безопасности участников. Можно: Wildberries, Ozon, shk-wb.ru.' },
   mention: { label: 'Реклама канала или бота', reason: 'реклама других каналов и ботов запрещена.' },
   card: { label: 'Номер карты', reason: 'номер карты в общем чате видят все. Сообщение удалено ради вашей безопасности — реквизиты передавайте только поддержке в личных сообщениях.' },
+  // soft — без предупреждения и без сообщения владельцу: человек ничего не нарушал, просто не подумал.
+  phone: { label: 'Номер телефона', soft: true, reason: 'номер телефона в общем чате видят все — сообщение удалено ради вашей безопасности. Напишите вопрос без номера, а номер передайте поддержке в личных сообщениях.' },
   profanity: { label: 'Мат', reason: 'нецензурная лексика в чате запрещена.' },
   insult: { label: 'Оскорбление', reason: 'оскорбления в чате запрещены.' },
   spam: { label: 'Похоже на спам', reason: 'похоже на рекламу или спам.' },
@@ -230,7 +253,7 @@ const RULES = {
 };
 
 function verdict(rule, detail = '') {
-  return { rule, label: RULES[rule].label, reason: RULES[rule].reason, detail: String(detail || '').slice(0, 200) };
+  return { rule, label: RULES[rule].label, reason: RULES[rule].reason, soft: Boolean(RULES[rule].soft), detail: String(detail || '').slice(0, 200) };
 }
 
 function originChat(message) {
@@ -261,6 +284,8 @@ function classify(message, ctx = {}) {
   if (badMention) return verdict('mention', `@${badMention}`);
   const card = findCardNumber(text);
   if (card) return verdict('card', `${card.slice(0, 4)} •••• ${card.slice(-4)}`);
+  const phone = findPhone(text);
+  if (phone) return verdict('phone', phone);
   const profanity = findProfanity(text);
   if (profanity) return verdict('profanity', profanity);
   const insult = findInsult(text);
@@ -273,6 +298,6 @@ function classify(message, ctx = {}) {
 }
 
 module.exports = {
-  ALLOWED_HOSTS, RULES, classify, findCardNumber, findInsult, findLinks, findMentions, findProfanity, findSpam,
+  ALLOWED_HOSTS, RULES, classify, findCardNumber, findInsult, findPhone, findLinks, findMentions, findProfanity, findSpam,
   hostAllowed, internalChatId, isAllowedUrl, verdict, wordsOf,
 };

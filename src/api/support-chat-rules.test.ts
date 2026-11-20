@@ -9,6 +9,7 @@ const rules = require('../../server/_chat-rules.js') as {
   findCardNumber: (text: string) => string | null;
   findInsult: (text: string) => string | null;
   findLinks: (message: Record<string, unknown>) => string[];
+  findPhone: (text: string) => string | null;
   findProfanity: (text: string) => string | null;
   findSpam: (text: string) => string | null;
   isAllowedUrl: (url: string, ctx?: Record<string, unknown>) => boolean;
@@ -134,5 +135,17 @@ describe('карты и спам', () => {
     for (const text of [
       'Нужны люди для заработка, подробности в лс', 'Пассивный доход без вложений', 'Лучшее казино тут', 'Крипта, инвестиции, доход 300$ в день',
     ]) expect(rules.findSpam(text), text).not.toBeNull();
+  });
+
+  it('объявление о работе в ПВЗ — не спам', () => {
+    expect(rules.findSpam('Ищу сотрудников в ПВЗ, пишите в лс')).toBeNull();
+  });
+
+  it('телефон: «+7», скобки и дефисы, слово «номер / тел / ватсап» рядом — ловится; ШК, коробка, ID и голые 11 цифр — нет', () => {
+    for (const text of ['Мой номер +7 999 123-45-67', 'позвоните 8 (999) 123-45-67', '8-999-123-45-67', 'мой номер 89991234567', 'тел. 9991234567', 'пишите в ватсап 89991234567', 'клиент +79991234567 не забрал'])
+      expect(rules.findPhone(text), text).toBe('+7 999 ••• •• 67');
+    for (const text of ['89991234567', 'ШК 12345678901 не находится', 'номер ШК 81234567890', 'Код 191607973', 'коробка 1234567890', 'ID клиента 12345678', 'звоните завтра после 10'])
+      expect(rules.findPhone(text), text).toBeNull();
+    expect(rules.classify({ text: 'мой номер +7 999 123-45-67' }, ctx)).toMatchObject({ rule: 'phone', soft: true });
   });
 });

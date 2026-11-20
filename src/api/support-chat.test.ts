@@ -91,6 +91,16 @@ describe('модерация чата поддержки', () => {
     expect(calls('banChatMember')).toHaveLength(0);
   });
 
+  it('телефон: удалить и объяснить в чате, без предупреждения и без сообщения владельцу', async () => {
+    await bot.processUpdate(say('не приходит код, мой номер +7 999 123-45-67'));
+    expect(calls('deleteMessage')).toHaveLength(1);
+    const notices = calls('sendMessage');
+    expect(notices).toHaveLength(1);
+    expect(notices[0].body.chat_id).toBe(CHAT.id);
+    expect(notices[0].body.text).toContain('номер телефона в общем чате видят все');
+    expect(db.some(call => call.path === 'support_chat_warnings' && call.method === 'POST')).toBe(false);
+  });
+
   it('ссылка на WB и обычный вопрос — не трогает', async () => {
     const url = 'https://www.wildberries.ru/catalog/1/detail.aspx';
     await bot.processUpdate(say(`товар ${url}`, { entities: [{ type: 'url', offset: 6, length: url.length }] }));

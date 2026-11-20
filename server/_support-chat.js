@@ -266,6 +266,7 @@ async function punish(message, found) {
   if (!throttled(noticeAt, user.id, NOTICE_EVERY_MS)) {
     await sendTemp(chat.id, `${userLink(user)}, сообщение удалено: ${escapeHtml(found.reason)}`);
   }
+  if (found.soft) return; // телефон и т. п.: без предупреждения и без сообщения владельцу
   if (throttled(alertAt, user.id, ALERT_EVERY_MS)) return;
   const excerpt = excerptOf(message);
   const warningId = await saveWarning({ chatId: chat.id, user, rule: found.rule, reason: found.reason, excerpt, messageId: message.message_id });
@@ -317,11 +318,11 @@ function rightsError(error) {
 // --- Команды в чате ----------------------------------------------------------------------------------------
 
 const RULES_TEXT = [
-  '<b>📋 Правила чата поддержки</b>',
-  '1. Вопросы — по «Помощнику ПВЗ», «ПВЗ Принт», боту и сайту shk-wb.ru.',
-  '2. Ссылки — только на Wildberries, Ozon и shk-wb.ru. Остальные бот удаляет: так мы защищаем участников от мошенников.',
-  '3. Без мата, оскорблений, рекламы и пересылок из других каналов.',
-  '4. Не публикуйте номера карт, пароли, коды из SMS и коды входа WB — их видят все. Поддержка их никогда не просит.',
+  '<b>📋 Правила чата</b>',
+  'Здесь общаются сотрудники и владельцы ПВЗ Wildberries и Ozon: работа, опыт, вопросы — и поддержка «Помощника ПВЗ», «ПВЗ Принт», бота и сайта shk-wb.ru. Это не официальный чат Wildberries и Ozon.',
+  '1. Ссылки — только на Wildberries, Ozon и shk-wb.ru. Остальные бот удаляет: так мы защищаем участников от мошенников.',
+  '2. Без мата, оскорблений, рекламы и пересылок из других каналов.',
+  '3. Не публикуйте номера карт и телефонов, пароли, коды из SMS и коды входа WB — их видят все. Поддержка их никогда не просит.',
   'За нарушение бот удаляет сообщение и выдаёт предупреждение.',
 ].join('\n');
 
