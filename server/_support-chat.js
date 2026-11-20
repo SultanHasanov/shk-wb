@@ -512,7 +512,8 @@ async function handleBotMembership(update) {
   }
   const member = event.new_chat_member;
   const lines = [`<b>🤖 Бот в группе ${title}</b>`, `ID группы: <code>${chat.id}</code>`];
-  if (!isSupportChat(chat)) lines.push(`Чтобы бот модерировал её, пропишите <code>SUPPORT_CHAT_ID=${chat.id}</code> в .env узла бота и перезапустите его. Пока он в ней молчит.`);
+  if (chat.type === 'group') lines.push('⚠️ Это обычная группа: в ней бот не сможет ограничивать участников. Сделайте её публичной или привяжите к каналу — она станет супергруппой, и бот пришлёт новый ID (-100…).');
+  else if (!isSupportChat(chat)) lines.push(`Чтобы бот модерировал её, пропишите <code>SUPPORT_CHAT_ID=${chat.id}</code> в .env узла бота и перезапустите его. Пока он в ней молчит.`);
   if (status !== 'administrator') lines.push('Сделайте бота администратором с правами «Удаление сообщений» и «Блокировка пользователей».');
   else if (!member.can_delete_messages || !member.can_restrict_members) lines.push('Не хватает прав: нужны «Удаление сообщений» и «Блокировка пользователей».');
   else lines.push('Права в порядке ✅');
@@ -526,6 +527,11 @@ async function handleBotMembership(update) {
 async function handleGroupUpdate(update) {
   if (update.my_chat_member) return handleBotMembership(update);
   const message = update.message || update.edited_message;
+  // Обычная группа стала супергруппой (сделали публичной или привязали к каналу) — id меняется на -100…
+  if (message?.migrate_to_chat_id) {
+    await toOwners(`<b>🔁 Группа «${escapeHtml(message.chat?.title || '')}» стала супергруппой</b>\nНовый ID: <code>${message.migrate_to_chat_id}</code>\nДля модерации нужен именно он: <code>SUPPORT_CHAT_ID=${message.migrate_to_chat_id}</code>.`);
+    return;
+  }
   if (!message || !isSupportChat(message.chat)) return;
   const edited = !update.message;
   const chat = message.chat;

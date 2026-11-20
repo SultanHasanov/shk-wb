@@ -227,6 +227,12 @@ describe('команды и кнопки', () => {
     expect(toOwner?.body.text).toContain('администратором');
   });
 
+  it('обычная группа стала супергруппой — владельцу новый ID', async () => {
+    await bot.processUpdate({ update_id: ++updateId, message: { message_id: 2, date: 1, chat: { id: -5493736188, type: 'group', title: 'Чат' }, from: user, migrate_to_chat_id: -1005493736188 } });
+    const toOwner = calls('sendMessage').find(call => call.body.chat_id === String(OWNER));
+    expect(toOwner?.body.text).toContain('SUPPORT_CHAT_ID=-1005493736188');
+  });
+
   it('команды чата ставятся отдельным списком', async () => {
     await bot.syncBotCommands();
     const scoped = calls('setMyCommands').filter(call => call.body.scope);
