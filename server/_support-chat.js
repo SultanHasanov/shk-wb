@@ -147,6 +147,34 @@ async function isNewcomer(tgId) {
 // --- Флуд --------------------------------------------------------------------------------------------------
 
 const floodLog = new Map(); // tg → [{ at, text }]
+
+// Медленный режим для одного человека после флуда (встроенный в Telegram — только на весь чат): SLOW_MODE_MS
+// после каждого его сообщения бот запрещает писать на SLOW_DELAY_S. Меньше 30 с Telegram считает запретом навсегда,
+// поэтому 35 с. Человеку это видно как обычная задержка: поле ввода заблокировано, потом снова можно.
+const SLOW_MODE_MS = 10 * 60 * 1000;
+const SLOW_DELAY_S = 35;
+const slowUntil = new Map(); // tg → до какого времени медленный режим
+
+function inSlowMode(tgId, now = Date.now()) {
+  const until = slowUntil.get(tgId);
+  if (!until) return false;
+  if (until > now) return true;
+  slowUntil.delete(tgId);
+  return false;
+}
+
+/** Задержка перед следующим сообщением: запрет писать на SLOW_DELAY_S, дальше права как у всех. */
+async function slowDown(chatId, tgId) {
+  try {
+    await telegramRequest('restrictChatMember', {
+      chat_id: chatId, user_id: Number(tgId), permissions: NO_PERMISSIONS,
+      use_independent_chat_permissions: true, until_date: Math.floor(Date.now() / 1000) + SLOW_DELAY_S,
+    });
+  } catch (error) {
+    console.warn('Чат поддержки: медленный режим', error?.message || error);
+  }
+}
+
 const mediaGroups = new Map(); // media_group_id → at: альбом из 10 фото — одно сообщение, а не флуд
 
 function isFlood(tgId, text, now = Date.now(), mediaGroupId = null) {
@@ -269,6 +297,7 @@ function mute(chatId, tgId, hours = DEFAULT_MUTE_HOURS) {
 
 /** Снять мут: права как у всех участников чата (из настроек группы). */
 async function unmute(chatId, tgId) {
+  slowUntil.delete(Number(tgId));
   const chat = await telegramRequest('getChat', { chat_id: chatId }).catch(() => null);
   const permissions = chat?.permissions || Object.fromEntries(Object.keys(NO_PERMISSIONS).map(key => [key, !['can_change_info', 'can_pin_messages', 'can_manage_topics'].includes(key)]));
   return telegramRequest('restrictChatMember', { chat_id: chatId, user_id: Number(tgId), permissions, use_independent_chat_permissions: true });
@@ -511,18 +540,24 @@ async function handleGroupUpdate(update) {
   const text = String(message.text ?? message.caption ?? '');
   if (!edited) {
     boundedSet(messageCounts, user.id, (messageCounts.get(user.id) || 0) + 1);
-    if (isFlood(user.id, text, Date.now(), message.media_group_id || null)) { await punish(message, rules.verdict('flood')); return; }
+    if (isFlood(user.id, text, Date.now(), message.media_group_id || null)) {
+      boundedSet(slowUntil, user.id, Date.now() + SLOW_MODE_MS);
+      await punish(message, rules.verdict('flood'));
+      await slowDown(chat.id, user.id);
+      return;
+    }
   }
   const allowed = await allowedTelegram(chat);
   const ctx = { chatId: chat.id, botUsername: await deps.botUsername().catch(() => ''), allowedTelegram: allowed, mentionKinds: await mentionKinds(message, allowed), newcomer: false };
   let found = rules.classify(message, ctx);
   if (!found && rules.findSpam(text) && await isNewcomer(user.id)) found = rules.classify(message, { ...ctx, newcomer: true });
   if (found) await punish(message, found);
+  if (!edited && inSlowMode(user.id)) await slowDown(chat.id, user.id);
 }
 
 /** Для тестов: забыть всё, что держится в памяти. */
 function resetSupportChatState() {
-  for (const map of [adminCache, mentionCache, messageCounts, subscriberCache, floodLog, mediaGroups, noticeAt, alertAt, reportsLog]) map.clear();
+  for (const map of [adminCache, mentionCache, messageCounts, subscriberCache, floodLog, mediaGroups, slowUntil, noticeAt, alertAt, reportsLog]) map.clear();
 }
 
 module.exports = {
