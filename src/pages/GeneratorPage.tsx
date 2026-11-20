@@ -49,6 +49,7 @@ import type { CabinetBootstrap, StickerAsset } from '../api/cabinet';
 import { useMoney } from '../lib/currency';
 import { type T, useT } from '../i18n';
 import { rememberPendingOrder } from '../lib/pending-orders';
+import { isValidBoxPrefix, splitBoxInput } from '../lib/box-prefix';
 
 /** Остаток по коду один на все виды генерации: тип и режим ниже выбирают, что
  *  печатать, а не из какого лимита списывать. */
@@ -206,11 +207,13 @@ function goToPackages() {
  * нему нельзя было понять, что именно получишь, особенно на вкладке коробок,
  * где печатается QR, а не штрихкод.
  */
+const BOX_NUMBER_ID = 'generator-box-number';
+
 function SampleSticker({ kind, prefix }: { kind: 'product' | 'box'; prefix: string }) {
   const t = useT();
   const src =
     kind === 'box'
-      ? `/api/stickers/image?example=1&variant=box&prefix=${encodeURIComponent(prefix || 'TRBX')}`
+      ? `/api/stickers/image?example=1&variant=box&prefix=${encodeURIComponent(isValidBoxPrefix(prefix) ? prefix : 'TRBX')}`
       : '/api/stickers/image?example=1';
   // Живой шаблон доступен не всегда: в локальной разработке без запущенного API
   // и при редком сбое эндпоинта. Подменяем его не фотографией вкладки, а теми же
@@ -397,6 +400,49 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
   const invalidCustomCode = g.mode === 'custom' && g.code.length !== codeLength;
   // Пустое поле количества — это 0 в сторе: нажатие ловило бы 400 от API.
   const invalidQuantity = false;
+  const invalidPrefix = g.kind === 'box' && !isValidBoxPrefix(g.prefix);
+  // Короткое пояснение после того, как мы сами разнесли префикс и номер по полям.
+  const [boxNotice, setBoxNotice] = useState('');
+  useEffect(() => setBoxNotice(''), [g.kind, g.mode]);
+  const onPrefixInput = (raw: string) => {
+    const { prefix, digits } = splitBoxInput(raw);
+    // в префикс вписали одни цифры — это номер; префикс возвращаем обычный
+    g.prefix = digits && !prefix ? 'TRBX' : prefix;
+    if (!digits) {
+      if (boxNotice) setBoxNotice('');
+      return;
+    }
+    if (g.mode === 'custom') {
+      g.code = digits.slice(0, codeLength);
+      setBoxNotice(t(
+        `Номер ${g.code} перенесли в поле «Номер коробки». В «Префикс» пишутся только буквы перед номером.`,
+        `${g.code} нөмірі «Қорап нөмірі» өрісіне ауыстырылды. «Префикс» өрісіне нөмірдің алдындағы әріптер ғана жазылады.`,
+      ));
+      // дальше человек, скорее всего, продолжит набирать номер — пусть набирает в нужном поле
+      requestAnimationFrame(() => document.getElementById(BOX_NUMBER_ID)?.focus());
+    } else {
+      setBoxNotice(t(
+        'В «Префикс» пишутся только буквы перед номером. При массовой генерации номера коробок выдаются автоматически.',
+        '«Префикс» өрісіне нөмірдің алдындағы әріптер ғана жазылады. Көптеп генерациялағанда қорап нөмірлері автоматты түрде беріледі.',
+      ));
+    }
+  };
+  const onCodeInput = (raw: string) => {
+    // в номер коробки вставили номер целиком, с буквами (TRBX5084472379) — буквы уходят в префикс
+    if (g.kind === 'box' && /[A-Za-z]/.test(raw)) {
+      const { prefix, digits } = splitBoxInput(raw);
+      if (digits && prefix) {
+        g.prefix = prefix;
+        g.code = digits.slice(0, codeLength);
+        setBoxNotice(t(
+          `Префикс ${prefix} подставили в своё поле, в номере оставили только цифры.`,
+          `${prefix} префиксі өз өрісіне қойылды, нөмірде тек цифрлар қалды.`,
+        ));
+        return;
+      }
+    }
+    g.code = raw.replace(/\D/g, '').slice(0, codeLength);
+  };
   const bulkCustomMode = false;
 
   // Печать и скачивание идут одним и тем же PDF: раньше «Печать» звала
@@ -501,6 +547,27 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             />
           )}
 
+          {/* Префикс — над номером: номер коробки WB читается как «TRBX» + 10 цифр, и поля идут в том же порядке. */}
+          {g.kind === 'box' && (
+            <Field
+              label={t('Префикс — буквы перед номером', 'Префикс — нөмірдің алдындағы әріптер')}
+              error={invalidPrefix ? t('Укажите префикс — обычно TRBX', 'Префиксті көрсетіңіз — әдетте TRBX') : undefined}
+              help={g.mode === 'range'
+                ? t('Обычно TRBX. Номера коробок выдаются автоматически — их вводить не нужно.', 'Әдетте TRBX. Қорап нөмірлері автоматты түрде беріледі — оларды енгізудің қажеті жоқ.')
+                : t('Обычно TRBX. Сами цифры номера — в следующем поле.', 'Әдетте TRBX. Нөмірдің цифрлары — келесі өрісте.')}
+            >
+              <Input
+                value={g.prefix}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="TRBX"
+                onChange={e => onPrefixInput(e.target.value)}
+              />
+            </Field>
+          )}
+          {g.kind === 'box' && boxNotice && <Alert tone="info">{boxNotice}</Alert>}
+
           {g.mode === 'range' ? (
             <div>
               <Field
@@ -536,16 +603,21 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
           ) : (
             <Field
               label={numberLabel}
-              help={t(
-                `Введите ровно ${codeLength} цифр. Введено: ${g.code.length} из ${codeLength}.`,
-                `Дәл ${codeLength} цифр енгізіңіз. Енгізілді: ${g.code.length} / ${codeLength}.`,
-              )}
+              help={g.kind === 'box'
+                ? t(
+                    `Только ${codeLength} цифр после префикса: для TRBX5084472379 — 5084472379. Введено: ${g.code.length} из ${codeLength}.`,
+                    `Префикстен кейінгі ${codeLength} цифр ғана: TRBX5084472379 үшін — 5084472379. Енгізілді: ${g.code.length} / ${codeLength}.`,
+                  )
+                : t(
+                    `Введите ровно ${codeLength} цифр. Введено: ${g.code.length} из ${codeLength}.`,
+                    `Дәл ${codeLength} цифр енгізіңіз. Енгізілді: ${g.code.length} / ${codeLength}.`,
+                  )}
             >
               <Input
+                id={g.kind === 'box' ? BOX_NUMBER_ID : undefined}
                 inputMode="numeric"
-                maxLength={codeLength}
                 value={g.code}
-                onChange={e => (g.code = e.target.value.replace(/\D/g, '').slice(0, codeLength))}
+                onChange={e => onCodeInput(e.target.value)}
                 placeholder={g.kind === 'box' ? '5084472379' : '59874145000'}
               />
             </Field>
@@ -555,16 +627,6 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             <span className="muted">{t('К списанию с баланса', 'Баланстан есептен шығару')}</span>
             <strong>{g.mode === 'range' ? (cabinet.data?.wallet.discountAvailable ? '16 ₽' : '20 ₽') : (cabinet.data?.wallet.discountAvailable ? '6 ₽' : '7,50 ₽')}</strong>
           </div>
-
-          {g.kind === 'box' && (
-            <Field label={t('Префикс', 'Префикс')}>
-              <Input
-                value={g.prefix}
-                maxLength={12}
-                onChange={e => (g.prefix = e.target.value.toUpperCase())}
-              />
-            </Field>
-          )}
 
           {/* Код доступа обязателен: генерация без него не проходит на сервере,
               поэтому поле показывается сразу, а не прячется за ссылкой. */}
@@ -620,7 +682,7 @@ export const GeneratorWorkspace = observer(({ onNeedPackages }: { onNeedPackages
             size="lg"
             block
             loading={mutation.isPending}
-            disabled={invalidCustomCode || invalidQuantity}
+            disabled={invalidCustomCode || invalidQuantity || invalidPrefix}
             onClick={() => setConfirmOpen(true)}
           >
             {mutation.isPending ? t('Генерируем…', 'Генерациялап жатырмыз…') : t('Сгенерировать', 'Генерациялау')}
