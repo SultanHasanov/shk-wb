@@ -84,9 +84,9 @@
   и `chat_administrators`) при старте узла, если задан `SUPPORT_CHAT_ID`.
 - **Апдейты групп не пишутся в `telegram_bot_updates`** — повторы отсекает память (Egress). Нужны `allowed_updates`
   `message, edited_message, callback_query, my_chat_member` — `selfhost/tg-set-webhook.sh` (перезапустить после выкладки).
-- **Ссылка поддержки:** `SUPPORT_CHAT_URL=https://t.me/<имя>` в `.env` сайта и узла — кнопки бота «💬 Чат поддержки»;
+- **Чат:** «Чат · WB Инструменты» `@wbtools_chat`, id `-1004465478259` (владелец группы — второй аккаунт владельца). **Ссылка поддержки:** `SUPPORT_CHAT_URL=https://t.me/wbtools_chat` в `.env` сайта и узла — кнопки бота «💬 Чат поддержки»;
   не задан — личка, как раньше. Личными остаются: ответ на сообщение из админки, ограничение аккаунта, вывод на
-  карту (`SUPPORT_PRIVATE_URL`). Сайт — `VITE_SUPPORT_CHAT_URL` при сборке (`ContactsPage`, совместимость принтера
+  карту (`SUPPORT_PRIVATE_URL`). Сайт — `VITE_SUPPORT_CHAT_URL` при сборке (`.env.local` для deploy.sh и `.github/workflows/deploy.yml`) (`ContactsPage`, совместимость принтера
   на `CellPrintPage`). Ссылки в программах (`_local-only/`) меняются с их следующими выпусками.
 - Миграция `supabase/migrations/20261124_support_chat_warnings.sql`.
 

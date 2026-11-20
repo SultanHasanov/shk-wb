@@ -54,6 +54,8 @@ jobs:
           VITE_SUPABASE_URL: https://shk-wb.ru/supabase
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_TELEGRAM_BOT_USERNAME: ${{ secrets.VITE_TELEGRAM_BOT_USERNAME }}
+          # Общий чат «Чат · WB Инструменты» (кнопки на сайте); тот же адрес — SUPPORT_CHAT_URL в .env серверов
+          VITE_SUPPORT_CHAT_URL: https://t.me/wbtools_chat
 
       - name: Package, upload and switch release
         env:
