@@ -143,31 +143,27 @@ describe('модерация чата поддержки', () => {
     expect(calls('deleteMessage')).toHaveLength(1);
   });
 
-  it('флуд: шестое сообщение за 10 с удаляется и включается медленный режим — задержка 35 с после каждого сообщения', async () => {
-    for (let index = 0; index < 5; index += 1) await bot.processUpdate(say(`вопрос ${index}`));
+  it('флуд: 8-е сообщение за 10 с — одна пауза 35 с, без удаления, без предупреждения; потом снова можно', async () => {
+    for (let index = 0; index < 7; index += 1) await bot.processUpdate(say(`вопрос ${index}`));
     expect(calls('restrictChatMember')).toHaveLength(0);
-    await bot.processUpdate(say('вопрос 5'));
-    expect(calls('deleteMessage')).toHaveLength(1);
-    const first = calls('restrictChatMember')[0];
-    expect(first?.body).toMatchObject({ chat_id: CHAT.id, user_id: user.id });
-    expect(first.body.permissions.can_send_messages).toBe(false);
-    const delay = first.body.until_date - Math.floor(Date.now() / 1000);
+    await bot.processUpdate(say('вопрос 7'));
+    expect(calls('deleteMessage')).toHaveLength(0);
+    const pause = calls('restrictChatMember')[0];
+    expect(pause?.body).toMatchObject({ chat_id: CHAT.id, user_id: user.id });
+    expect(pause.body.permissions.can_send_messages).toBe(false);
+    const delay = pause.body.until_date - Math.floor(Date.now() / 1000);
     expect(delay).toBeGreaterThanOrEqual(34);
     expect(delay).toBeLessThanOrEqual(35);
-    expect(calls('sendMessage').find(call => call.body.chat_id === CHAT.id)?.body.text).toContain('медленный режим на 10 минут');
-    expect(calls('sendMessage').find(call => call.body.chat_id === String(OWNER))?.body.text).toContain('Флуд — медленный режим');
-    // следующее сообщение после паузы — не удаляется, но снова задержка
+    expect(calls('sendMessage').find(call => call.body.chat_id === CHAT.id)?.body.text).toContain('пауза на полминуты');
+    expect(calls('sendMessage').some(call => call.body.chat_id === String(OWNER))).toBe(false);
+    expect(db.some(call => call.path === 'support_chat_warnings' && call.method === 'POST')).toBe(false);
+    // после паузы — обычное сообщение без новых ограничений
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.now() + 40_000);
     sent = [];
     await bot.processUpdate(say('спокойный вопрос'));
-    expect(calls('deleteMessage')).toHaveLength(0);
-    expect(calls('restrictChatMember')).toHaveLength(1);
-    // через 10 минут режим выключается сам
-    vi.setSystemTime(Date.now() + 11 * 60_000);
-    sent = [];
-    await bot.processUpdate(say('ещё вопрос'));
     expect(calls('restrictChatMember')).toHaveLength(0);
+    expect(calls('deleteMessage')).toHaveLength(0);
     vi.useRealTimers();
   });
 

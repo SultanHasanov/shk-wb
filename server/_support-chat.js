@@ -14,7 +14,7 @@ const ADMINS_TTL_MS = 60 * 1000; // снятый с должности адми�
 const MENTION_TTL_MS = 24 * 60 * 60 * 1000;
 const SUBSCRIBER_TTL_MS = 60 * 60 * 1000;
 const NEWCOMER_MESSAGES = 3;
-const FLOOD_WINDOW_MS = 10 * 1000, FLOOD_MAX = 5;
+const FLOOD_WINDOW_MS = 10 * 1000, FLOOD_MAX = 7; // флуд — 8 и больше сообщений за 10 с
 const REPEAT_WINDOW_MS = 60 * 1000, REPEAT_MAX = 3;
 const REPORTS_PER_HOUR = 3;
 const DEFAULT_MUTE_HOURS = 24;
@@ -148,30 +148,19 @@ async function isNewcomer(tgId) {
 
 const floodLog = new Map(); // tg → [{ at, text }]
 
-// Медленный режим для одного человека после флуда (встроенный в Telegram — только на весь чат): SLOW_MODE_MS
-// после каждого его сообщения бот запрещает писать на SLOW_DELAY_S. Меньше 30 с Telegram считает запретом навсегда,
-// поэтому 35 с. Человеку это видно как обычная задержка: поле ввода заблокировано, потом снова можно.
-const SLOW_MODE_MS = 10 * 60 * 1000;
-const SLOW_DELAY_S = 35;
-const slowUntil = new Map(); // tg → до какого времени медленный режим
+// Флуд → одна пауза: бот запрещает писать на PAUSE_S, потом права как у всех. Сообщение не удаляется, предупреждения
+// нет (решение владельца 20.11.2026: 10 минут медленного режима — слишком жёстко). Меньше 30 с Telegram считает
+// запретом навсегда, поэтому 35 с.
+const PAUSE_S = 35;
 
-function inSlowMode(tgId, now = Date.now()) {
-  const until = slowUntil.get(tgId);
-  if (!until) return false;
-  if (until > now) return true;
-  slowUntil.delete(tgId);
-  return false;
-}
-
-/** Задержка перед следующим сообщением: запрет писать на SLOW_DELAY_S, дальше права как у всех. */
-async function slowDown(chatId, tgId) {
+async function pauseWriting(chatId, tgId) {
   try {
     await telegramRequest('restrictChatMember', {
       chat_id: chatId, user_id: Number(tgId), permissions: NO_PERMISSIONS,
-      use_independent_chat_permissions: true, until_date: Math.floor(Date.now() / 1000) + SLOW_DELAY_S,
+      use_independent_chat_permissions: true, until_date: Math.floor(Date.now() / 1000) + PAUSE_S,
     });
   } catch (error) {
-    console.warn('Чат поддержки: медленный режим', error?.message || error);
+    console.warn('Чат поддержки: пауза за флуд', error?.message || error);
   }
 }
 
@@ -298,7 +287,7 @@ function mute(chatId, tgId, hours = DEFAULT_MUTE_HOURS) {
 
 /** Снять мут: права как у всех участников чата (из настроек группы). */
 async function unmute(chatId, tgId) {
-  slowUntil.delete(Number(tgId));
+
   const chat = await telegramRequest('getChat', { chat_id: chatId }).catch(() => null);
   const permissions = chat?.permissions || Object.fromEntries(Object.keys(NO_PERMISSIONS).map(key => [key, !['can_change_info', 'can_pin_messages', 'can_manage_topics'].includes(key)]));
   return telegramRequest('restrictChatMember', { chat_id: chatId, user_id: Number(tgId), permissions, use_independent_chat_permissions: true });
@@ -548,10 +537,9 @@ async function handleGroupUpdate(update) {
   if (!edited) {
     boundedSet(messageCounts, user.id, (messageCounts.get(user.id) || 0) + 1);
     if (isFlood(user.id, text, Date.now(), message.media_group_id || null)) {
-      boundedSet(slowUntil, user.id, Date.now() + SLOW_MODE_MS);
-      await punish(message, rules.verdict('flood'));
-      await slowDown(chat.id, user.id);
-      return;
+      await pauseWriting(chat.id, user.id);
+      if (!throttled(noticeAt, user.id, NOTICE_EVERY_MS)) await sendTemp(chat.id, `${userLink(user)}, ${escapeHtml(rules.RULES.flood.reason)}`);
+      // само сообщение проверяется дальше как обычно
     }
   }
   const allowed = await allowedTelegram(chat);
@@ -559,12 +547,11 @@ async function handleGroupUpdate(update) {
   let found = rules.classify(message, ctx);
   if (!found && rules.findSpam(text) && await isNewcomer(user.id)) found = rules.classify(message, { ...ctx, newcomer: true });
   if (found) await punish(message, found);
-  if (!edited && inSlowMode(user.id)) await slowDown(chat.id, user.id);
 }
 
 /** Для тестов: забыть всё, что держится в памяти. */
 function resetSupportChatState() {
-  for (const map of [adminCache, mentionCache, messageCounts, subscriberCache, floodLog, mediaGroups, slowUntil, noticeAt, alertAt, reportsLog]) map.clear();
+  for (const map of [adminCache, mentionCache, messageCounts, subscriberCache, floodLog, mediaGroups, noticeAt, alertAt, reportsLog]) map.clear();
 }
 
 module.exports = {
