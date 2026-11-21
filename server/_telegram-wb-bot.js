@@ -29,7 +29,7 @@ const controls = require('./_user-controls');
 const { appButton, appEmoji } = require('./_bot-app-icons');
 // Чат поддержки: модерация супергруппы SUPPORT_CHAT_ID (удаление ссылок, мата, спама; предупреждения владельцу)
 const supportChat = require('./_support-chat');
-// Разовая акция 20–22.11.2026: приглашение в общий чат после покупки или генерации (server/_chat-invite.js)
+// Приглашение в общий чат после покупки или генерации — один раз каждому, кого нет в чате (server/_chat-invite.js)
 const chatInvite = require('./_chat-invite');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -1085,7 +1085,7 @@ function clientQrResendData(sid, requestId) {
  * идемпотентна по нему: второй раз код не спишется).
  * → 'sent' | 'charged_unsent' (списано, фото не ушло, возврата нет) | 'not_sent' (ничего не списано: нехватка, возврат).
  */
-/** QR кода клиента; после выдачи — приглашение в общий чат (акция, server/_chat-invite.js). */
+/** QR кода клиента; после выдачи — приглашение в общий чат (server/_chat-invite.js). */
 async function handleClientCode(from, chatId, sid, options = {}) {
   const outcome = await handleClientCodeInner(from, chatId, sid, options);
   if (outcome === 'sent') chatInvite.inviteAfterAction(from?.id);

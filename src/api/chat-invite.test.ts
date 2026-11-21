@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Приглашение в общий чат после покупки или генерации (server/_chat-invite.js): разовая акция до 22.11.2026,
+// Приглашение в общий чат после покупки или генерации (server/_chat-invite.js): без срока,
 // каждому один раз, кто уже в чате — не получает.
 
 const require = createRequire(import.meta.url);
@@ -74,9 +74,9 @@ describe('приглашение в чат', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('срок по умолчанию — до конца 22.11.2026 по Москве', () => {
+  it('по умолчанию — без срока', () => {
     delete process.env.SUPPORT_CHAT_INVITE_UNTIL;
-    expect(invite.inviteActive(Date.parse('2026-11-22T23:59:00+03:00'))).toBe(true);
-    expect(invite.inviteActive(Date.parse('2026-11-23T00:01:00+03:00'))).toBe(false);
+    expect(invite.inviteActive(Date.parse('2026-11-23T00:01:00+03:00'))).toBe(true);
+    expect(invite.inviteActive(Date.parse('2030-01-01T00:00:00+03:00'))).toBe(true);
   });
 });

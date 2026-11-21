@@ -93,7 +93,7 @@ async function completeOrder(order, payment) {
     completed={...completed,fulfillment_status:'fulfilled',fulfilled_at:fulfilledAt};
     await notifyAdminOrder(completed).catch(error=>console.error('Admin order alert failed',error.message));
     await notifyCompleted(completed);
-    // Разовая акция 20–22.11.2026: приглашение в общий чат после оплаты (пополнение, подписка, ключ, покупка с баланса)
+    // Приглашение в общий чат после оплаты (пополнение, подписка, ключ, покупка с баланса)
     require('./_chat-invite').inviteUserAfterAction(completed.user_id).catch(()=>{});
     return completed;
   } catch(error) {

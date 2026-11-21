@@ -1,12 +1,11 @@
-// Приглашение в общий чат после покупки, пополнения или генерации — разовая акция владельца (20.11.2026):
-// только до SUPPORT_CHAT_INVITE_UNTIL (по умолчанию 22.11.2026 23:59 МСК), каждому один раз, тем, кого ещё нет в чате.
+// Приглашение в общий чат после покупки, пополнения или генерации (решение владельца 21.11.2026: без срока):
+// каждому один раз, тем, кого ещё нет в чате. Выключить можно датой в SUPPORT_CHAT_INVITE_UNTIL (после неё — молчит).
 // «Уже приглашали» — строка в api_rate_limits (scope support-chat-invite, ключ — sha256 Telegram ID): без новой таблицы,
 // чистки у неё нет. Работает и на узле бота, и на сайте (оплаты): Telegram через telegramRequest, база — supabaseFetch.
 const crypto = require('crypto');
 const { supabaseFetch } = require('./_supabase');
 const { sendMessage, telegramRequest } = require('./_telegram-api');
 
-const DEFAULT_UNTIL = '2026-11-22T23:59:59+03:00';
 const SCOPE = 'support-chat-invite';
 const DELAY_MS = 3000; // после результата покупки/генерации, чтобы приглашение пришло следом, а не вперемешку
 
@@ -23,9 +22,12 @@ function chatUrl() {
   return /^https:\/\/t\.me\/[\w+]+$/.test(url) ? url : '';
 }
 
+/** Срок приглашений: по умолчанию без срока; SUPPORT_CHAT_INVITE_UNTIL=<дата> — выключить после неё. */
 function inviteUntil() {
-  const until = Date.parse(process.env.SUPPORT_CHAT_INVITE_UNTIL || DEFAULT_UNTIL);
-  return Number.isFinite(until) ? until : 0;
+  const raw = String(process.env.SUPPORT_CHAT_INVITE_UNTIL || '').trim();
+  if (!raw) return Infinity;
+  const until = Date.parse(raw);
+  return Number.isFinite(until) ? until : Infinity;
 }
 
 function inviteActive(now = Date.now()) {
