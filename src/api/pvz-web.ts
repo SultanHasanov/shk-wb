@@ -11,8 +11,8 @@ export type WbState =
 export type PvzWebStatus = { allowed: boolean; wb: WbState; codeViaBot: boolean };
 
 export type PvzGoodBase = { title: string; brand: string; size: string; color: string; nm: number | null; shk: string; price: number | null };
-/** Метки товара в пункте: отказ, утилизация, не оплачен, примерка, брак, нужна переупаковка, возврат продавцу. */
-export type GoodMark = 'declined' | 'utilization' | 'unpaid' | 'tryon' | 'defect' | 'repack' | 'to_seller';
+/** Метки товара в пункте: отказ, утилизация, уже оплачен, примерка, брак, возврат продавцу. */
+export type GoodMark = 'declined' | 'utilization' | 'paid' | 'tryon' | 'defect' | 'to_seller';
 export type PvzGood = PvzGoodBase & { days: number | null; marks: GoodMark[] };
 export type PvzCell = { cell: string; sid: string; name: string; tail: string; days: number | null; goods: PvzGood[] };
 /** История: выданный или возвращённый товар. employee — номер сотрудника в WB (имён WB не отдаёт). */

@@ -71,14 +71,13 @@ function Marks({ marks }: { marks: GoodMark[] }) {
   const names: Record<GoodMark, string> = {
     declined: t('отказ', 'бас тарту'),
     utilization: t('утилизация', 'кәдеге жарату'),
-    unpaid: t('не оплачен', 'төленбеген'),
+    paid: t('оплачен', 'төленген'),
     tryon: t('примерка', 'киіп көру'),
     defect: t('брак', 'ақау'),
-    repack: t('переупаковать', 'қайта орау'),
     to_seller: t('возврат продавцу', 'сатушыға қайтару'),
   };
-  const alert: GoodMark[] = ['declined', 'defect', 'repack', 'utilization'];
-  return <span className={s.marks}>{marks.map(m => <span key={m} className={`${s.mark} ${alert.includes(m) ? s.markAlert : ''}`}>{names[m]}</span>)}</span>;
+  const alert: GoodMark[] = ['declined', 'defect', 'utilization'];
+  return <span className={s.marks}>{marks.map(m => <span key={m} className={`${s.mark} ${alert.includes(m) ? s.markAlert : m === 'paid' ? s.markOk : ''}`}>{names[m]}</span>)}</span>;
 }
 
 const goodDetails = (g: PvzGoodBase) => [g.brand, g.size, g.color].filter(Boolean).join(' · ');
@@ -100,6 +99,11 @@ function GoodCard({ good, children }: { good: PvzGoodBase & { marks?: GoodMark[]
       </div>
     </div>
   );
+}
+
+/** Загрузка по центру экрана: данные WB идут несколько секунд, строка в углу выглядела как зависание. */
+export function Loader({ text }: { text: string }) {
+  return <div className={s.loader} role="status"><Spinner size={36} /><span>{text}</span></div>;
 }
 
 function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
@@ -202,7 +206,7 @@ export function CellPage({ data, cell, go, onQr }: { data: PvzGoods; cell: strin
   return (
     <>
       <BackButton onClick={() => go('')} label={t('Все ячейки', 'Барлық ұяшықтар')} />
-      <div className={s.titleRow}><h1 className={s.pageTitle}>{t('Ячейка', 'Ұяшық')} {cell}</h1></div>
+      <div className={s.titleRow}><h1 className={s.h1}>{t('Ячейка', 'Ұяшық')} {cell}</h1></div>
       {!current.length && <div className={s.hintBox}>{t('Сейчас в этой ячейке ничего не лежит.', 'Қазір бұл ұяшықта ештеңе жоқ.')}</div>}
       {current.map(c => (
         <section key={c.sid} className={s.card}>
@@ -338,13 +342,14 @@ export function GoodsScreen({ data, mode, go }: { data: PvzGoods; mode: GoodsMod
             <span>{t('ШК', 'ШК')}</span><span>{t('Клиент', 'Клиент')}</span><span>{t('В пункте', 'Пунктте')}</span>
           </div>
           {shown.slice(0, limit).map((r, i) => (
-            <div key={`${r.cell}-${r.shk}-${i}`} className={s.row}>
+            // вся строка открывает ячейку; у кнопок внутри (ячейка, клиент) своё действие
+            <div key={`${r.cell}-${r.shk}-${i}`} className={s.row} onClick={() => go(`cell/${encodeURIComponent(r.cell)}`)}>
               <button type="button" className={`${s.rowCell} ${s.inlineLink}`} onClick={() => go(`cell/${encodeURIComponent(r.cell)}`)} aria-label={`${t('Ячейка', 'Ұяшық')} ${r.cell}`}>{r.cell}</button>
               <span className={s.rowThumb}><GoodThumb nm={r.nm} small /></span>
               <span className={s.rowTitle}>{r.title || t('Товар', 'Тауар')}{goodDetails(r) && <span className={s.rowSub}>{goodDetails(r)}</span>}<Marks marks={r.marks} /></span>
               <span className={s.rowBrand}>{r.price != null ? money(r.price) : ''}</span>
               <span className={`${s.rowShk} ${s.mono}`}>{r.shk}</span>
-              <button type="button" className={`${s.rowClient} ${s.inlineLink}`} onClick={() => go(`client/${r.sid}`)}>{clientLabel(t, r.client, r.tail)}</button>
+              <button type="button" className={`${s.rowClient} ${s.inlineLink}`} onClick={event => { event.stopPropagation(); go(`client/${r.sid}`); }}>{clientLabel(t, r.client, r.tail)}</button>
               <span className={s.rowDays}><DaysBadge days={r.days} /></span>
             </div>
           ))}
@@ -396,7 +401,7 @@ export function OpsScreen({ data }: { data: PvzGoods }) {
         </div>
         {days.map(d => (
           <div key={d.key} className={s.opsRow}>
-            <span className={s.rowTitle}>{d.label}</span><span>{d.clients.size}</span><span>{d.received}</span><span>{money(d.sum)}</span><span>{d.returned}</span>
+            <span className={s.opsDay}>{d.label}</span><span>{d.clients.size}</span><span>{d.received}</span><span>{money(d.sum)}</span><span>{d.returned}</span>
           </div>
         ))}
       </div>
@@ -407,7 +412,7 @@ export function OpsScreen({ data }: { data: PvzGoods }) {
         </div>
         {staff.map(w => (
           <div key={w.id || 'none'} className={s.opsRow}>
-            <span className={s.rowTitle}>{w.id ? `№ ${w.id}` : t('не указан', 'көрсетілмеген')}</span><span /><span>{w.received}</span><span>{money(w.sum)}</span><span>{w.returned}</span>
+            <span className={s.opsDay}>{w.id ? `№ ${w.id}` : t('не указан', 'көрсетілмеген')}</span><span /><span>{w.received}</span><span>{money(w.sum)}</span><span>{w.returned}</span>
           </div>
         ))}
       </div>

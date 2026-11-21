@@ -84,6 +84,8 @@
 .inlineLink { border: 0; padding: 0; background: transparent; color: var(--accent-dark); font: inherit; font-weight: var(--fw-semibold); text-align: left; cursor: pointer; }
 .inlineLink:hover { text-decoration: underline; }
 
+.loader { flex: 1; min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4); color: var(--text-muted); font-size: var(--fs-16); text-align: center; }
+
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px var(--sp-4); }
 .statLabel { font-size: var(--fs-12); color: var(--text-muted); }
@@ -164,7 +166,8 @@
   gap: var(--sp-3); align-items: center; padding: 10px 14px; font-size: var(--fs-13);
 }
 .rowHead, .opsHead { background: var(--surface-muted); color: var(--text-muted); font-weight: var(--fw-semibold); }
-.row { border-top: 1px solid var(--border); }
+.row { border-top: 1px solid var(--border); cursor: pointer; }
+.row:hover { background: var(--surface-muted); }
 .rowCell { font-weight: var(--fw-bold); font-family: var(--font-mono); font-size: var(--fs-14); }
 .rowTitle { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
 .rowSub { display: block; font-weight: var(--fw-normal); font-size: var(--fs-12); color: var(--text-muted); }
@@ -172,6 +175,7 @@
 .more { align-self: center; }
 .opsRow { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); gap: var(--sp-3); align-items: center; padding: 10px 14px; font-size: var(--fs-13); border-top: 1px solid var(--border); }
 .opsHead { border-top: 0; }
+.opsDay { font-weight: var(--fw-medium); }
 
 .center { margin: 40px auto 0; width: 100%; max-width: 560px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 32px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
 .lockIcon { width: 56px; height: 56px; border-radius: 28px; background: var(--surface-muted); color: var(--text-muted); display: flex; align-items: center; justify-content: center; }

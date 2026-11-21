@@ -307,10 +307,10 @@ function marksOf(item) {
   const marks = [];
   if (status === 'GOODS_DECLINED') marks.push('declined');
   if (status === 'GOODS_STATUS_UTILIZATION') marks.push('utilization');
-  if (item.is_paid === false) marks.push('unpaid');
+  // На живом пункте «не оплачен» — у 9 товаров из 10 (оплата при получении), поэтому отмечаем редкое: уже оплачен.
+  if (item.is_paid === true) marks.push('paid');
   if (item.try_on === true) marks.push('tryon');
   if (item.has_defect_mark === true) marks.push('defect');
-  if (item.repackaging_status === 'NeedRepackaged') marks.push('repack');
   if (item.item_purpose === 'return_to_seller') marks.push('to_seller');
   return marks;
 }

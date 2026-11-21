@@ -5,14 +5,14 @@ import {
   MoreHorizontal, Package, QrCode, RefreshCw, ScanLine, Search, Tag, Truck,
 } from 'lucide-react';
 import { Alert, Button, EmptyState } from '../../ui';
-import { CabinetError, CabinetLoading } from '../../components/CabinetState';
+import { CabinetError } from '../../components/CabinetState';
 import { type T, useLocalePath, useT } from '../../i18n';
 import { useDocumentMeta } from '../../lib/seo';
 import { markOpened } from '../../lib/whats-new';
 import { useWhatsNewState } from '../../components/WhatsNew';
 import { useStores } from '../../stores/root-store';
 import { type WbState, isWbLoginRequired, usePvzGoods, usePvzWebStatus, useRefreshGoods, useWbAction } from '../../api/pvz-web';
-import { CellPage, CellsScreen, ClientPage, CodeScreen, GoodsScreen, OpsScreen, QrDialog, type Go, type QrTarget } from './screens';
+import { CellPage, CellsScreen, ClientPage, CodeScreen, GoodsScreen, Loader, OpsScreen, QrDialog, type Go, type QrTarget } from './screens';
 import s from './PvzWebApp.module.css';
 
 type Icon = typeof Grid2X2;
@@ -152,7 +152,7 @@ export default function PvzWebApp() {
   const wbLost = isWbLoginRequired(goods.error) || isWbLoginRequired(refresh.error);
   useEffect(() => { if (wbLost) void refetchStatus(); }, [wbLost, refetchStatus]);
 
-  if (status.isPending) return <Frame><CabinetLoading /></Frame>;
+  if (status.isPending) return <Frame><Loader text={t('Открываем веб-версию…', 'Веб-нұсқаны ашып жатырмыз…')} /></Frame>;
   if (status.isError) return <Frame><CabinetError error={status.error} retry={() => void status.refetch()} /></Frame>;
   if (!status.data.allowed) {
     return (
@@ -228,7 +228,7 @@ export default function PvzWebApp() {
       </>
     );
   } else if (page === 'code') body = <CodeScreen go={go} onQr={setQrTarget} onWbLost={() => void status.refetch()} />;
-  else if (goods.isPending) body = <CabinetLoading />;
+  else if (goods.isPending) body = <Loader text={t('Загружаем данные пункта из WB…', 'Пункт деректерін WB-ден жүктеп жатырмыз…')} />;
   else if (goods.isError || !data) body = <CabinetError error={goods.error} retry={() => void goods.refetch()} />;
   else if (page === 'cell') body = <CellPage data={data} cell={arg} go={go} onQr={setQrTarget} />;
   else if (page === 'client') body = <ClientPage data={data} sid={arg} go={go} onQr={setQrTarget} />;

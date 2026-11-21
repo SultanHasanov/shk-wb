@@ -33,7 +33,7 @@ describe('веб-версия Помощника: ячейки', () => {
     const cells = cellsView(goods, NOW);
     expect(cells.map(c => c.cell)).toEqual(['15', '214', '221']);
     // отказ ещё лежит в пункте — он в ячейке, с метками
-    expect((cells[2].goods[0] as unknown as { marks: string[] }).marks).toEqual(['declined', 'unpaid', 'tryon', 'repack']);
+    expect((cells[2].goods[0] as unknown as { marks: string[] }).marks).toEqual(['declined', 'tryon']);
     expect((cells[1].goods[0] as unknown as { marks: string[] }).marks).toEqual([]);
     const anna = cells[1];
     expect(anna).toMatchObject({ sid: '38120457', name: 'Анна', tail: '47-12', days: 3 });
