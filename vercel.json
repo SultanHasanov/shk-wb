@@ -47,6 +47,7 @@
     { "source": "/api/cabinet/staff/history", "destination": "/api/cabinet?action=staff-history" },
     { "source": "/api/cabinet/staff/link", "destination": "/api/cabinet?action=staff-link" },
     { "source": "/api/staff/public/:token", "destination": "/api/cabinet?action=staff-public&token=:token" },
+    { "source": "/api/cabinet/pvz-web/:op", "destination": "/api/cabinet?action=pvz-web&op=:op" },
     { "source": "/api/trial", "destination": "/api/app?action=trial" },
     { "source": "/api/app/devices/:id", "destination": "/api/app?action=device&id=:id" },
     { "source": "/api/app/login/start", "destination": "/api/app?action=login-start" },

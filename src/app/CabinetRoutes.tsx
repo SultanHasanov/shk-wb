@@ -23,6 +23,8 @@ import {
 
 // «Сотрудники» — большой раздел (табель, зарплата, выгрузка в Excel): отдельный чанк, остальной кабинет его не грузит.
 const StaffPage = lazy(() => import('../pages/cabinet/staff/StaffPage').then(m => ({ default: m.StaffPage })));
+// Веб-версия «Помощника ПВЗ» (/cabinet/pvz-web): отдельное приложение внутри кабинета, грузится только по переходу.
+const PvzWebApp = lazy(() => import('../pages/pvz-web/PvzWebApp'));
 
 /**
  * Ветка кабинета целиком: грузится ленивым чанком из App — по образцу
@@ -33,6 +35,8 @@ export default function CabinetRoutes() {
   return (
     <Routes>
       <Route element={<RequireAuth />}>
+        {/* Веб-версия Помощника — на весь экран, со своим меню: под входом, но вне оболочки кабинета */}
+        <Route path="pvz-web" element={<Suspense fallback={null}><PvzWebApp /></Suspense>} />
         <Route element={<CabinetShell />}>
           <Route index element={<OverviewPage />} />
           <Route path="generator" element={<CabinetGeneratorPage />} />

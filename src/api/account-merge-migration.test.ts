@@ -214,6 +214,7 @@ describe('merge_telegram_account', () => {
       app_docs_history: 'старые версии документов зашифрованы ключом исходного user_id',
       // слияние отказывает (MERGE_CLOUD_DATA), пока у исходного есть пункты; без пункта ссылка всё равно не открывается
       staff_share_links: 'ссылка на график пункта: пункты и график при слиянии не переносятся',
+      app_wb_web_sessions: 'вход в WB веб-версии Помощника: после слияния проще войти заново, чем переносить чужой токен',
     };
     const cascade = new Set<string>();
     for (const name of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'))) {

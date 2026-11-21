@@ -24,6 +24,7 @@ const { CELL_PRINT_PRICES } = require('../server/_payments');
 const { isSalePlan, planPrice, PLAN_ORDER, PLANS, SALE_PLANS } = require('../server/_app-plans');
 const feedback = require('../server/_feedback');
 const staff = require('../server/_staff');
+const pvzWeb = require('../server/_pvz-web');
 
 /**
  * Что станет с тарифом не из продажи при покупке нового — как решит SQL (app_apply_subscription,
@@ -1205,6 +1206,8 @@ module.exports = async function handler(req, res) {
     }
     if (a.startsWith('feedback-')) return await feedback.handleOwner(req, res, user, a);
     if (staff.isOwnerAction(a)) return await staff.handleOwner(req, res, user, a);
+    // Веб-версия «Помощника ПВЗ» (/cabinet/pvz-web): вход в WB, ячейки, поиск клиента, код клиента.
+    if (pvzWeb.isOwnerAction(a)) return await pvzWeb.handleOwner(req, res, user);
     if (a === 'account') return deleteAccount(req, res, user);
     if (a === 'partner') return handlePartner(req, res, user);
     return res.status(404).json({ error: 'Метод кабинета не найден', code: 'NOT_FOUND' });

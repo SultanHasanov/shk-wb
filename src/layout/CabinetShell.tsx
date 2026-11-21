@@ -59,6 +59,8 @@ const cabinetNavGroups = (t: T): { title: string | null; items: NavItem[] }[] =>
     items: [
       ...(APP_SUBSCRIPTIONS_LIVE ? [
         { to: '/cabinet/subscription', label: t('Подписка', 'Жазылым'), Icon: Laptop, end: false },
+        // «Помощник ПВЗ» в браузере: открывается на весь экран, вне этой оболочки (src/pages/pvz-web)
+        { to: '/cabinet/pvz-web', label: t('Веб-версия Помощника', 'Көмекшінің веб-нұсқасы'), Icon: Grid2X2, end: false },
         // график и зарплата пунктов — те же документы, что в «Помощнике ПВЗ» (server/_staff.js)
         { to: '/cabinet/staff', label: t('Сотрудники', 'Қызметкерлер'), Icon: CalendarDays, end: false },
         { to: '/cabinet/access', label: t('Доступ сотрудников', 'Қызметкерлер қолжетімділігі'), Icon: ShieldCheck, end: false },

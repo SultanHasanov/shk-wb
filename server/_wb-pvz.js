@@ -5,6 +5,7 @@ const ORGS_ORIGIN = 'https://r-point.wb.ru';
 const RATING_ORIGIN = 'https://point-rating.wb.ru';
 const DESKTOP_ORIGIN = 'https://s-point.wb.ru';
 const POINT_ORIGIN = 'https://point.wb.ru';
+const REQUEST_TIMEOUT_MS = 20 * 1000;
 
 class WbPvzError extends Error {
   constructor(message, status, powHeader) {
@@ -74,7 +75,8 @@ async function request(session, url, options = {}) {
   };
   const cookies = cookieHeader(session);
   if (cookies) headers.Cookie = cookies;
-  const init = { method: options.method || 'GET', headers };
+  // Без срока зависший WB держал бы запрос кабинета и бота бесконечно; истёкший срок — та же «сеть до WB».
+  const init = { method: options.method || 'GET', headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(options.body);
