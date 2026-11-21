@@ -36,7 +36,7 @@ export default function CabinetRoutes() {
     <Routes>
       <Route element={<RequireAuth />}>
         {/* Веб-версия Помощника — на весь экран, со своим меню: под входом, но вне оболочки кабинета */}
-        <Route path="pvz-web" element={<Suspense fallback={null}><PvzWebApp /></Suspense>} />
+        <Route path="pvz-web/*" element={<Suspense fallback={null}><PvzWebApp /></Suspense>} />
         <Route element={<CabinetShell />}>
           <Route index element={<OverviewPage />} />
           <Route path="generator" element={<CabinetGeneratorPage />} />

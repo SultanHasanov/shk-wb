@@ -1,8 +1,8 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft, Boxes, CalendarDays, ClipboardCheck, Grid2X2, LineChart, Lock, LogOut, MessageSquare, MoreHorizontal,
-  Package, QrCode, RefreshCw, ScanLine, Search, Tag, Truck,
+  ArrowLeft, Boxes, CalendarDays, ClipboardCheck, Gem, Grid2X2, Hourglass, LineChart, Lock, LogOut, MessageSquare,
+  MoreHorizontal, Package, QrCode, RefreshCw, ScanLine, Search, Tag, Truck,
 } from 'lucide-react';
 import { Alert, Button, EmptyState } from '../../ui';
 import { CabinetError, CabinetLoading } from '../../components/CabinetState';
@@ -12,11 +12,12 @@ import { markOpened } from '../../lib/whats-new';
 import { useWhatsNewState } from '../../components/WhatsNew';
 import { useStores } from '../../stores/root-store';
 import { type WbState, isWbLoginRequired, usePvzGoods, usePvzWebStatus, useRefreshGoods, useWbAction } from '../../api/pvz-web';
-import { CellsScreen, CodeScreen, GoodsScreen, QrDialog, type QrTarget } from './screens';
+import { CellPage, CellsScreen, ClientPage, CodeScreen, GoodsScreen, OpsScreen, QrDialog, type Go, type QrTarget } from './screens';
 import s from './PvzWebApp.module.css';
 
-type Screen = 'cells' | 'goods' | 'code' | 'more' | 'locked';
 type Icon = typeof Grid2X2;
+/** Страницы веб-версии — путь после /cabinet/pvz-web: '' (ячейки), goods, stale, expensive, ops, code, more, locked/N, cell/N, client/SID. */
+type Section = { path: string; label: string; Icon: Icon };
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
@@ -24,7 +25,6 @@ const errorText = (error: unknown, fallback: string) => (error instanceof Error 
 const lockedSections = (t: T): { label: string; Icon: Icon }[] => [
   { label: t('В пути', 'Жолда'), Icon: Truck },
   { label: t('Коробки', 'Қораптар'), Icon: Boxes },
-  { label: t('Операции по дням', 'Күндер бойынша операциялар'), Icon: LineChart },
   { label: t('Контроль пункта', 'Пунктті бақылау'), Icon: ClipboardCheck },
   { label: t('Инвентаризация', 'Түгендеу'), Icon: ScanLine },
 ];
@@ -114,7 +114,7 @@ function LockedScreen({ title }: { title: string }) {
       <div className={s.lockIcon} aria-hidden="true"><Lock size={26} /></div>
       <h1 className={s.h2}>{t(`«${title}» — только в программе на ПК`, `«${title}» — тек ДК-дағы бағдарламада`)}</h1>
       <p>{t('Этому разделу нужна база WB с компьютера пункта. На сервере мы её не храним, поэтому в браузере раздел не открывается.', 'Бұл бөлімге пункт компьютеріндегі WB базасы керек. Серверде оны сақтамаймыз, сондықтан браузерде бөлім ашылмайды.')}</p>
-      <p>{t('В веб-версии работают: ячейки, все товары и код клиента.', 'Веб-нұсқада жұмыс істейді: ұяшықтар, барлық тауарлар және клиент коды.')}</p>
+      <p>{t('В веб-версии работают: ячейки с историей, товары, залежавшиеся и дорогие, операции по дням и код клиента.', 'Веб-нұсқада жұмыс істейді: тарихы бар ұяшықтар, тауарлар, ұзақ жатқандар мен қымбаттар, күндер бойынша операциялар және клиент коды.')}</p>
       <Link to={lp('/program')}><Button>{t('Скачать программу', 'Бағдарламаны жүктеу')}</Button></Link>
     </div>
   );
@@ -125,11 +125,19 @@ function LockedScreen({ title }: { title: string }) {
 export default function PvzWebApp() {
   const t = useT();
   const lp = useLocalePath();
+  const navigate = useNavigate();
   useDocumentMeta(t('Помощник ПВЗ — веб-версия', 'ПВЗ көмекшісі — веб-нұсқа'));
   // Страница живёт вне оболочки кабинета, поэтому метку «new» у своего пункта меню снимает сама.
   const { auth } = useStores();
   const [, updateNews] = useWhatsNewState(auth.user?.id ?? null);
   useEffect(() => { updateNews(state => markOpened(state, '/cabinet/pvz-web')); }, [updateNews]);
+
+  // Каждая страница — свой адрес: кнопка «Назад» в браузере и на телефоне возвращает к списку, а не в кабинет.
+  const route = (useParams()['*'] ?? '').replace(/\/+$/, '');
+  const [page, rawArg = ''] = route.split('/');
+  const arg = decodeURIComponent(rawArg);
+  const go = useCallback<Go>(path => { navigate(lp(`/cabinet/pvz-web${path ? `/${path}` : ''}`)); window.scrollTo(0, 0); }, [navigate, lp]);
+
   const status = usePvzWebStatus();
   const wb = status.data?.wb;
   const ready = Boolean(status.data?.allowed) && wb?.state === 'ready';
@@ -137,8 +145,6 @@ export default function PvzWebApp() {
   const refresh = useRefreshGoods();
   const switchPoint = useWbAction<{ pointId: number }>('wb-point');
   const logout = useWbAction<Record<string, never>>('wb-logout');
-  const [screen, setScreen] = useState<Screen>('cells');
-  const [lockTitle, setLockTitle] = useState('');
   const [qrTarget, setQrTarget] = useState<QrTarget | null>(null);
 
   // Вход в WB слетел посреди работы — перечитываем статус: он покажет экран входа вместо ошибки.
@@ -162,30 +168,49 @@ export default function PvzWebApp() {
   }
   if (!wb || wb.state !== 'ready') return <Frame><WbLogin wb={wb ?? { state: 'none' }} /></Frame>;
 
-  const openLocked = (title: string) => { setLockTitle(title); setScreen('locked'); };
+  const locked = lockedSections(t);
+  const lockTitle = page === 'locked' ? locked[Number(arg)]?.label ?? locked[0].label : '';
   const point = wb.points.find(p => p.id === wb.pointId);
-  const titles: Record<Screen, string> = {
-    cells: t('Ячейки', 'Ұяшықтар'), goods: t('Все товары', 'Барлық тауарлар'), code: t('Код клиента', 'Клиент коды'),
-    more: t('Ещё', 'Тағы'), locked: lockTitle,
-  };
-  const sections: { id: Screen; label: string; Icon: Icon }[] = [
-    { id: 'cells', label: t('Ячейки', 'Ұяшықтар'), Icon: Grid2X2 },
-    { id: 'goods', label: t('Все товары', 'Барлық тауарлар'), Icon: Package },
-    { id: 'code', label: t('Код клиента', 'Клиент коды'), Icon: QrCode },
+  const sections: Section[] = [
+    { path: '', label: t('Ячейки', 'Ұяшықтар'), Icon: Grid2X2 },
+    { path: 'goods', label: t('Все товары', 'Барлық тауарлар'), Icon: Package },
+    { path: 'code', label: t('Код клиента', 'Клиент коды'), Icon: QrCode },
   ];
+  const extra: Section[] = [
+    { path: 'stale', label: t('Залежавшиеся', 'Ұзақ жатқандар'), Icon: Hourglass },
+    { path: 'expensive', label: t('Дорогие', 'Қымбаттар'), Icon: Gem },
+    { path: 'ops', label: t('Операции по дням', 'Күндер бойынша операциялар'), Icon: LineChart },
+  ];
+  // страница ячейки подсвечивает «Ячейки», досье клиента — тоже: туда приходят из ячеек
+  const activePath = page === 'cell' || page === 'client' ? '' : page;
+  const title = page === 'cell' ? `${t('Ячейка', 'Ұяшық')} ${arg}` : page === 'client' ? t('Досье клиента', 'Клиент досьесі')
+    : page === 'locked' ? lockTitle : page === 'more' ? t('Ещё', 'Тағы')
+    : [...sections, ...extra].find(x => x.path === page)?.label ?? t('Ячейки', 'Ұяшықтар');
   const updatedAt = goods.data ? new Date(goods.data.loadedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : null;
   const refreshing = refresh.isPending || goods.isFetching;
+  const pointSelect = wb.points.length > 1 && (
+    <select className={s.pointSelect} aria-label={t('Пункт', 'Пункт')} value={wb.pointId ?? ''} disabled={switchPoint.isPending}
+      onChange={e => switchPoint.mutate({ pointId: Number(e.target.value) })}>
+      {wb.points.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+    </select>
+  );
 
   const data = goods.data;
   let body: ReactNode;
-  if (screen === 'locked') body = <LockedScreen title={lockTitle} />;
-  else if (screen === 'more') {
+  if (page === 'locked') body = <LockedScreen title={lockTitle} />;
+  else if (page === 'more') {
     body = (
       <>
+        {pointSelect}
+        <div className={s.moreList}>
+          {extra.map(item => (
+            <button key={item.path} type="button" className={s.moreItem} onClick={() => go(item.path)}><item.Icon size={18} aria-hidden="true" /><span className={s.navLabel}>{item.label}</span></button>
+          ))}
+        </div>
         <div className={s.navTitle}>{t('Нужен компьютер пункта', 'Пункт компьютері қажет')}</div>
         <div className={s.moreList}>
-          {lockedSections(t).map(item => (
-            <button key={item.label} type="button" className={`${s.moreItem} ${s.navMuted}`} onClick={() => openLocked(item.label)}>
+          {locked.map((item, i) => (
+            <button key={item.label} type="button" className={`${s.moreItem} ${s.navMuted}`} onClick={() => go(`locked/${i}`)}>
               <item.Icon size={18} aria-hidden="true" /><span className={s.navLabel}>{item.label}</span><Lock size={14} aria-label={t('только в программе на ПК', 'тек ДК-дағы бағдарламада')} />
             </button>
           ))}
@@ -202,12 +227,20 @@ export default function PvzWebApp() {
         </div>
       </>
     );
-  } else if (screen === 'code') {
-    body = <CodeScreen initialQuery="" onQr={setQrTarget} onWbLost={() => void status.refetch()} />;
-  } else if (goods.isPending) body = <CabinetLoading />;
+  } else if (page === 'code') body = <CodeScreen go={go} onQr={setQrTarget} onWbLost={() => void status.refetch()} />;
+  else if (goods.isPending) body = <CabinetLoading />;
   else if (goods.isError || !data) body = <CabinetError error={goods.error} retry={() => void goods.refetch()} />;
-  else if (screen === 'cells') body = <CellsScreen data={data} onQr={setQrTarget} />;
-  else body = <GoodsScreen data={data} />;
+  else if (page === 'cell') body = <CellPage data={data} cell={arg} go={go} onQr={setQrTarget} />;
+  else if (page === 'client') body = <ClientPage data={data} sid={arg} go={go} onQr={setQrTarget} />;
+  else if (page === 'goods' || page === 'stale' || page === 'expensive') body = <GoodsScreen data={data} mode={page === 'goods' ? 'all' : page} go={go} />;
+  else if (page === 'ops') body = <OpsScreen data={data} />;
+  else body = <CellsScreen data={data} go={go} />;
+
+  const navButton = (item: Section) => (
+    <button key={item.path} type="button" className={`${s.navItem} ${activePath === item.path ? s.navActive : ''}`} aria-current={activePath === item.path ? 'page' : undefined} onClick={() => go(item.path)}>
+      <item.Icon size={18} aria-hidden="true" /><span className={s.navLabel}>{item.label}</span>
+    </button>
+  );
 
   return (
     <div className={s.app}>
@@ -218,16 +251,13 @@ export default function PvzWebApp() {
         </div>
         <div className={s.navGroup}>
           <div className={s.navTitle}>{t('Пункт', 'Пункт')}</div>
-          {sections.map(item => (
-            <button key={item.id} type="button" className={`${s.navItem} ${screen === item.id ? s.navActive : ''}`} aria-current={screen === item.id ? 'page' : undefined} onClick={() => setScreen(item.id)}>
-              <item.Icon size={18} aria-hidden="true" /><span className={s.navLabel}>{item.label}</span>
-            </button>
-          ))}
+          {sections.map(navButton)}
+          {extra.map(navButton)}
         </div>
         <div className={s.navGroup}>
           <div className={s.navTitle}>{t('Нужен компьютер пункта', 'Пункт компьютері қажет')}</div>
-          {lockedSections(t).map(item => (
-            <button key={item.label} type="button" className={`${s.navItem} ${screen === 'locked' && lockTitle === item.label ? s.navActive : s.navMuted}`} onClick={() => openLocked(item.label)}>
+          {locked.map((item, i) => (
+            <button key={item.label} type="button" className={`${s.navItem} ${page === 'locked' && lockTitle === item.label ? s.navActive : s.navMuted}`} onClick={() => go(`locked/${i}`)}>
               <item.Icon size={18} aria-hidden="true" /><span className={s.navLabel}>{item.label}</span><Lock size={14} aria-label={t('только в программе на ПК', 'тек ДК-дағы бағдарламада')} />
             </button>
           ))}
@@ -246,19 +276,17 @@ export default function PvzWebApp() {
 
       <div className={s.main}>
         <header className={s.header}>
-          <div className={s.mobileTitle}>{titles[screen]}</div>
-          {wb.points.length > 1 ? (
-            <select className={s.pointSelect} aria-label={t('Пункт', 'Пункт')} value={wb.pointId ?? ''} disabled={switchPoint.isPending}
-              onChange={e => switchPoint.mutate({ pointId: Number(e.target.value) })}>
-              {wb.points.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          ) : <span className={s.pointName}>{point?.name}</span>}
-          <button type="button" className={s.headerSearch} onClick={() => setScreen('code')}>
+          <div className={s.mobileHead}>
+            <div className={s.mobileTitle}>{title}</div>
+            <div className={s.mobilePoint}>{point?.name}</div>
+          </div>
+          <div className={s.desktopPoint}>{pointSelect || <span className={s.pointName}>{point?.name}</span>}</div>
+          <button type="button" className={s.headerSearch} onClick={() => go('code')}>
             <Search size={16} aria-hidden="true" />{t('Поиск клиента: ячейка, телефон, ШК', 'Клиентті іздеу: ұяшық, телефон, ШК')}
           </button>
           {updatedAt && <span className={s.updated}>{t(`Данные WB на ${updatedAt}`, `WB деректері: ${updatedAt}`)}</span>}
           <Button variant="secondary" size="sm" loading={refreshing} onClick={() => refresh.mutate()} aria-label={t('Обновить данные WB', 'WB деректерін жаңарту')}>
-            {!refreshing && <RefreshCw size={16} aria-hidden="true" />}{t('Обновить', 'Жаңарту')}
+            {!refreshing && <RefreshCw size={16} aria-hidden="true" />}<span className={s.refreshLabel}>{t('Обновить', 'Жаңарту')}</span>
           </Button>
         </header>
         <div className={s.content}>
@@ -270,11 +298,11 @@ export default function PvzWebApp() {
 
       <nav className={s.tabbar} aria-label={t('Разделы', 'Бөлімдер')}>
         {sections.map(item => (
-          <button key={item.id} type="button" className={`${s.tab} ${screen === item.id ? s.tabActive : ''}`} aria-current={screen === item.id ? 'page' : undefined} onClick={() => setScreen(item.id)}>
+          <button key={item.path} type="button" className={`${s.tab} ${activePath === item.path ? s.tabActive : ''}`} aria-current={activePath === item.path ? 'page' : undefined} onClick={() => go(item.path)}>
             <item.Icon size={22} aria-hidden="true" />{item.label}
           </button>
         ))}
-        <button type="button" className={`${s.tab} ${screen === 'more' || screen === 'locked' ? s.tabActive : ''}`} onClick={() => setScreen('more')}>
+        <button type="button" className={`${s.tab} ${!sections.some(x => x.path === activePath) ? s.tabActive : ''}`} onClick={() => go('more')}>
           <MoreHorizontal size={22} aria-hidden="true" />{t('Ещё', 'Тағы')}
         </button>
       </nav>

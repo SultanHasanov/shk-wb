@@ -10,9 +10,14 @@ export type WbState =
   | { state: 'ready'; points: WbPoint[]; pointId: number | null };
 export type PvzWebStatus = { allowed: boolean; wb: WbState; codeViaBot: boolean };
 
-export type PvzGood = { title: string; brand: string; size: string; color: string; nm: number | null; shk: string; price: number | null; days: number | null };
+export type PvzGoodBase = { title: string; brand: string; size: string; color: string; nm: number | null; shk: string; price: number | null };
+/** Метки товара в пункте: отказ, утилизация, не оплачен, примерка, брак, нужна переупаковка, возврат продавцу. */
+export type GoodMark = 'declined' | 'utilization' | 'unpaid' | 'tryon' | 'defect' | 'repack' | 'to_seller';
+export type PvzGood = PvzGoodBase & { days: number | null; marks: GoodMark[] };
 export type PvzCell = { cell: string; sid: string; name: string; tail: string; days: number | null; goods: PvzGood[] };
-export type PvzGoods = { pointId: number; loadedAt: string; cells: PvzCell[]; goodsCount: number };
+/** История: выданный или возвращённый товар. employee — номер сотрудника в WB (имён WB не отдаёт). */
+export type PvzEvent = PvzGoodBase & { kind: 'received' | 'returned'; sid: string; cell: string; tail: string; at: string; employee: string };
+export type PvzGoods = { pointId: number; loadedAt: string; cells: PvzCell[]; goodsCount: number; events: PvzEvent[] };
 
 export type MatchReason = 'cell' | 'sid' | 'shk' | 'phone';
 export type ClientMatch = { sid: string; cells: string[]; name: string; tail: string; why: MatchReason[] };

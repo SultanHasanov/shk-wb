@@ -34,7 +34,12 @@ const GOODS_TTL_MS = 2 * 60 * 1000;
 const MAX_SNAPSHOTS = 300;
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 // WB отдаёт в списке и уже выданные / возвращённые товары — в ячейках их нет.
-const GONE_STATUSES = new Set(['GOODS_RECIEVED', 'GOODS_RECEIVED', 'GOODS_RETURNED', 'GOODS_RETURN_ERROR']);
+// Статусы сверены на живом пункте (21.11.2026): GOODS_READY — ждёт клиента, GOODS_DECLINED — клиент отказался, товар
+// ещё в пункте, GOODS_STATUS_UTILIZATION — на утилизацию; GOODS_RECIEVED (опечатка WB) — выдан, GOODS_RETURNED и
+// GOODS_RETURN_ERROR — возвращён. Выданные и возвращённые WB отдаёт примерно за две недели — это история.
+const RECEIVED_STATUSES = new Set(['GOODS_RECIEVED', 'GOODS_RECEIVED']);
+const RETURNED_STATUSES = new Set(['GOODS_RETURNED', 'GOODS_RETURN_ERROR']);
+const statusOf = item => String(item?.status || '').toUpperCase();
 
 function q(value) { return encodeURIComponent(String(value)); }
 
@@ -272,10 +277,45 @@ function daysSince(value, now) {
 
 /** Лежит ли товар в пункте: есть ячейка и клиент, статус — не «выдан» и не «возвращён». */
 function inPoint(item) {
-  return Boolean(wbGoods.goodCell(item)) && Boolean(wbGoods.goodSid(item)) && !GONE_STATUSES.has(String(item?.status || '').toUpperCase());
+  const status = statusOf(item);
+  return Boolean(wbGoods.goodCell(item)) && Boolean(wbGoods.goodSid(item)) && !RECEIVED_STATUSES.has(status) && !RETURNED_STATUSES.has(status);
 }
 
-/** Ячейки пункта: клиент и его товары. Точные имена полей товара в goods/list не зафиксированы — берём известные варианты. */
+/**
+ * Товар для экрана. Сверено на живом goods/list (21.11.2026): описание — во вложенном info (name, brand,
+ * subject_name, goods_size, color), артикул WB (nm) — vendor_code, цена — price_with_sale / price.
+ */
+function goodView(item) {
+  const info = item.info && typeof item.info === 'object' ? item.info : {};
+  const price = Number(item.price_with_sale ?? item.price);
+  const nm = Number(item.vendor_code);
+  const size = text(info.goods_size);
+  return {
+    title: firstText(info, ['name', 'subject_name']) || firstText(item, ['goods_name', 'name']),
+    brand: firstText(info, ['brand']) || firstText(item, ['brand']),
+    size: size && size !== '0' ? size : '',
+    color: text(info.color),
+    nm: Number.isSafeInteger(nm) && nm > 0 ? nm : null,
+    shk: text(item.shk_code) || [...wbGoods.goodShks(item)][0] || '',
+    price: Number.isFinite(price) && price > 0 ? price : null,
+  };
+}
+
+/** Метки на товаре, который лежит в пункте: только те, что есть (ложные не шлём). */
+function marksOf(item) {
+  const status = statusOf(item);
+  const marks = [];
+  if (status === 'GOODS_DECLINED') marks.push('declined');
+  if (status === 'GOODS_STATUS_UTILIZATION') marks.push('utilization');
+  if (item.is_paid === false) marks.push('unpaid');
+  if (item.try_on === true) marks.push('tryon');
+  if (item.has_defect_mark === true) marks.push('defect');
+  if (item.repackaging_status === 'NeedRepackaged') marks.push('repack');
+  if (item.item_purpose === 'return_to_seller') marks.push('to_seller');
+  return marks;
+}
+
+/** Ячейки пункта: клиент и его товары, которые сейчас лежат в пункте. */
 function cellsView(goods, now = Date.now()) {
   const cells = new Map();
   for (const item of Array.isArray(goods) ? goods : []) {
@@ -286,28 +326,39 @@ function cellsView(goods, now = Date.now()) {
     const entry = cells.get(key) || { cell, sid, name: '', tail: '', days: null, goods: [] };
     if (!entry.name) entry.name = wbGoods.goodName(item);
     if (!entry.tail) entry.tail = phoneTail(wbGoods.goodPhone(item));
-    const days = daysSince(item.status_updated ?? item.arrived_at ?? item.date, now);
+    const days = daysSince(item.status_updated, now);
     if (days != null && (entry.days == null || days > entry.days)) entry.days = days;
-    // Сверено на живом goods/list (21.11.2026): описание товара — во вложенном info (name, brand, subject_name,
-    // goods_size, color), артикул WB (nm) — vendor_code, цена — price_with_sale / price.
-    const info = item.info && typeof item.info === 'object' ? item.info : {};
-    const price = Number(item.price_with_sale ?? item.price);
-    const nm = Number(item.vendor_code);
-    const size = text(info.goods_size);
-    entry.goods.push({
-      title: firstText(info, ['name', 'subject_name']) || firstText(item, ['goods_name', 'name']),
-      brand: firstText(info, ['brand']) || firstText(item, ['brand']),
-      size: size && size !== '0' ? size : '',
-      color: text(info.color),
-      nm: Number.isSafeInteger(nm) && nm > 0 ? nm : null,
-      shk: text(item.shk_code) || [...wbGoods.goodShks(item)][0] || '',
-      price: Number.isFinite(price) && price > 0 ? price : null,
-      days,
-    });
+    entry.goods.push({ ...goodView(item), days, marks: marksOf(item) });
     cells.set(key, entry);
   }
   const num = value => Number(String(value).replace(/\D/g, '')) || 0;
   return [...cells.values()].sort((a, b) => num(a.cell) - num(b.cell) || a.cell.localeCompare(b.cell));
+}
+
+/**
+ * История: выданные и возвращённые товары — кто, из какой ячейки, когда и какой сотрудник провёл операцию
+ * (history[].employee_id — номер сотрудника в WB, имён WB здесь не отдаёт). Свежие сверху.
+ */
+function eventsView(goods) {
+  const events = [];
+  for (const item of Array.isArray(goods) ? goods : []) {
+    const status = statusOf(item);
+    const kind = RECEIVED_STATUSES.has(status) ? 'received' : RETURNED_STATUSES.has(status) ? 'returned' : null;
+    const sid = wbGoods.goodSid(item);
+    if (!kind || !sid) continue;
+    const at = Date.parse(item.status_updated || '');
+    if (!Number.isFinite(at)) continue;
+    const last = Array.isArray(item.history) && item.history.length ? item.history[item.history.length - 1] : null;
+    const employee = Number(last?.employee_id || last?.real_employee_id);
+    events.push({
+      kind, sid, at: new Date(at).toISOString(),
+      cell: wbGoods.goodCell(item),
+      tail: phoneTail(wbGoods.goodPhone(item)),
+      employee: Number.isSafeInteger(employee) && employee > 0 ? String(employee) : '',
+      ...goodView(item),
+    });
+  }
+  return events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
 async function goods(req, res, userId) {
@@ -323,6 +374,7 @@ async function goods(req, res, userId) {
     loadedAt: new Date(snapshot.loadedAt).toISOString(),
     cells,
     goodsCount: cells.reduce((sum, c) => sum + c.goods.length, 0),
+    events: eventsView(snapshot.goods),
   });
 }
 
@@ -511,5 +563,5 @@ async function handleOwner(req, res, user) {
 module.exports = {
   handleOwner,
   isOwnerAction,
-  _test: { cellsView, chargeRequestId, findMatches, inPoint, parsePhone, phoneTail, wbView },
+  _test: { cellsView, chargeRequestId, eventsView, findMatches, inPoint, parsePhone, phoneTail, wbView },
 };

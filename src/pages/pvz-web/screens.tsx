@@ -1,7 +1,7 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Camera, X } from 'lucide-react';
+import { ArrowLeft, Camera } from 'lucide-react';
 import { Alert, Button, EmptyState, Modal, Spinner } from '../../ui';
 import { type T, useT } from '../../i18n';
 import { ApiError } from '../../api/client';
@@ -9,8 +9,11 @@ import { wbImageUrls } from '../../lib/wb-image';
 import {
   type ClientMatch,
   type ClientQr,
+  type GoodMark,
   type MatchReason,
-  type PvzCell,
+  type PvzEvent,
+  type PvzGood,
+  type PvzGoodBase,
   type PvzGoods,
   issueClientQr,
   isWbLoginRequired,
@@ -22,19 +25,26 @@ import s from './PvzWebApp.module.css';
 
 /** Кому показываем QR: клиент и, если известна, его ячейка. */
 export type QrTarget = { sid: string; cell: string; name: string };
+/** Переходы между страницами веб-версии: путь после /cabinet/pvz-web. */
+export type Go = (path: string) => void;
 
 const LONG_DAYS = 7;
 
-function daysText(t: T, days: number) {
-  const mod10 = days % 10, mod100 = days % 100;
-  const ru = mod10 === 1 && mod100 !== 11 ? 'день' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'дня' : 'дней';
-  return t(`${days} ${ru}`, `${days} күн`);
+function plural(n: number, one: string, few: string, many: string) {
+  const mod10 = n % 10, mod100 = n % 100;
+  return mod10 === 1 && mod100 !== 11 ? one : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? few : many;
 }
+const daysText = (t: T, n: number) => t(`${n} ${plural(n, 'день', 'дня', 'дней')}`, `${n} күн`);
+const goodsText = (t: T, n: number) => t(`${n} ${plural(n, 'товар', 'товара', 'товаров')}`, `${n} тауар`);
+const money = (value: number) => `${Math.round(value).toLocaleString('ru-RU')} ₽`;
+const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
+const clientLabel = (t: T, name: string, tail: string) => name || (tail ? `${t('Тел.', 'Тел.')} …${tail}` : t('Клиент', 'Клиент'));
 
-function goodsText(t: T, count: number) {
-  const mod10 = count % 10, mod100 = count % 100;
-  const ru = mod10 === 1 && mod100 !== 11 ? 'товар' : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'товара' : 'товаров';
-  return t(`${count} ${ru}`, `${count} тауар`);
+/** День события по местному времени: ключ для группировки и подпись. */
+function dayOf(iso: string) {
+  const d = new Date(iso);
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return { key, label: d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }), time: d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) };
 }
 
 function DaysBadge({ days }: { days: number | null }) {
@@ -55,20 +65,101 @@ function GoodThumb({ nm, small = false }: { nm: number | null; small?: boolean }
   );
 }
 
-/** «Бренд · размер · цвет» — что есть. */
-function goodDetails(g: { brand: string; size: string; color: string }) {
-  return [g.brand, g.size, g.color].filter(Boolean).join(' · ');
+function Marks({ marks }: { marks: GoodMark[] }) {
+  const t = useT();
+  if (!marks.length) return null;
+  const names: Record<GoodMark, string> = {
+    declined: t('отказ', 'бас тарту'),
+    utilization: t('утилизация', 'кәдеге жарату'),
+    unpaid: t('не оплачен', 'төленбеген'),
+    tryon: t('примерка', 'киіп көру'),
+    defect: t('брак', 'ақау'),
+    repack: t('переупаковать', 'қайта орау'),
+    to_seller: t('возврат продавцу', 'сатушыға қайтару'),
+  };
+  const alert: GoodMark[] = ['declined', 'defect', 'repack', 'utilization'];
+  return <span className={s.marks}>{marks.map(m => <span key={m} className={`${s.mark} ${alert.includes(m) ? s.markAlert : ''}`}>{names[m]}</span>)}</span>;
 }
 
-const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
+const goodDetails = (g: PvzGoodBase) => [g.brand, g.size, g.color].filter(Boolean).join(' · ');
+
+function GoodCard({ good, children }: { good: PvzGoodBase & { marks?: GoodMark[] }; children?: ReactNode }) {
+  const t = useT();
+  return (
+    <div className={s.good}>
+      <GoodThumb nm={good.nm} />
+      <div className={s.goodBody}>
+        <div className={s.goodTitle}>{good.title || t('Товар', 'Тауар')}</div>
+        {goodDetails(good) && <div className={s.goodMeta}>{goodDetails(good)}</div>}
+        <div className={s.goodMeta}>{[good.shk && `${t('ШК', 'ШК')} ${good.shk}`, good.nm && `${t('арт.', 'арт.')} ${good.nm}`].filter(Boolean).join(' · ')}</div>
+        {good.marks && <Marks marks={good.marks} />}
+        <div className={s.goodFoot}>
+          {good.price != null && <span className={s.goodPrice}>{money(good.price)}</span>}
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return <button type="button" className={s.back} onClick={onClick}><ArrowLeft size={18} aria-hidden="true" />{label}</button>;
+}
+
+function Stat({ label, value }: { label: string; value: ReactNode }) {
+  return <div className={s.stat}><div className={s.statLabel}>{label}</div><div className={s.statValue}>{value}</div></div>;
+}
+
+// ---------- история: группы «клиент · день · ячейка · что сделал» ----------
+
+type EventGroup = { key: string; kind: PvzEvent['kind']; sid: string; tail: string; cell: string; at: string; items: PvzEvent[]; sum: number };
+
+function groupEvents(events: PvzEvent[]): EventGroup[] {
+  const groups = new Map<string, EventGroup>();
+  for (const e of events) {
+    const key = `${dayOf(e.at).key}|${e.sid}|${e.cell}|${e.kind}`;
+    const g = groups.get(key) ?? { key, kind: e.kind, sid: e.sid, tail: e.tail, cell: e.cell, at: e.at, items: [], sum: 0 };
+    g.items.push(e);
+    g.sum += e.price ?? 0;
+    groups.set(key, g);
+  }
+  return [...groups.values()];
+}
+
+function HistoryList({ groups, show, go }: { groups: EventGroup[]; show: 'client' | 'cell'; go: Go }) {
+  const t = useT();
+  return (
+    <div className={s.history}>
+      {groups.map(g => {
+        const day = dayOf(g.at);
+        const what = g.kind === 'received'
+          ? t(`забрал ${goodsText(t, g.items.length)} на ${money(g.sum)}`, `${goodsText(t, g.items.length)} алды, ${money(g.sum)}`)
+          : t(`отказ: ${goodsText(t, g.items.length)} на ${money(g.sum)}`, `бас тарту: ${goodsText(t, g.items.length)}, ${money(g.sum)}`);
+        return (
+          <div key={g.key} className={s.historyItem}>
+            <div className={s.historyHead}>
+              <span className={s.historyDate}>{day.label}, {day.time}</span>
+              {show === 'client'
+                ? <button type="button" className={s.inlineLink} onClick={() => go(`client/${g.sid}`)}>{clientLabel(t, '', g.tail)}</button>
+                : g.cell && <button type="button" className={s.inlineLink} onClick={() => go(`cell/${encodeURIComponent(g.cell)}`)}>{t('ячейка', 'ұяшық')} {g.cell}</button>}
+              <span className={`${s.mark} ${g.kind === 'returned' ? s.markAlert : s.markOk}`}>{what}</span>
+            </div>
+            <ul className={s.historyGoods}>
+              {g.items.map((e, i) => <li key={`${e.shk}-${i}`}>{e.title || t('Товар', 'Тауар')}{e.brand ? ` · ${e.brand}` : ''}{e.price != null ? ` · ${money(e.price)}` : ''}</li>)}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const depthNote = (t: T) => t('WB отдаёт выдачи и возвраты примерно за последние две недели — более ранней истории в веб-версии нет.', 'WB беру мен қайтаруларды шамамен соңғы екі аптаға береді — одан ертерек тарих веб-нұсқада жоқ.');
 
 // ---------- Ячейки ----------
 
-export function CellsScreen({ data, onQr }: { data: PvzGoods; onQr: (target: QrTarget) => void }) {
+export function CellsScreen({ data, go }: { data: PvzGoods; go: Go }) {
   const t = useT();
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const keyOf = (c: PvzCell) => `${c.cell}|${c.sid}`;
-  const selected = data.cells.find(c => keyOf(c) === selectedKey) ?? null;
   const stats = useMemo(() => ({
     cells: new Set(data.cells.map(c => c.cell)).size,
     clients: new Set(data.cells.map(c => c.sid)).size,
@@ -78,98 +169,168 @@ export function CellsScreen({ data, onQr }: { data: PvzGoods; onQr: (target: QrT
   if (!data.cells.length) {
     return <EmptyState title={t('В пункте сейчас нет товаров', 'Пунктте қазір тауар жоқ')} text={t('WB не вернул ни одного товара в ячейках. Если это не так — нажмите «Обновить».', 'WB ұяшықтарда бірде-бір тауар қайтармады. Олай болмаса — «Жаңарту» түймесін басыңыз.')} />;
   }
-
   return (
     <>
       <div className={s.titleRow}><h1 className={s.h1}>{t('Ячейки', 'Ұяшықтар')}</h1></div>
       <div className={s.stats}>
-        <div className={s.stat}><div className={s.statLabel}>{t('Занято ячеек', 'Бос емес ұяшықтар')}</div><div className={s.statValue}>{stats.cells}</div></div>
-        <div className={s.stat}><div className={s.statLabel}>{t('Клиентов', 'Клиенттер')}</div><div className={s.statValue}>{stats.clients}</div></div>
-        <div className={s.stat}><div className={s.statLabel}>{t('Товаров в пункте', 'Пункттегі тауарлар')}</div><div className={s.statValue}>{data.goodsCount}</div></div>
-        <div className={s.stat}><div className={s.statLabel}>{t('Лежат дольше 7 дней', '7 күннен артық жатыр')}</div><div className={s.statValue}>{stats.long}</div></div>
+        <Stat label={t('Занято ячеек', 'Бос емес ұяшықтар')} value={stats.cells} />
+        <Stat label={t('Клиентов', 'Клиенттер')} value={stats.clients} />
+        <Stat label={t('Товаров в пункте', 'Пункттегі тауарлар')} value={data.goodsCount} />
+        <Stat label={t('Лежат дольше 7 дней', '7 күннен артық жатыр')} value={stats.long} />
       </div>
-      <div className={s.split}>
-        <div className={s.cellGrid}>
-          {data.cells.map(c => (
-            <button key={keyOf(c)} type="button" className={`${s.cellCard} ${selected && keyOf(c) === keyOf(selected) ? s.cellCardActive : ''}`} onClick={() => setSelectedKey(keyOf(c))}>
-              <span className={s.cellTop}>
-                <span className={s.cellNum}>{c.cell}</span>
-                <DaysBadge days={c.days} />
-              </span>
-              <span className={s.cellBody}>
-                <span className={s.cellName}>{c.name || (c.tail ? `${t('Тел.', 'Тел.')} …${c.tail}` : t('Клиент', 'Клиент'))}</span>
-                <span className={s.cellMeta}>{goodsText(t, c.goods.length)}{c.name && c.tail ? ` · ${t('тел.', 'тел.')} …${c.tail}` : ''}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-        {selected && <button type="button" className={s.scrim} aria-label={t('Закрыть', 'Жабу')} onClick={() => setSelectedKey(null)} />}
-        <aside className={`${s.panel} ${s.panelSticky} ${selected ? s.panelSheet : s.panelEmpty}`} aria-label={t('Карточка ячейки', 'Ұяшық карточкасы')}>
-          {!selected ? (
-            <p className={s.muted}>{t('Выберите ячейку — здесь появятся клиент и его товары.', 'Ұяшықты таңдаңыз — мұнда клиент пен оның тауарлары көрсетіледі.')}</p>
-          ) : (
-            <>
-              <div className={s.panelHead}>
-                <h2 className={s.h2}>{t('Ячейка', 'Ұяшық')} {selected.cell}</h2>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <DaysBadge days={selected.days} />
-                  <Button variant="ghost" size="sm" className={s.panelClose} aria-label={t('Закрыть', 'Жабу')} onClick={() => setSelectedKey(null)}><X size={18} /></Button>
-                </span>
-              </div>
-              <dl className={s.facts}>
-                {selected.name && <><dt>{t('Клиент', 'Клиент')}</dt><dd><strong>{selected.name}</strong></dd></>}
-                <dt>{t('Телефон', 'Телефон')}</dt><dd>{selected.tail ? `+7 ••• •••-${selected.tail}` : '—'}</dd>
-                <dt>{t('ID клиента', 'Клиент ID')}</dt><dd className={s.mono}>{selected.sid}</dd>
-              </dl>
-              <div className={s.goodList}>
-                <div className={s.sectionLabel}>{t('Товары в ячейке', 'Ұяшықтағы тауарлар')}</div>
-                {selected.goods.map((g, i) => (
-                  <div key={`${g.shk}-${i}`} className={s.good}>
-                    <GoodThumb nm={g.nm} />
-                    <div className={s.goodBody}>
-                      <div className={s.goodTitle}>{g.title || t('Товар', 'Тауар')}</div>
-                      {goodDetails(g) && <div className={s.goodMeta}>{goodDetails(g)}</div>}
-                      <div className={s.goodMeta}>
-                        {[g.shk && `${t('ШК', 'ШК')} ${g.shk}`, g.nm && `${t('арт.', 'арт.')} ${g.nm}`].filter(Boolean).join(' · ')}
-                      </div>
-                      {g.price != null && <div className={s.goodPrice}>{g.price.toLocaleString('ru-RU')} ₽</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <Button block onClick={() => onQr({ sid: selected.sid, cell: selected.cell, name: selected.name })}>{t('QR-код клиента', 'Клиенттің QR-коды')}</Button>
-            </>
-          )}
-        </aside>
+      <div className={s.cellGrid}>
+        {data.cells.map(c => (
+          <button key={`${c.cell}|${c.sid}`} type="button" className={s.cellCard} onClick={() => go(`cell/${encodeURIComponent(c.cell)}`)}>
+            <span className={s.cellTop}><span className={s.cellNum}>{c.cell}</span><DaysBadge days={c.days} /></span>
+            <span className={s.cellBody}>
+              <span className={s.cellName}>{clientLabel(t, c.name, c.tail)}</span>
+              <span className={s.cellMeta}>{goodsText(t, c.goods.length)}{c.name && c.tail ? ` · ${t('тел.', 'тел.')} …${c.tail}` : ''}</span>
+            </span>
+          </button>
+        ))}
       </div>
     </>
   );
 }
 
-// ---------- Все товары ----------
+// ---------- страница ячейки ----------
+
+export function CellPage({ data, cell, go, onQr }: { data: PvzGoods; cell: string; go: Go; onQr: (target: QrTarget) => void }) {
+  const t = useT();
+  const current = data.cells.filter(c => c.cell === cell);
+  const history = useMemo(() => groupEvents(data.events.filter(e => e.cell === cell)), [data.events, cell]);
+  return (
+    <>
+      <BackButton onClick={() => go('')} label={t('Все ячейки', 'Барлық ұяшықтар')} />
+      <div className={s.titleRow}><h1 className={s.pageTitle}>{t('Ячейка', 'Ұяшық')} {cell}</h1></div>
+      {!current.length && <div className={s.hintBox}>{t('Сейчас в этой ячейке ничего не лежит.', 'Қазір бұл ұяшықта ештеңе жоқ.')}</div>}
+      {current.map(c => (
+        <section key={c.sid} className={s.card}>
+          <div className={s.cardHead}>
+            <div>
+              <div className={s.h2}>{clientLabel(t, c.name, c.tail)}</div>
+              <div className={s.cellMeta}>{t('ID клиента', 'Клиент ID')} <span className={s.mono}>{c.sid}</span> · {goodsText(t, c.goods.length)}{c.goods.some(g => g.price != null) ? ` · ${money(c.goods.reduce((sum, g) => sum + (g.price ?? 0), 0))}` : ''}</div>
+            </div>
+            <DaysBadge days={c.days} />
+          </div>
+          <div className={s.actions}>
+            <Button onClick={() => onQr({ sid: c.sid, cell: c.cell, name: c.name })}>{t('QR-код клиента', 'Клиенттің QR-коды')}</Button>
+            <Button variant="secondary" onClick={() => go(`client/${c.sid}`)}>{t('Досье клиента', 'Клиент досьесі')}</Button>
+          </div>
+          <div className={s.goodGrid}>{c.goods.map((g, i) => <GoodCard key={`${g.shk}-${i}`} good={g}><DaysBadge days={g.days} /></GoodCard>)}</div>
+        </section>
+      ))}
+      <section className={s.card}>
+        <div className={s.h2}>{t('Кто был в ячейке раньше', 'Ұяшықта бұрын кім болды')}</div>
+        {history.length ? <HistoryList groups={history} show="client" go={go} />
+          : <p className={s.muted}>{t('За последние недели из этой ячейки ничего не выдавали и не возвращали.', 'Соңғы апталарда бұл ұяшықтан ештеңе берілмеген және қайтарылмаған.')}</p>}
+        <p className={s.note}>{depthNote(t)}</p>
+      </section>
+    </>
+  );
+}
+
+// ---------- досье клиента ----------
+
+export function ClientPage({ data, sid, go, onQr }: { data: PvzGoods; sid: string; go: Go; onQr: (target: QrTarget) => void }) {
+  const t = useT();
+  const current = data.cells.filter(c => c.sid === sid);
+  const events = useMemo(() => data.events.filter(e => e.sid === sid), [data.events, sid]);
+  const history = useMemo(() => groupEvents(events), [events]);
+  const received = events.filter(e => e.kind === 'received');
+  const returned = events.filter(e => e.kind === 'returned');
+  const tail = current[0]?.tail || events[0]?.tail || '';
+  const name = current[0]?.name || '';
+  const total = received.length + returned.length;
+  const sum = (list: PvzEvent[]) => list.reduce((acc, e) => acc + (e.price ?? 0), 0);
+  const inPoint = current.reduce((acc, c) => acc + c.goods.length, 0);
+
+  return (
+    <>
+      <BackButton onClick={() => window.history.back()} label={t('Назад', 'Артқа')} />
+      <div className={s.titleRow}>
+        <h1 className={s.pageTitle}>{clientLabel(t, name, tail)}</h1>
+        <span className={s.muted}>{t('ID клиента', 'Клиент ID')} <span className={s.mono}>{sid}</span></span>
+      </div>
+      {!current.length && !events.length ? (
+        <EmptyState title={t('По этому клиенту ничего нет', 'Бұл клиент бойынша ештеңе жоқ')} text={depthNote(t)} />
+      ) : (
+        <>
+          <div className={s.stats}>
+            <Stat label={t('Сейчас в пункте', 'Қазір пунктте')} value={goodsText(t, inPoint)} />
+            <Stat label={t('Забрал', 'Алды')} value={<>{received.length} <span className={s.statSub}>{money(sum(received))}</span></>} />
+            <Stat label={t('Отказался', 'Бас тартты')} value={<>{returned.length} <span className={s.statSub}>{money(sum(returned))}</span></>} />
+            <Stat label={t('Выкуп', 'Сатып алу')} value={total ? `${Math.round((received.length / total) * 100)}%` : '—'} />
+          </div>
+          <div className={s.actions}>
+            <Button onClick={() => onQr({ sid, cell: current.length === 1 ? current[0].cell : '', name })}>{t('QR-код клиента', 'Клиенттің QR-коды')}</Button>
+          </div>
+          {current.map(c => (
+            <section key={c.cell} className={s.card}>
+              <div className={s.cardHead}>
+                <button type="button" className={`${s.h2} ${s.inlineLink}`} onClick={() => go(`cell/${encodeURIComponent(c.cell)}`)}>{t('Ячейка', 'Ұяшық')} {c.cell}</button>
+                <DaysBadge days={c.days} />
+              </div>
+              <div className={s.goodGrid}>{c.goods.map((g, i) => <GoodCard key={`${g.shk}-${i}`} good={g}><DaysBadge days={g.days} /></GoodCard>)}</div>
+            </section>
+          ))}
+          <section className={s.card}>
+            <div className={s.h2}>{t('Получения и отказы', 'Алулар мен бас тартулар')}</div>
+            {history.length ? <HistoryList groups={history} show="cell" go={go} /> : <p className={s.muted}>{t('За последние недели клиент ничего не забирал и не возвращал.', 'Соңғы апталарда клиент ештеңе алмаған және қайтармаған.')}</p>}
+            <p className={s.note}>{depthNote(t)}</p>
+          </section>
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------- Все товары / Залежавшиеся / Дорогие ----------
 
 const PAGE = 200;
+export type GoodsMode = 'all' | 'stale' | 'expensive';
+const THRESHOLDS: Record<Exclude<GoodsMode, 'all'>, number[]> = { stale: [7, 10, 14], expensive: [3000, 5000, 10000] };
 
-export function GoodsScreen({ data }: { data: PvzGoods }) {
+export function GoodsScreen({ data, mode, go }: { data: PvzGoods; mode: GoodsMode; go: Go }) {
   const t = useT();
   const [filter, setFilter] = useState('');
   const [limit, setLimit] = useState(PAGE);
-  const rows = useMemo(() => data.cells.flatMap(c => c.goods.map(g => ({ ...g, cell: c.cell, client: c.name, tail: c.tail }))), [data.cells]);
+  const [threshold, setThreshold] = useState(mode === 'all' ? 0 : THRESHOLDS[mode][0]);
+  useEffect(() => { setThreshold(mode === 'all' ? 0 : THRESHOLDS[mode][0]); setFilter(''); }, [mode]);
+  const rows = useMemo(() => {
+    const all: (PvzGood & { cell: string; sid: string; client: string; tail: string })[] = data.cells.flatMap(c => c.goods.map(g => ({ ...g, cell: c.cell, sid: c.sid, client: c.name, tail: c.tail })));
+    if (mode === 'stale') return all.filter(r => (r.days ?? 0) > threshold).sort((a, b) => (b.days ?? 0) - (a.days ?? 0));
+    if (mode === 'expensive') return all.filter(r => (r.price ?? 0) >= threshold).sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+    return all;
+  }, [data.cells, mode, threshold]);
   const needle = filter.trim().toLowerCase();
   const shown = useMemo(() => (needle
-    ? rows.filter(r => r.cell.toLowerCase() === needle || r.shk.includes(needle) || r.title.toLowerCase().includes(needle) || r.brand.toLowerCase().includes(needle) || String(r.nm ?? '') === needle || r.client.toLowerCase().includes(needle))
+    ? rows.filter(r => r.cell.toLowerCase() === needle || r.shk.includes(needle) || String(r.nm ?? '') === needle || r.title.toLowerCase().includes(needle) || r.brand.toLowerCase().includes(needle))
     : rows), [rows, needle]);
-  useEffect(() => setLimit(PAGE), [needle]);
+  useEffect(() => setLimit(PAGE), [needle, mode, threshold]);
+  const title = mode === 'stale' ? t('Залежавшиеся', 'Ұзақ жатқандар') : mode === 'expensive' ? t('Дорогие', 'Қымбаттар') : t('Все товары', 'Барлық тауарлар');
+  const total = rows.reduce((acc, r) => acc + (r.price ?? 0), 0);
 
   return (
     <>
       <div className={s.titleRow}>
-        <h1 className={s.h1}>{t('Все товары', 'Барлық тауарлар')}</h1>
-        <span className={s.muted}>{goodsText(t, rows.length)} {t('в пункте', 'пунктте')}</span>
+        <h1 className={s.h1}>{title}</h1>
+        <span className={s.muted}>{goodsText(t, rows.length)} · {money(total)}</span>
       </div>
-      <input className={s.filterInput} value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Ячейка, ШК, артикул, название или бренд', 'Ұяшық, ШК, артикул, атауы немесе бренд')} aria-label={t('Фильтр товаров', 'Тауарлар сүзгісі')} />
+      <div className={s.toolbar}>
+        {mode !== 'all' && (
+          <div className={s.segments} role="group" aria-label={mode === 'stale' ? t('Сколько дней лежит', 'Неше күн жатыр') : t('Цена от', 'Бағасы бастап')}>
+            {THRESHOLDS[mode].map(v => (
+              <button key={v} type="button" className={`${s.segment} ${threshold === v ? s.segmentActive : ''}`} aria-pressed={threshold === v} onClick={() => setThreshold(v)}>
+                {mode === 'stale' ? t(`дольше ${v} дней`, `${v} күннен артық`) : t(`от ${money(v)}`, `${money(v)} бастап`)}
+              </button>
+            ))}
+          </div>
+        )}
+        <input className={s.filterInput} value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Ячейка, ШК, артикул, название или бренд', 'Ұяшық, ШК, артикул, атауы немесе бренд')} aria-label={t('Фильтр товаров', 'Тауарлар сүзгісі')} />
+      </div>
       {!shown.length ? (
-        <EmptyState title={t('Ничего не нашли', 'Ештеңе табылмады')} text={needle ? t('Попробуйте другой запрос.', 'Басқа сұраныс жасап көріңіз.') : t('WB не вернул ни одного товара в ячейках.', 'WB ұяшықтарда бірде-бір тауар қайтармады.')} />
+        <EmptyState title={t('Таких товаров нет', 'Мұндай тауар жоқ')} text={needle ? t('Попробуйте другой запрос.', 'Басқа сұраныс жасап көріңіз.') : mode === 'stale' ? t('Залежавшихся товаров нет — отлично.', 'Ұзақ жатқан тауар жоқ — тамаша.') : t('В пункте нет товаров под это условие.', 'Пунктте бұл шартқа сай тауар жоқ.')} />
       ) : (
         <div className={s.table}>
           <div className={s.rowHead}>
@@ -178,18 +339,79 @@ export function GoodsScreen({ data }: { data: PvzGoods }) {
           </div>
           {shown.slice(0, limit).map((r, i) => (
             <div key={`${r.cell}-${r.shk}-${i}`} className={s.row}>
-              <span className={s.rowCell}>{r.cell}</span>
+              <button type="button" className={`${s.rowCell} ${s.inlineLink}`} onClick={() => go(`cell/${encodeURIComponent(r.cell)}`)} aria-label={`${t('Ячейка', 'Ұяшық')} ${r.cell}`}>{r.cell}</button>
               <span className={s.rowThumb}><GoodThumb nm={r.nm} small /></span>
-              <span className={s.rowTitle}>{r.title || t('Товар', 'Тауар')}{goodDetails(r) && <span className={s.rowSub}>{goodDetails(r)}</span>}</span>
-              <span className={s.rowBrand}>{r.price != null ? `${r.price.toLocaleString('ru-RU')} ₽` : ''}</span>
+              <span className={s.rowTitle}>{r.title || t('Товар', 'Тауар')}{goodDetails(r) && <span className={s.rowSub}>{goodDetails(r)}</span>}<Marks marks={r.marks} /></span>
+              <span className={s.rowBrand}>{r.price != null ? money(r.price) : ''}</span>
               <span className={`${s.rowShk} ${s.mono}`}>{r.shk}</span>
-              <span className={s.rowClient}>{[r.client, r.tail && `…${r.tail}`].filter(Boolean).join(' ')}</span>
+              <button type="button" className={`${s.rowClient} ${s.inlineLink}`} onClick={() => go(`client/${r.sid}`)}>{clientLabel(t, r.client, r.tail)}</button>
               <span className={s.rowDays}><DaysBadge days={r.days} /></span>
             </div>
           ))}
         </div>
       )}
       {shown.length > limit && <Button variant="secondary" className={s.more} onClick={() => setLimit(limit + PAGE)}>{t('Показать ещё', 'Тағы көрсету')}</Button>}
+    </>
+  );
+}
+
+// ---------- Операции по дням ----------
+
+const OPS_DAYS = 31;
+
+export function OpsScreen({ data }: { data: PvzGoods }) {
+  const t = useT();
+  const { days, staff } = useMemo(() => {
+    const byDay = new Map<string, { key: string; label: string; received: number; sum: number; returned: number; returnedSum: number; clients: Set<string> }>();
+    const byStaff = new Map<string, { id: string; received: number; sum: number; returned: number }>();
+    for (const e of data.events) {
+      const day = dayOf(e.at);
+      const d = byDay.get(day.key) ?? { key: day.key, label: day.label, received: 0, sum: 0, returned: 0, returnedSum: 0, clients: new Set<string>() };
+      const who = byStaff.get(e.employee) ?? { id: e.employee, received: 0, sum: 0, returned: 0 };
+      if (e.kind === 'received') { d.received += 1; d.sum += e.price ?? 0; d.clients.add(e.sid); who.received += 1; who.sum += e.price ?? 0; }
+      else { d.returned += 1; d.returnedSum += e.price ?? 0; who.returned += 1; }
+      byDay.set(day.key, d);
+      byStaff.set(e.employee, who);
+    }
+    return {
+      days: [...byDay.values()].sort((a, b) => (a.key < b.key ? 1 : -1)).slice(0, OPS_DAYS),
+      staff: [...byStaff.values()].sort((a, b) => b.received - a.received),
+    };
+  }, [data.events]);
+
+  if (!days.length) return <EmptyState title={t('Операций пока нет', 'Әзірге операция жоқ')} text={depthNote(t)} />;
+  const totals = days.reduce((acc, d) => ({ received: acc.received + d.received, sum: acc.sum + d.sum, returned: acc.returned + d.returned }), { received: 0, sum: 0, returned: 0 });
+  return (
+    <>
+      <div className={s.titleRow}><h1 className={s.h1}>{t('Операции по дням', 'Күндер бойынша операциялар')}</h1></div>
+      <div className={s.stats}>
+        <Stat label={t('Выдано товаров', 'Берілген тауарлар')} value={totals.received} />
+        <Stat label={t('Оборот', 'Айналым')} value={money(totals.sum)} />
+        <Stat label={t('Возвратов', 'Қайтарулар')} value={totals.returned} />
+        <Stat label={t('Выкуп', 'Сатып алу')} value={totals.received + totals.returned ? `${Math.round((totals.received / (totals.received + totals.returned)) * 100)}%` : '—'} />
+      </div>
+      <div className={s.table}>
+        <div className={`${s.opsRow} ${s.opsHead}`}>
+          <span>{t('День', 'Күн')}</span><span>{t('Клиентов', 'Клиенттер')}</span><span>{t('Выдано', 'Берілді')}</span><span>{t('Оборот', 'Айналым')}</span><span>{t('Возвратов', 'Қайтарулар')}</span>
+        </div>
+        {days.map(d => (
+          <div key={d.key} className={s.opsRow}>
+            <span className={s.rowTitle}>{d.label}</span><span>{d.clients.size}</span><span>{d.received}</span><span>{money(d.sum)}</span><span>{d.returned}</span>
+          </div>
+        ))}
+      </div>
+      <div className={s.h2}>{t('По сотрудникам', 'Қызметкерлер бойынша')}</div>
+      <div className={s.table}>
+        <div className={`${s.opsRow} ${s.opsHead}`}>
+          <span>{t('Сотрудник WB', 'WB қызметкері')}</span><span /><span>{t('Выдано', 'Берілді')}</span><span>{t('Оборот', 'Айналым')}</span><span>{t('Возвратов', 'Қайтарулар')}</span>
+        </div>
+        {staff.map(w => (
+          <div key={w.id || 'none'} className={s.opsRow}>
+            <span className={s.rowTitle}>{w.id ? `№ ${w.id}` : t('не указан', 'көрсетілмеген')}</span><span /><span>{w.received}</span><span>{money(w.sum)}</span><span>{w.returned}</span>
+          </div>
+        ))}
+      </div>
+      <p className={s.note}>{depthNote(t)} {t('Имён сотрудников WB здесь не отдаёт — показан номер сотрудника в WB. Приёмки, переупаковок и разбивки по часам в веб-версии нет — они есть в программе на ПК.', 'WB мұнда қызметкерлердің атын бермейді — WB-дегі қызметкер нөмірі көрсетілген. Қабылдау, қайта орау және сағат бойынша бөлу веб-нұсқада жоқ — олар ДК-дағы бағдарламада бар.')}</p>
     </>
   );
 }
@@ -222,9 +444,9 @@ function whyText(t: T, why: MatchReason[]) {
 
 type SearchResult = { matches: ClientMatch[]; note: string | null };
 
-export function CodeScreen({ initialQuery, onQr, onWbLost }: { initialQuery: string; onQr: (target: QrTarget) => void; onWbLost: () => void }) {
+export function CodeScreen({ go, onQr, onWbLost }: { go: Go; onQr: (target: QrTarget) => void; onWbLost: () => void }) {
   const t = useT();
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const failed = (error: unknown) => { if (isWbLoginRequired(error)) onWbLost(); };
 
@@ -307,10 +529,11 @@ export function CodeScreen({ initialQuery, onQr, onWbLost }: { initialQuery: str
               <div key={m.sid} className={s.match}>
                 <div className={s.matchCell}>{m.cells.join(', ') || '—'}</div>
                 <div className={s.matchBody}>
-                  <div><strong>{m.name || (m.tail ? `${t('Тел.', 'Тел.')} …${m.tail}` : t('Клиент', 'Клиент'))}</strong><span className={s.why}>{t('совпал', 'сәйкес келді')}: {whyText(t, m.why)}</span></div>
-                  <div className={s.cellMeta}>{m.tail ? `+7 ••• •••-${m.tail} · ` : ''}ID {m.sid}</div>
+                  <div><strong>{clientLabel(t, m.name, m.tail)}</strong><span className={s.why}>{t('совпал', 'сәйкес келді')}: {whyText(t, m.why)}</span></div>
+                  <div className={s.cellMeta}>ID {m.sid}</div>
                 </div>
-                <Button variant="secondary" onClick={() => onQr({ sid: m.sid, cell: m.cells.length === 1 ? m.cells[0] : '', name: m.name })}>{t('Показать QR', 'QR көрсету')}</Button>
+                <Button variant="secondary" onClick={() => go(`client/${m.sid}`)}>{t('Досье', 'Досье')}</Button>
+                <Button onClick={() => onQr({ sid: m.sid, cell: m.cells.length === 1 ? m.cells[0] : '', name: m.name })}>{t('Показать QR', 'QR көрсету')}</Button>
               </div>
             ))}
           </>
