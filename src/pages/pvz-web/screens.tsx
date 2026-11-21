@@ -5,6 +5,7 @@ import { Camera, X } from 'lucide-react';
 import { Alert, Button, EmptyState, Modal, Spinner } from '../../ui';
 import { type T, useT } from '../../i18n';
 import { ApiError } from '../../api/client';
+import { wbImageUrls } from '../../lib/wb-image';
 import {
   type ClientMatch,
   type ClientQr,
@@ -40,6 +41,23 @@ function DaysBadge({ days }: { days: number | null }) {
   const t = useT();
   if (days == null) return null;
   return <span className={`${s.days} ${days > LONG_DAYS ? s.daysLong : ''}`}>{daysText(t, days)}</span>;
+}
+
+/** Фото товара с серверов WB. Не открылось на расчётном сервере — пробуем соседние, потом оставляем пустую рамку. */
+function GoodThumb({ nm, small = false }: { nm: number | null; small?: boolean }) {
+  const urls = useMemo(() => (nm ? wbImageUrls(nm) : []), [nm]);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => setAttempt(0), [nm]);
+  return (
+    <span className={`${s.thumb} ${small ? s.thumbSmall : ''}`} aria-hidden="true">
+      {attempt < urls.length && <img src={urls[attempt]} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setAttempt(attempt + 1)} />}
+    </span>
+  );
+}
+
+/** «Бренд · размер · цвет» — что есть. */
+function goodDetails(g: { brand: string; size: string; color: string }) {
+  return [g.brand, g.size, g.color].filter(Boolean).join(' · ');
 }
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
@@ -79,8 +97,8 @@ export function CellsScreen({ data, onQr }: { data: PvzGoods; onQr: (target: QrT
                 <DaysBadge days={c.days} />
               </span>
               <span className={s.cellBody}>
-                <span className={s.cellName}>{c.name || t('Клиент', 'Клиент')}</span>
-                <span className={s.cellMeta}>{goodsText(t, c.goods.length)}{c.tail ? ` · ${t('тел.', 'тел.')} …${c.tail}` : ''}</span>
+                <span className={s.cellName}>{c.name || (c.tail ? `${t('Тел.', 'Тел.')} …${c.tail}` : t('Клиент', 'Клиент'))}</span>
+                <span className={s.cellMeta}>{goodsText(t, c.goods.length)}{c.name && c.tail ? ` · ${t('тел.', 'тел.')} …${c.tail}` : ''}</span>
               </span>
             </button>
           ))}
@@ -99,7 +117,7 @@ export function CellsScreen({ data, onQr }: { data: PvzGoods; onQr: (target: QrT
                 </span>
               </div>
               <dl className={s.facts}>
-                <dt>{t('Клиент', 'Клиент')}</dt><dd><strong>{selected.name || '—'}</strong></dd>
+                {selected.name && <><dt>{t('Клиент', 'Клиент')}</dt><dd><strong>{selected.name}</strong></dd></>}
                 <dt>{t('Телефон', 'Телефон')}</dt><dd>{selected.tail ? `+7 ••• •••-${selected.tail}` : '—'}</dd>
                 <dt>{t('ID клиента', 'Клиент ID')}</dt><dd className={s.mono}>{selected.sid}</dd>
               </dl>
@@ -107,9 +125,14 @@ export function CellsScreen({ data, onQr }: { data: PvzGoods; onQr: (target: QrT
                 <div className={s.sectionLabel}>{t('Товары в ячейке', 'Ұяшықтағы тауарлар')}</div>
                 {selected.goods.map((g, i) => (
                   <div key={`${g.shk}-${i}`} className={s.good}>
-                    <div className={s.goodTitle}>{g.title || t('Товар', 'Тауар')}</div>
-                    <div className={s.goodMeta}>
-                      {[g.brand, g.shk && `${t('ШК', 'ШК')} ${g.shk}`, g.price != null && `${g.price.toLocaleString('ru-RU')} ₽`].filter(Boolean).join(' · ')}
+                    <GoodThumb nm={g.nm} />
+                    <div className={s.goodBody}>
+                      <div className={s.goodTitle}>{g.title || t('Товар', 'Тауар')}</div>
+                      {goodDetails(g) && <div className={s.goodMeta}>{goodDetails(g)}</div>}
+                      <div className={s.goodMeta}>
+                        {[g.shk && `${t('ШК', 'ШК')} ${g.shk}`, g.nm && `${t('арт.', 'арт.')} ${g.nm}`].filter(Boolean).join(' · ')}
+                      </div>
+                      {g.price != null && <div className={s.goodPrice}>{g.price.toLocaleString('ru-RU')} ₽</div>}
                     </div>
                   </div>
                 ))}
@@ -134,7 +157,7 @@ export function GoodsScreen({ data }: { data: PvzGoods }) {
   const rows = useMemo(() => data.cells.flatMap(c => c.goods.map(g => ({ ...g, cell: c.cell, client: c.name, tail: c.tail }))), [data.cells]);
   const needle = filter.trim().toLowerCase();
   const shown = useMemo(() => (needle
-    ? rows.filter(r => r.cell.toLowerCase() === needle || r.shk.includes(needle) || r.title.toLowerCase().includes(needle) || r.brand.toLowerCase().includes(needle) || r.client.toLowerCase().includes(needle))
+    ? rows.filter(r => r.cell.toLowerCase() === needle || r.shk.includes(needle) || r.title.toLowerCase().includes(needle) || r.brand.toLowerCase().includes(needle) || String(r.nm ?? '') === needle || r.client.toLowerCase().includes(needle))
     : rows), [rows, needle]);
   useEffect(() => setLimit(PAGE), [needle]);
 
@@ -144,22 +167,23 @@ export function GoodsScreen({ data }: { data: PvzGoods }) {
         <h1 className={s.h1}>{t('Все товары', 'Барлық тауарлар')}</h1>
         <span className={s.muted}>{goodsText(t, rows.length)} {t('в пункте', 'пунктте')}</span>
       </div>
-      <input className={s.filterInput} value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Ячейка, ШК, название или клиент', 'Ұяшық, ШК, атауы немесе клиент')} aria-label={t('Фильтр товаров', 'Тауарлар сүзгісі')} />
+      <input className={s.filterInput} value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Ячейка, ШК, артикул, название или бренд', 'Ұяшық, ШК, артикул, атауы немесе бренд')} aria-label={t('Фильтр товаров', 'Тауарлар сүзгісі')} />
       {!shown.length ? (
         <EmptyState title={t('Ничего не нашли', 'Ештеңе табылмады')} text={needle ? t('Попробуйте другой запрос.', 'Басқа сұраныс жасап көріңіз.') : t('WB не вернул ни одного товара в ячейках.', 'WB ұяшықтарда бірде-бір тауар қайтармады.')} />
       ) : (
         <div className={s.table}>
           <div className={s.rowHead}>
-            <span>{t('Ячейка', 'Ұяшық')}</span><span>{t('Товар', 'Тауар')}</span><span>{t('Бренд', 'Бренд')}</span>
+            <span>{t('Ячейка', 'Ұяшық')}</span><span /><span>{t('Товар', 'Тауар')}</span><span>{t('Цена', 'Бағасы')}</span>
             <span>{t('ШК', 'ШК')}</span><span>{t('Клиент', 'Клиент')}</span><span>{t('В пункте', 'Пунктте')}</span>
           </div>
           {shown.slice(0, limit).map((r, i) => (
             <div key={`${r.cell}-${r.shk}-${i}`} className={s.row}>
               <span className={s.rowCell}>{r.cell}</span>
-              <span className={s.rowTitle}>{r.title || t('Товар', 'Тауар')}</span>
-              <span className={`${s.rowBrand} ${s.muted}`}>{r.brand}</span>
+              <span className={s.rowThumb}><GoodThumb nm={r.nm} small /></span>
+              <span className={s.rowTitle}>{r.title || t('Товар', 'Тауар')}{goodDetails(r) && <span className={s.rowSub}>{goodDetails(r)}</span>}</span>
+              <span className={s.rowBrand}>{r.price != null ? `${r.price.toLocaleString('ru-RU')} ₽` : ''}</span>
               <span className={`${s.rowShk} ${s.mono}`}>{r.shk}</span>
-              <span className={s.rowClient}>{r.client}{r.tail ? ` …${r.tail}` : ''}</span>
+              <span className={s.rowClient}>{[r.client, r.tail && `…${r.tail}`].filter(Boolean).join(' ')}</span>
               <span className={s.rowDays}><DaysBadge days={r.days} /></span>
             </div>
           ))}
@@ -283,7 +307,7 @@ export function CodeScreen({ initialQuery, onQr, onWbLost }: { initialQuery: str
               <div key={m.sid} className={s.match}>
                 <div className={s.matchCell}>{m.cells.join(', ') || '—'}</div>
                 <div className={s.matchBody}>
-                  <div><strong>{m.name || t('Клиент', 'Клиент')}</strong><span className={s.why}>{t('совпал', 'сәйкес келді')}: {whyText(t, m.why)}</span></div>
+                  <div><strong>{m.name || (m.tail ? `${t('Тел.', 'Тел.')} …${m.tail}` : t('Клиент', 'Клиент'))}</strong><span className={s.why}>{t('совпал', 'сәйкес келді')}: {whyText(t, m.why)}</span></div>
                   <div className={s.cellMeta}>{m.tail ? `+7 ••• •••-${m.tail} · ` : ''}ID {m.sid}</div>
                 </div>
                 <Button variant="secondary" onClick={() => onQr({ sid: m.sid, cell: m.cells.length === 1 ? m.cells[0] : '', name: m.name })}>{t('Показать QR', 'QR көрсету')}</Button>
@@ -317,7 +341,6 @@ export function QrDialog({ target, onClose }: { target: QrTarget | null; onClose
         {issue.data ? (
           <>
             <img className={s.qrImage} src={issue.data.image} alt={t('QR-код клиента', 'Клиенттің QR-коды')} />
-            <div className={s.qrCode}>{issue.data.code}</div>
             <div className={s.muted}>{issue.data.spent}</div>
             <div className={s.cellMeta}>{t('Код действует сегодня. Повторный показ этого клиента сегодня — без списания.', 'Код бүгін жарамды. Осы клиентті бүгін қайта көрсету — есептен шығарусыз.')}</div>
           </>

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 
 type Match = { sid: string; cells: string[]; name: string; tail: string; why: string[] };
-type Cell = { cell: string; sid: string; name: string; tail: string; days: number | null; goods: { title: string; brand: string; shk: string; price: number | null }[] };
+type Cell = { cell: string; sid: string; name: string; tail: string; days: number | null; goods: { title: string; brand: string; size: string; color: string; nm: number | null; shk: string; price: number | null }[] };
 const pvzWeb = require('../../server/_pvz-web.js') as {
   _test: {
     cellsView: (goods: unknown[], now?: number) => Cell[];
@@ -18,8 +18,8 @@ const { cellsView, chargeRequestId, findMatches, parsePhone, wbView } = pvzWeb._
 
 const NOW = Date.parse('2026-11-21T09:00:00Z');
 const goods = [
-  { buyer_sid: 38120457, cell: '214', buyer: { mobile: '79000004712', name: 'Анна' }, shk_id: '41200357812', goods_name: 'Кроссовки', brand: 'Stride', price: 3490, status: 'GOODS_READY', status_updated: '2026-11-20T08:00:00Z' },
-  { buyer_sid: 38120457, cell: '214', buyer: { mobile: '79000004712', name: 'Анна' }, shk_id: '41200357813', goods_name: 'Носки', status: 'GOODS_READY', status_updated: '2026-11-19T08:00:00Z' },
+  { buyer_sid: 38120457, cell: '214', buyer: { mobile: '79000004712', name: 'Анна' }, shk_code: 41200357812, vendor_code: 377869894, info: { name: 'Кроссовки', brand: 'Stride', goods_size: '42', color: 'белый' }, price: 3990, price_with_sale: 3490, status: 'GOODS_READY', status_updated: '2026-11-20T08:00:00Z' },
+  { buyer_sid: 38120457, cell: '214', buyer: { mobile: '79000004712', name: 'Анна' }, shk_code: 41200357813, info: { name: '', subject_name: 'Носки', goods_size: '0' }, status: 'GOODS_READY', status_updated: '2026-11-19T08:00:00Z' },
   { buyer_sid: 27455190, cell: '15', buyer: { mobile: '79000003712', name: 'Игорь' }, shk_id: '41200361140', status: 'GOODS_READY' },
   // уже выдан — в ячейках его нет, но поиск по списку его находит (как в боте)
   { buyer_sid: 41977302, cell: '218', buyer: { mobile: '79000000563', name: 'Мария' }, shk_id: '41200344901', status: 'GOODS_RECIEVED' },
@@ -32,7 +32,8 @@ describe('веб-версия Помощника: ячейки', () => {
     const anna = cells[1];
     expect(anna).toMatchObject({ sid: '38120457', name: 'Анна', tail: '47-12', days: 3 });
     expect(anna.goods).toHaveLength(2);
-    expect(anna.goods[0]).toMatchObject({ title: 'Кроссовки', brand: 'Stride', shk: '41200357812', price: 3490 });
+    expect(anna.goods[0]).toMatchObject({ title: 'Кроссовки', brand: 'Stride', size: '42', color: 'белый', nm: 377869894, shk: '41200357812', price: 3490 });
+    expect(anna.goods[1]).toMatchObject({ title: 'Носки', size: '', nm: null, shk: '41200357813', price: null });
     expect(cells[0].days).toBeNull();
   });
 });

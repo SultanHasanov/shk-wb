@@ -288,11 +288,19 @@ function cellsView(goods, now = Date.now()) {
     if (!entry.tail) entry.tail = phoneTail(wbGoods.goodPhone(item));
     const days = daysSince(item.status_updated ?? item.arrived_at ?? item.date, now);
     if (days != null && (entry.days == null || days > entry.days)) entry.days = days;
-    const price = Number(item.price ?? item.total_price);
+    // Сверено на живом goods/list (21.11.2026): описание товара — во вложенном info (name, brand, subject_name,
+    // goods_size, color), артикул WB (nm) — vendor_code, цена — price_with_sale / price.
+    const info = item.info && typeof item.info === 'object' ? item.info : {};
+    const price = Number(item.price_with_sale ?? item.price);
+    const nm = Number(item.vendor_code);
+    const size = text(info.goods_size);
     entry.goods.push({
-      title: firstText(item, ['goods_name', 'name', 'title', 'subject_name', 'subject']),
-      brand: firstText(item, ['brand', 'brand_name']),
-      shk: [...wbGoods.goodShks(item)][0] || '',
+      title: firstText(info, ['name', 'subject_name']) || firstText(item, ['goods_name', 'name']),
+      brand: firstText(info, ['brand']) || firstText(item, ['brand']),
+      size: size && size !== '0' ? size : '',
+      color: text(info.color),
+      nm: Number.isSafeInteger(nm) && nm > 0 ? nm : null,
+      shk: text(item.shk_code) || [...wbGoods.goodShks(item)][0] || '',
       price: Number.isFinite(price) && price > 0 ? price : null,
       days,
     });
@@ -464,7 +472,8 @@ async function qr(req, res, userId) {
     chargePreview(userId).catch(() => null),
   ]);
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ sid, cell, code: qrText.split('_')[1], image, spent, next });
+  // Пятизначный код отдельно не отдаём: на выдаче нужен только QR.
+  return res.status(200).json({ sid, cell, image, spent, next });
 }
 
 // ---------- вход ----------

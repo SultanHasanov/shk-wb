@@ -90,6 +90,7 @@
 .cellCardActive { border-color: var(--accent); }
 .cellTop { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
 .cellNum { font-size: var(--fs-24); font-weight: var(--fw-bold); font-family: var(--font-mono); }
+.cellBody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cellName { font-weight: var(--fw-semibold); }
 .cellMeta { font-size: var(--fs-13); color: var(--text-muted); }
 .days { font-size: var(--fs-12); font-weight: var(--fw-semibold); padding: 2px var(--sp-2); border-radius: 10px; background: var(--surface-muted); color: var(--text-muted); white-space: nowrap; }
@@ -106,7 +107,12 @@
 .facts dt { color: var(--text-muted); }
 .facts dd { margin: 0; }
 .goodList { display: flex; flex-direction: column; gap: var(--sp-2); }
-.good { border: 1px solid var(--border); border-radius: 10px; padding: 10px var(--sp-3); }
+.good { display: flex; gap: var(--sp-3); align-items: flex-start; border: 1px solid var(--border); border-radius: 10px; padding: 10px var(--sp-3); }
+.goodBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.goodPrice { font-weight: var(--fw-semibold); margin-top: 2px; }
+.thumb { flex: none; display: block; width: 72px; aspect-ratio: 3 / 4; border-radius: var(--r-sm); background: var(--surface-muted); overflow: hidden; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.thumbSmall { width: 42px; border-radius: 6px; }
 .goodTitle { font-weight: var(--fw-semibold); }
 .goodMeta { font-size: var(--fs-12); color: var(--text-muted); }
 .sectionLabel { font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--text-muted); }
@@ -138,13 +144,14 @@
 .filterInput { height: 40px; width: 100%; max-width: 360px; box-sizing: border-box; padding: 0 var(--sp-3); border: 1px solid var(--border-strong); border-radius: var(--r-sm); font: inherit; background: var(--surface); color: var(--text); }
 .table { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
 .row, .rowHead {
-  display: grid; grid-template-columns: 80px minmax(0, 2.2fr) minmax(0, 1fr) 150px minmax(0, 1.2fr) 90px;
+  display: grid; grid-template-columns: 64px 42px minmax(0, 2.6fr) 90px 130px minmax(0, 1fr) 90px;
   gap: var(--sp-3); align-items: center; padding: 10px 14px; font-size: var(--fs-13);
 }
 .rowHead { background: var(--surface-muted); color: var(--text-muted); font-weight: var(--fw-semibold); }
 .row { border-top: 1px solid var(--border); }
 .rowCell { font-weight: var(--fw-bold); font-family: var(--font-mono); }
 .rowTitle { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.rowSub { display: block; font-weight: var(--fw-normal); font-size: var(--fs-12); color: var(--text-muted); }
 .more { align-self: center; }
 
 .center { margin: 40px auto 0; width: 100%; max-width: 560px; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 32px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
@@ -164,7 +171,6 @@
 
 .qr { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); text-align: center; }
 .qrImage { width: 240px; height: 240px; max-width: 100%; border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-2); box-sizing: border-box; background: #fff; }
-.qrCode { font-size: 30px; font-weight: var(--fw-bold); letter-spacing: 0.12em; font-family: var(--font-mono); }
 .qrPlaceholder { width: 220px; height: 120px; border-radius: var(--r-md); background: var(--surface-muted); display: flex; align-items: center; justify-content: center; padding: var(--sp-4); box-sizing: border-box; color: var(--text-muted); font-size: var(--fs-13); }
 
 .tabbar { display: none; }
@@ -185,7 +191,7 @@
   .cellGrid { grid-template-columns: 1fr; gap: var(--sp-2); }
   .cellCard { flex-direction: row; align-items: center; gap: var(--sp-3); min-height: 68px; padding: 10px 14px; border-width: 1px; }
   .cellTop { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 64px; }
-  .cellBody { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .cellBody { flex: 1; }
 
   /* карточка ячейки на телефоне — нижняя шторка поверх списка */
   .panelSheet {
@@ -199,8 +205,9 @@
   .scrim { position: fixed; inset: 0; z-index: var(--z-scrim); background: rgba(20, 20, 30, 0.5); border: 0; }
 
   .rowHead { display: none; }
-  .row { grid-template-columns: 56px minmax(0, 1fr) auto; grid-template-areas: 'cell title days' 'cell brand days' 'cell shk days' 'cell client days'; gap: 2px var(--sp-3); align-items: start; padding: var(--sp-3) 14px; }
-  .rowCell { grid-area: cell; font-size: var(--fs-18); }
+  .row { grid-template-columns: 42px minmax(0, 1fr) auto; grid-template-areas: 'thumb title cell' 'thumb brand days' 'thumb shk shk' 'thumb client client'; gap: 2px var(--sp-3); align-items: start; padding: var(--sp-3) 14px; }
+  .rowCell { grid-area: cell; font-size: var(--fs-18); text-align: right; }
+  .rowThumb { grid-area: thumb; }
   .rowTitle { grid-area: title; font-weight: var(--fw-semibold); font-size: var(--fs-14); }
   .rowBrand { grid-area: brand; }
   .rowShk { grid-area: shk; }

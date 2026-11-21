@@ -10,14 +10,14 @@ export type WbState =
   | { state: 'ready'; points: WbPoint[]; pointId: number | null };
 export type PvzWebStatus = { allowed: boolean; wb: WbState; codeViaBot: boolean };
 
-export type PvzGood = { title: string; brand: string; shk: string; price: number | null; days: number | null };
+export type PvzGood = { title: string; brand: string; size: string; color: string; nm: number | null; shk: string; price: number | null; days: number | null };
 export type PvzCell = { cell: string; sid: string; name: string; tail: string; days: number | null; goods: PvzGood[] };
 export type PvzGoods = { pointId: number; loadedAt: string; cells: PvzCell[]; goodsCount: number };
 
 export type MatchReason = 'cell' | 'sid' | 'shk' | 'phone';
 export type ClientMatch = { sid: string; cells: string[]; name: string; tail: string; why: MatchReason[] };
 export type ChargePreview = { kind: 'free' | 'quota' | 'pack' | 'wallet' | 'unknown'; line: string };
-export type ClientQr = { sid: string; cell: string; code: string; image: string; spent: string; next: ChargePreview | null };
+export type ClientQr = { sid: string; cell: string; image: string; spent: string; next: ChargePreview | null };
 
 const BASE = '/api/cabinet/pvz-web';
 export const pvzWebKey = ['cabinet', 'pvz-web'] as const;
